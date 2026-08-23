@@ -110,6 +110,33 @@ bundled mongo-express at `127.0.0.1:9814` (only needed for the `/mongo-express`
 sidebar UI; without it that page returns 502). mongo-express hosts are not
 configurable via `.env` yet — fixed at `127.0.0.1` in `application.yml`.
 
+### Memory footprint
+
+The auto-deploy script (`deploy/deploy.sh`) starts the jar with memory-tuned
+JVM options, measured at roughly **205 MB RSS** on JDK 25 (vs ~360 MB with a
+plain `-Xms256m -Xmx512m`):
+
+```bash
+java -Xms64m -Xmx256m -XX:+UseSerialGC -XX:+UseCompactObjectHeaders \
+     -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=96m -Xss512k \
+     -jar mongodbserver-*.jar
+```
+
+- `-XX:+UseSerialGC` has the lowest native overhead for small heaps.
+- `-XX:+UseCompactObjectHeaders` (JDK 25+) trims every object on the heap.
+- The caps bound metaspace, JIT code cache and thread stacks.
+
+Override by exporting `JAVA_OPTS` before running `deploy.sh`. Notes for
+**1 GB-RAM servers**, where mongod (~300–450 MB) shares the budget:
+
+- Pin WiredTiger's cache in `compose.yaml`:
+  `command: ["mongod", "--wiredTigerCacheSizeGB", "0.25"]`
+- Consider removing the `mongo-express` service entirely — it is optional
+  (the app works without it; `/mongo-express` just returns 502).
+- Restores of very large backup files need heap headroom: with `-Xmx256m`
+  keep uploaded backups well under the 256 MB multipart limit, or raise
+  `-Xmx` while tuning the rest of the stack down.
+
 ## Using the provisioned database from your application
 
 Example (Node.js):

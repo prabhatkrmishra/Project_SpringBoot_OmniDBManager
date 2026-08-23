@@ -8,7 +8,12 @@ JAR_NAME="mongodbserver-*.jar"
 VERSION_FILE="$DEPLOY_DIR/.current_version"
 TMUX_SESSION="mongodbserver"
 SPRING_PROFILE="${SPRING_PROFILE:-}"
-JAVA_OPTS="-Xms256m -Xmx512m"
+# Memory-tuned JVM defaults for small VPS (measured ~205MB RSS vs ~360MB with
+# the previous -Xms256m -Xmx512m on JDK 25): small heap, SerialGC (lowest
+# native overhead at this heap size), compact object headers (JDK 25+), and
+# capped metaspace / code cache / thread stacks. Override by exporting
+# JAVA_OPTS before running this script.
+JAVA_OPTS="${JAVA_OPTS:--Xms64m -Xmx256m -XX:+UseSerialGC -XX:+UseCompactObjectHeaders -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=96m -Xss512k}"
 
 # ─── Check latest release from GitHub ────────────────────────────────────────
 LATEST_TAG=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
