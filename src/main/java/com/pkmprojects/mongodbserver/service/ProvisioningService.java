@@ -412,6 +412,16 @@ public class ProvisioningService {
         return slash < 0 ? rest : rest.substring(0, slash);
     }
 
+    /**
+     * Whether issued connection strings carry {@code tls=true} - set when
+     * clients reach MongoDB through a TLS-terminating TCP proxy (e.g. nginx
+     * stream) or mongod itself serves TLS.
+     */
+    private boolean resolveConnectionTls() {
+        Boolean tls = environment.getProperty("app.mongo-public-tls", Boolean.class, false);
+        return Boolean.TRUE.equals(tls);
+    }
+
     private void requireDatabase(String dbName) {
         if (!mongoDatabaseRepository.databaseExists(dbName)) {
             throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
@@ -439,7 +449,7 @@ public class ProvisioningService {
         // every driver. Consumers connect directly to MongoDB with this string - the
         // app is only the credential-issuing control plane, never a data-plane proxy.
         return "mongodb://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + resolveConnectionHost() + "/" + dbName
-                + "?authSource=" + dbName;
+                + "?authSource=" + dbName + (resolveConnectionTls() ? "&tls=true" : "");
     }
 
     /**

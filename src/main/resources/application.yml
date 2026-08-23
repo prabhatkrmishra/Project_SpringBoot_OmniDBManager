@@ -59,6 +59,10 @@ app:
   # Add ":port" only if clients must reach a non-default port (drivers default
   # to 27017). Empty by default: derived from spring.mongodb.uri / local fallback.
   mongo-public-host: ${MONGODB_PUBLIC_HOST:}
+  # Set true when clients reach MongoDB through a TLS-terminating TCP proxy
+  # (e.g. nginx stream) or mongod itself serves TLS; issued connection strings
+  # then carry &tls=true so drivers encrypt the wire from day one.
+  mongo-public-tls: ${MONGODB_PUBLIC_TLS:false}
   # Bundled mongo-express UI, reverse-proxied at /mongo-express (from .env)
   mongo-express:
     base-url: ${MONGO_EXPRESS_BASE_URL:http://127.0.0.1:9814/mongo-express}

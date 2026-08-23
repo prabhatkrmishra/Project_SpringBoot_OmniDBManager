@@ -151,6 +151,18 @@ class ProvisioningServiceTest {
     }
 
     @Test
+    void buildConnectionStringAddsTlsWhenConfigured() {
+        // lenient: resolveConnectionHost's sibling getProperty calls are
+        // intentionally unstubbed in this test.
+        lenient().when(environment.getProperty("app.mongo-public-tls", Boolean.class, false)).thenReturn(true);
+        when(passwordGenerator.generate(16)).thenReturn("generatedPass123");
+
+        DatabaseInfo info = service.provision(new CreateDatabaseForm("myapp", "appuser", ""));
+
+        assertThat(info.connectionString()).endsWith("?authSource=myapp&tls=true");
+    }
+
+    @Test
     void provisionRejectsExistingDatabase() {
         when(mongoDatabaseRepository.databaseExists("myapp")).thenReturn(true);
 
