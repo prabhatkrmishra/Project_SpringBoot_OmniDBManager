@@ -139,6 +139,20 @@ Override by exporting `JAVA_OPTS` before running `deploy.sh`. Notes for
   keep uploaded backups well under the 256 MB multipart limit, or raise
   `-Xmx` while tuning the rest of the stack down.
 
+### Verifying the deployment
+
+Three ops scripts live in `deploy/` — run them on the server (they need
+bash, docker and the `.env` next to them):
+
+```bash
+bash deploy/verify-memory-config.sh          # config in effect vs expected profile (small|medium)
+bash deploy/load-test-mongo.sh 15 4          # data-plane ops/sec probe (throwaway db, auto-dropped)
+bash deploy/load-test-app.sh                 # admin UI throughput + latency percentiles
+```
+
+`verify-memory-config.sh` fails loudly when reality drifts from the expected
+profile (e.g. after a resize where the compose guardrails were not updated).
+
 ## Using the provisioned database from your application
 
 Example (Node.js):
