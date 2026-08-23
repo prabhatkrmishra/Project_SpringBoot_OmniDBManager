@@ -62,3 +62,48 @@ server {
 #         proxy_read_timeout 24h;
 #     }
 # }
+
+# ── MongoDB over TLS (optional) ─────────────────────────────────────────────
+# Mongo speaks raw TCP, not HTTP - this needs nginx's STREAM module, which is
+# a top-level `stream {}` block in /etc/nginx/nginx.conf (NOT inside http{}).
+#
+# One-time setup:
+#   sudo apt install libnginx-mod-stream
+#   sudo mkdir -p /etc/nginx/streams-enabled
+#   # add to the TOP LEVEL of /etc/nginx/nginx.conf (after the http {} block):
+#   #   stream {
+#   #       include /etc/nginx/streams-enabled/*.conf;
+#   #   }
+#
+# Then save this as /etc/nginx/streams-enabled/mongodbserver.conf:
+#
+# limit_conn_zone $binary_remote_addr zone=mongo_conn_per_ip:10m;
+#
+# server {
+#     # Standard driver port: tenant URIs need no explicit :port.
+#     listen 27017 ssl;
+#     proxy_pass 127.0.0.1:9812;
+#
+#     # nginx terminates TLS; mongod keeps speaking plaintext on loopback.
+#     ssl_certificate     /etc/letsencrypt/live/your.domain.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/your.domain.com/privkey.pem;
+#
+#     # Guardrail: each client connection costs mongod ~0.5-1MB of RAM.
+#     limit_conn mongo_conn_per_ip 20;
+# }
+#
+# Validate and apply:
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo ufw allow 27017/tcp
+#
+# Finally set in ~/mongodbserver/.env so ISSUED connection strings are correct:
+#   MONGODB_PUBLIC_HOST=your.domain.com
+#   MONGODB_PUBLIC_TLS=true
+# and restart the jar. New strings then read:
+#   mongodb://user:pass@your.domain.com/db?authSource=db&tls=true
+#
+# Notes:
+# - SCRAM auth still protects every database; TLS here only encrypts transport.
+# - Connections already issued WITHOUT &tls=true keep working unencrypted until
+#   rotated - reset passwords to reissue TLS strings.
+# - mongod's own --maxConns guardrail still applies behind nginx.

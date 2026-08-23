@@ -162,6 +162,15 @@ SSE `/monitor/stream`, and `X-Forwarded-For` passthrough. After TLS is up,
 set `RATE_LIMIT_TRUST_XFF=true` in `.env` so the login rate limiter keys on
 real client IPs instead of nginx's.
 
+The same template also shows how to expose **MongoDB itself** to tenant apps
+through nginx's stream (TCP) module with TLS termination — including a
+per-IP connection limit. With that in place, set in `.env`:
+
+```bash
+MONGODB_PUBLIC_HOST=your.domain.com   # host used in issued connection strings
+MONGODB_PUBLIC_TLS=true               # issued strings carry &tls=true
+```
+
 ## Using the provisioned database from your application
 
 Example (Node.js):
