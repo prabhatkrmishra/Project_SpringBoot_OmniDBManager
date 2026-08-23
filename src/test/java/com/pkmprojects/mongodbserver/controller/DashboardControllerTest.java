@@ -70,8 +70,8 @@ class DashboardControllerTest {
     @Test
     void dashboardListsDatabasesAndActivity() throws Exception {
         when(provisioningService.listDatabases()).thenReturn(List.of(
-                new DatabaseInfo("myapp", "appuser", List.of("readWrite:myapp"), 2, NOW, NOW, null, true, null, 0L),
-                new DatabaseInfo("external", null, List.of(), 0, null, null, null, false, null, 0L)));
+                new DatabaseInfo("myapp", "appuser", List.of("readWrite:myapp"), 2L, NOW, NOW, null, true, null, 0L),
+                new DatabaseInfo("external", null, List.of(), 0L, null, null, null, false, null, 0L)));
         when(auditLogRepository.findTop10ByOrderByPerformedAtDesc()).thenReturn(List.of(
                 new AuditEvent(AuditEvent.PROVISION, "myapp", "appuser", "admin", NOW)));
 

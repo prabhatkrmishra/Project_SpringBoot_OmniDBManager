@@ -128,7 +128,7 @@
                                         <td th:text="${database.userName} ?: '—'">app_user</td>
                                         <td>
                                             <span class="badge badge-soft-info"
-                                                  th:text="${database.collectionsCount}">0</span>
+                                                  th:text="${database.collectionsCount} ?: '—'">0</span>
                                         </td>
                                         <td class="text-body-secondary">
                                             <span th:if="${database.sizeBytes < 1024}"

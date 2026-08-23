@@ -442,15 +442,19 @@ public class ProvisioningService {
                 + "?authSource=" + dbName;
     }
 
-    private int collectionCount(String dbName) {
+    /**
+     * @return the number of collections in {@code dbName}, or {@code null} when
+     *         the count cannot be read (rendered as "unknown", never 0)
+     */
+    private Long collectionCount(String dbName) {
         try {
-            return mongoDatabaseRepository.listCollectionNames(dbName).size();
+            return (long) mongoDatabaseRepository.listCollectionNames(dbName).size();
         } catch (MongoException e) {
             // A collection listing failing for one database (e.g. the server is
             // briefly unreachable) must not fail the whole dashboard page with a
             // 500 - degrade to "unknown" for that row and say so in the log.
             log.warn("Could not count collections of {}; leaving count blank", dbName, e);
-            return 0;
+            return null;
         }
     }
 
@@ -468,7 +472,7 @@ public class ProvisioningService {
         }
     }
 
-    private DatabaseInfo toInfo(String dbName, ManagedDatabase metadata, Integer collectionsCount,
+    private DatabaseInfo toInfo(String dbName, ManagedDatabase metadata, Long collectionsCount,
                                 String connectionString, long sizeBytes) {
         if (metadata == null) {
             return new DatabaseInfo(dbName, null, List.of(), collectionsCount, null, null, null, false,

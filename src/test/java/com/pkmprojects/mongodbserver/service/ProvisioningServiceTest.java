@@ -393,6 +393,20 @@ class ProvisioningServiceTest {
     }
 
     @Test
+    void getDatabaseDegradesCollectionCountToUnknownWhenListingFails() {
+        when(mongoDatabaseRepository.databaseExists("myapp")).thenReturn(true);
+        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.empty());
+        org.mockito.Mockito.doThrow(mongoError(13, "Unauthorized"))
+                .when(mongoDatabaseRepository).listCollectionNames("myapp");
+        when(mongoDatabaseRepository.getDatabaseSizes()).thenReturn(Map.of("myapp", 1024L));
+
+        DatabaseInfo info = service.getDatabase("myapp");
+
+        // unknown must stay null (rendered as "—"), never collapse to 0
+        assertThat(info.collectionsCount()).isNull();
+    }
+
+    @Test
     void getDatabaseReconstructsConnectionStringFromStoredPassword() {
         when(mongoDatabaseRepository.databaseExists("myapp")).thenReturn(true);
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),

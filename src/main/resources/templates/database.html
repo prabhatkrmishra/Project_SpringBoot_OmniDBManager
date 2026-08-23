@@ -82,7 +82,7 @@
                             </div>
                             <div>
                                 <dt>Collections</dt>
-                                <dd th:text="${database.collectionsCount}">0</dd>
+                                <dd th:text="${database.collectionsCount} ?: '—'">0</dd>
                             </div>
                             <div>
                                 <dt>Storage size</dt>
