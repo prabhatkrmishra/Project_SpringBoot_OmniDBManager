@@ -1,0 +1,64 @@
+# Nginx reverse-proxy template for MongoDBServer.
+#
+# Setup on the VPS:
+#   sudo apt install nginx certbot python3-certbot-nginx
+#   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/mongodbserver
+#   sudo nano /etc/nginx/sites-available/mongodbserver   # set your domain
+#   sudo ln -s /etc/nginx/sites-available/mongodbserver /etc/nginx/sites-enabled/
+#   sudo rm -f /etc/nginx/sites-enabled/default
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d your.domain.com              # adds TLS + redirects
+#
+# Then in ~/mongodbserver/.env set:
+#   RATE_LIMIT_TRUST_XFF=true        # rate limiter keys on the real client IP
+# and restart the jar. Keep SERVER_ADDRESS unset (loopback) - nginx is the
+# only public entry point.
+
+# ── HTTP: certbot manages the TLS redirect after first run ──────────────────
+server {
+    listen 80;
+    server_name your.domain.com;
+
+    # Restore/import uploads are up to 256MB - nginx's 1MB default rejects them.
+    client_max_body_size 256m;
+
+    location / {
+        proxy_pass http://127.0.0.1:9811;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# ── HTTPS (created manually or by certbot; shown here for reference) ───────
+# server {
+#     listen 443 ssl http2;
+#     server_name your.domain.com;
+#
+#     ssl_certificate     /etc/letsencrypt/live/your.domain.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/your.domain.com/privkey.pem;
+#
+#     client_max_body_size 256m;
+#
+#     location / {
+#         proxy_pass http://127.0.0.1:9811;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Real-IP $remote_addr;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#     }
+#
+#     # SSE live monitor: streaming responses need buffering off and a long
+#     # read timeout, otherwise ticks stall and connections drop every minute.
+#     location /monitor/stream {
+#         proxy_pass http://127.0.0.1:9811;
+#         proxy_set_header Host $host;
+#         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+#         proxy_set_header X-Forwarded-Proto $scheme;
+#         proxy_http_version 1.1;
+#         proxy_set_header Connection "";
+#         proxy_buffering off;
+#         proxy_read_timeout 24h;
+#     }
+# }

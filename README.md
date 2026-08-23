@@ -153,6 +153,15 @@ bash deploy/load-test-app.sh                 # admin UI throughput + latency per
 `verify-memory-config.sh` fails loudly when reality drifts from the expected
 profile (e.g. after a resize where the compose guardrails were not updated).
 
+### Reverse proxy (nginx)
+
+The app binds loopback-only; put nginx in front for HTTPS. A ready template
+lives at `deploy/nginx.conf.example` — the three app-specific bits it handles:
+256 MB `client_max_body_size` (restore uploads), buffering disabled for the
+SSE `/monitor/stream`, and `X-Forwarded-For` passthrough. After TLS is up,
+set `RATE_LIMIT_TRUST_XFF=true` in `.env` so the login rate limiter keys on
+real client IPs instead of nginx's.
+
 ## Using the provisioned database from your application
 
 Example (Node.js):
