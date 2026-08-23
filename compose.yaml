@@ -5,6 +5,18 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9812:27017"
+    # Small-VPS guardrails (see README "Memory footprint"):
+    # - WiredTiger cache pinned instead of the auto-tuned default, so mongod
+    #   cannot grow into the JVM's share of RAM.
+    # - Connection cap (--maxConns): every client connection costs mongod
+    #   ~0.5-1MB of RAM; 500 bound the blast radius of a misbehaving tenant
+    #   app (raise if needed).
+    command: ["--wiredTigerCacheSizeGB", "0.25", "--maxConns", "500"]
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
+    mem_limit: 650m
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-root}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-root}

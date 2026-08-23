@@ -127,10 +127,12 @@ java -Xms64m -Xmx256m -XX:+UseSerialGC -XX:+UseCompactObjectHeaders \
 - The caps bound metaspace, JIT code cache and thread stacks.
 
 Override by exporting `JAVA_OPTS` before running `deploy.sh`. Notes for
-**1 GB-RAM servers**, where mongod (~300–450 MB) shares the budget:
+**1 GB-RAM servers**, where mongod shares the budget with the JVM:
 
-- Pin WiredTiger's cache in `compose.yaml`:
-  `command: ["mongod", "--wiredTigerCacheSizeGB", "0.25"]`
+- `compose.yaml` already pins the guardrails: WiredTiger cache at 256 MB,
+  `--maxIncomingConnections 500` (each connection costs mongod ~0.5–1 MB of
+  RAM), a 64k nofile ulimit, and a 650 MB container memory cap. Raise them
+  together if you move to a bigger box.
 - Consider removing the `mongo-express` service entirely — it is optional
   (the app works without it; `/mongo-express` just returns 502).
 - Restores of very large backup files need heap headroom: with `-Xmx256m`
