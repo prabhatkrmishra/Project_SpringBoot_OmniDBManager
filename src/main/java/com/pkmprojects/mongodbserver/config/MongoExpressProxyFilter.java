@@ -110,9 +110,21 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
         }
 
         byte[] body = request.getInputStream().readAllBytes();
-        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(target))
-                .header("Authorization", authorization)
-                .timeout(Duration.ofSeconds(60));
+        HttpRequest.Builder builder;
+        try {
+            builder = HttpRequest.newBuilder(URI.create(target))
+                    .header("Authorization", authorization)
+                    .timeout(Duration.ofSeconds(60));
+        } catch (IllegalArgumentException e) {
+            // The raw request path/query contains characters that cannot form a
+            // valid target URI (space, bad %-sequence, ...). That is a bad
+            // request, not a gateway failure - answer 400 instead of letting the
+            // exception surface as a 500.
+            log.debug("Cannot proxy request with unparseable target '{}'", target);
+            writeError(response, HttpServletResponse.SC_BAD_REQUEST,
+                    "The requested path cannot be proxied to Mongo Express");
+            return;
+        }
 
         var headerNames = request.getHeaderNames();
         while (headerNames.hasMoreElements()) {
@@ -150,13 +162,16 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("Mongo Express proxy request was interrupted", e);
-            writeError(response, "Mongo Express proxy request was interrupted");
+            writeError(response, HttpServletResponse.SC_BAD_GATEWAY,
+                    "Mongo Express proxy request was interrupted");
         } catch (ConnectException e) {
             log.warn("Mongo Express is not reachable at {}", targetBase, e);
-            writeError(response, "Mongo Express is not reachable. Is the container running?");
+            writeError(response, HttpServletResponse.SC_BAD_GATEWAY,
+                    "Mongo Express is not reachable. Is the container running?");
         } catch (IOException e) {
             log.error("Mongo Express proxy request to {} failed", target, e);
-            writeError(response, "Mongo Express proxy request failed");
+            writeError(response, HttpServletResponse.SC_BAD_GATEWAY,
+                    "Mongo Express proxy request failed");
         }
     }
 
@@ -177,13 +192,13 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
     }
 
     /**
-     * Writes an error message as a {@code 502 Bad Gateway} response, unless the response
-     * has already been committed (in which case the client can no longer receive a status
-     * change).
+     * Writes {@code message} with the given HTTP status, unless the response has
+     * already been committed (in which case the client can no longer receive a
+     * status change).
      */
-    private void writeError(HttpServletResponse response, String message) throws IOException {
+    private void writeError(HttpServletResponse response, int status, String message) throws IOException {
         if (!response.isCommitted()) {
-            response.setStatus(HttpServletResponse.SC_BAD_GATEWAY);
+            response.setStatus(status);
             response.setContentType("text/plain;charset=UTF-8");
             response.getOutputStream().write(message.getBytes(StandardCharsets.UTF_8));
         }
