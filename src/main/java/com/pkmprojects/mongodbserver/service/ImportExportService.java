@@ -270,6 +270,12 @@ public class ImportExportService {
         List<Document> documents = new ArrayList<>();
         for (int rowIndex = 1; rowIndex < rows.size(); rowIndex++) {
             List<String> cells = rows.get(rowIndex);
+            if (cells.size() > headers.size()) {
+                // Silently dropping the extra values would corrupt the import;
+                // short rows are fine (missing trailing cells become null).
+                throw new NameNotAllowedException(
+                        "CSV row " + (rowIndex + 1) + " has more values than the header row");
+            }
             Document document = new Document();
             boolean hasValue = false;
             for (int columnIndex = 0; columnIndex < headers.size(); columnIndex++) {

@@ -438,6 +438,14 @@ class ImportExportServiceTest {
                 .hasMessageContaining("'.'");
     }
 
+    @Test
+    void csvImportRejectsRowWiderThanHeader() {
+        assertThatThrownBy(() -> service.importDocuments("myapp", "users",
+                "a,b\n1,2,3\n".getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(NameNotAllowedException.class)
+                .hasMessageContaining("more values than the header row");
+    }
+
     // ── Import guards ───────────────────────────────────────────────────
 
     @Test
