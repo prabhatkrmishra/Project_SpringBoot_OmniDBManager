@@ -4,6 +4,7 @@ import com.pkmprojects.mongodbserver.dto.WebhookForm;
 import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.error.WebhookNotFoundException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
+import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.WebhookConfigRepository;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -41,6 +43,8 @@ class WebhookServiceTest {
     private WebhookConfigRepository webhookConfigRepository;
     @Mock
     private AuditLogRepository auditLogRepository;
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
 
     private WebhookService service;
 
@@ -48,7 +52,7 @@ class WebhookServiceTest {
     void setUp() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
-        service = new WebhookService(webhookConfigRepository, auditLogRepository,
+        service = new WebhookService(webhookConfigRepository, auditLogRepository, applicationEventPublisher,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         // Only the create tests read the returned config; the toggle/delete tests
         // also call save() but ignore the result.
@@ -85,6 +89,11 @@ class WebhookServiceTest {
         assertThat(auditCaptor.getValue().getUserName()).isEqualTo("Slack");
         assertThat(auditCaptor.getValue().getPerformedBy()).isEqualTo("admin");
         assertThat(auditCaptor.getValue().getPerformedAt()).isEqualTo(NOW);
+
+        // The audit event must be published so subscribed webhooks receive it.
+        ArgumentCaptor<AuditEventRecorded> publishedCaptor = ArgumentCaptor.forClass(AuditEventRecorded.class);
+        verify(applicationEventPublisher).publishEvent(publishedCaptor.capture());
+        assertThat(publishedCaptor.getValue().event()).isSameAs(auditCaptor.getValue());
     }
 
     @Test

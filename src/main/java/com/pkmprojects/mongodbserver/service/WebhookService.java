@@ -4,11 +4,13 @@ import com.pkmprojects.mongodbserver.dto.WebhookForm;
 import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.error.WebhookNotFoundException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
+import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.WebhookConfigRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,12 +33,15 @@ public class WebhookService {
 
     private final WebhookConfigRepository webhookConfigRepository;
     private final AuditLogRepository auditLogRepository;
+    private final ApplicationEventPublisher applicationEventPublisher;
     private final Clock clock;
 
     public WebhookService(WebhookConfigRepository webhookConfigRepository,
-                          AuditLogRepository auditLogRepository, Clock clock) {
+                          AuditLogRepository auditLogRepository,
+                          ApplicationEventPublisher applicationEventPublisher, Clock clock) {
         this.webhookConfigRepository = webhookConfigRepository;
         this.auditLogRepository = auditLogRepository;
+        this.applicationEventPublisher = applicationEventPublisher;
         this.clock = clock;
     }
 
@@ -136,7 +141,12 @@ public class WebhookService {
     }
 
     private void audit(String eventType, String webhookName, Instant performedAt) {
-        auditLogRepository.save(new AuditEvent(eventType, null, webhookName, currentUsername(), performedAt));
+        AuditEvent event = new AuditEvent(eventType, null, webhookName, currentUsername(), performedAt);
+        auditLogRepository.save(event);
+        // Publish like every other audit writer so webhooks subscribed to the
+        // WEBHOOK_* event types actually receive them (WebhookNotifier listens
+        // for AuditEventRecorded).
+        applicationEventPublisher.publishEvent(new AuditEventRecorded(event));
     }
 
     private String currentUsername() {
