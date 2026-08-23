@@ -4,8 +4,11 @@ spring:
 
   mongodb:
     # Local MongoDB (Docker Compose). The app connects as the Mongo root/admin user
-    # to provision databases and per-database users.
-    uri: ${MONGODB_URI:mongodb://${MONGODB_ROOT_USERNAME:root}:${MONGODB_ROOT_PASSWORD:root}@127.0.0.1:9812/?authSource=admin}
+    # to provision databases and per-database users. maxPoolSize is capped well
+    # below the driver default of 100 - this is a single-admin control plane, so
+    # 10 connections bound socket/buffer memory without starving the parallel
+    # collStats reads (16) or the SSE monitor.
+    uri: ${MONGODB_URI:mongodb://${MONGODB_ROOT_USERNAME:root}:${MONGODB_ROOT_PASSWORD:root}@127.0.0.1:9812/?authSource=admin&maxPoolSize=10}
     # Default database used by Spring Data repositories (provisioning metadata).
     database: mongodb_admin
 
@@ -29,6 +32,13 @@ server:
   address: ${SERVER_ADDRESS:127.0.0.1}
   # Trust X-Forwarded-* set by the reverse proxy/tunnel (HTTPS scheme, real IP).
   forward-headers-strategy: framework
+  tomcat:
+    threads:
+      # Single-admin app: Tomcat's default pool (200 max threads, each with a
+      # thread stack) is far more than this deployment can ever use. SSE streams
+      # are async and do not hold request threads.
+      max: 20
+      min-spare: 2
 
 management:
   endpoints:
