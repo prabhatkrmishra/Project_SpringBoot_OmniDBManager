@@ -97,7 +97,7 @@ class MongodbserverApplicationTests {
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/databases/testapp"));
 
-        // the detail page shows the show-once connection string
+        // the detail page shows the connection string rebuilt from stored metadata
         mockMvc.perform(get("/databases/testapp").session(session))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("mongodb://testapp_user:firstsecret123@")));

@@ -2,7 +2,7 @@
 
 A self-hosted, Atlas-style MongoDB provisioning service. Sign in with an admin
 account, create databases with dedicated per-database users, hand the
-"show once" connection string to your external applications, and later reset
+connection string to your external applications, and later reset
 the password or delete the database (drop DB + drop user) — all from a small
 Spring MVC web UI.
 
@@ -17,8 +17,11 @@ Spring MVC web UI.
   attempts get HTTP 429 with a `Retry-After` header.
 - **Atlas-style provisioning** — each database gets a dedicated MongoDB user
   with `readWrite` scoped to exactly that database.
-- **Show-once credentials** — the connection string (with password) is shown a
-  single time after creation/reset; passwords are never persisted by the app.
+- **Connection strings on demand** — the connection string (with password) is
+  shown after creation/reset and re-derived from stored provisioning metadata,
+  so it stays viewable on the database detail page at any time. That means the
+  per-database password is stored (plaintext) in the `mongodb_admin` metadata
+  database — protect that database like you protect `.env`.
 - **Password rotation** — reset a database user's password; the old password
   stops working immediately.
 - **Deletion** — drops the database and its dedicated user.
@@ -70,7 +73,8 @@ Spring MVC web UI.
 
 4. Sign in at http://localhost:9811/login with `APP_ADMIN_USERNAME` /
    `APP_ADMIN_PASSWORD`, then **Provision a database**. Copy the shown
-   connection string somewhere safe — it will not be shown again. External
+   connection string into your application's configuration — it stays viewable
+   on the database detail page if you need it again. External
    applications use that connection string to read/write only that database.
 
 ### Run from the compiled jar (no repo needed)
@@ -193,10 +197,11 @@ Controller  →  Service  →  Repository (MongoDB Java driver / Spring Data)
   and JSON export.
 - `MongoDatabaseRepository` — driver gateway for user + database administration.
 - `ManagedDatabaseRepository` — Spring Data metadata in the `mongodb_admin`
-  database (never stores passwords).
+  database (stores the per-database user's password so connection strings can
+  be re-derived).
 - `SecurityConfig` — form login, CSRF on, `@PreAuthorize` + route matchers for
   admin-only writes.
-- `LoginRateLimitFilter` — in-process sliding-window brute-force protection on
+- `LoginRateLimitFilter` — in-process fixed-window brute-force protection on
   the login form, running ahead of the security chain.
 - `MongoExpressProxyFilter` — reverse-proxies the bundled mongo-express UI at
   `/mongo-express` behind the app's authentication.
@@ -232,7 +237,7 @@ src/main/java/com/pkmprojects/mongodbserver
   controller/                     # Login, Dashboard, Database, Collection, Activity
   dto/                            # Form + view objects (CreateDatabaseForm, DatabaseInfo, ...)
   error/                          # Domain exceptions + global handler
-  model/                          # AuditEvent, ManagedDatabase (no passwords stored)
+  model/                          # AuditEvent, ManagedDatabase (stores the per-db user password)
   repository/                     # Driver gateway + Spring Data metadata repos
   security/                       # Password generator
   service/                        # Provisioning, Exploration, name validation
