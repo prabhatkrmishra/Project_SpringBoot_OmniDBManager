@@ -29,9 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -45,7 +43,7 @@ import java.util.stream.Collectors;
  * audit trail.</p>
  *
  * <p><strong>Concurrency contract:</strong> all lifecycle operations for the
- * same database name are serialized per name (see {@link #databaseLocks}).
+ * same database name are serialized per name (see {@link DatabaseLockRegistry}).
  * Without this, concurrent {@link #provision(CreateDatabaseForm)} and
  * {@link #delete(String)} calls interleave into inconsistent states (orphaned
  * metadata, a database whose user was already dropped) and concurrent
@@ -64,16 +62,6 @@ public class ProvisioningService {
     private static final int MONGO_CODE_NAMESPACE_NOT_FOUND = 26;
     private static final int MONGO_CODE_USER_ALREADY_EXISTS = 51003;
 
-    /**
-     * Per-database-name lock registry. The lifecycle operations are check-then-act
-     * sequences spanning multiple MongoDB commands, so two concurrent calls for
-     * the same name must not interleave (see the class Javadoc for the failure
-     * modes this prevents). Entries are intentionally never removed: the set of
-     * distinct names is bounded by the databases an admin manages, and removing
-     * a lock after use reintroduces a check-then-act race on the removal itself.
-     */
-    private final ConcurrentHashMap<String, Object> databaseLocks = new ConcurrentHashMap<>();
-
     private final MongoDatabaseRepository mongoDatabaseRepository;
     private final ManagedDatabaseRepository managedDatabaseRepository;
     private final AuditLogRepository auditLogRepository;
@@ -82,6 +70,7 @@ public class ProvisioningService {
     private final Clock clock;
     private final Environment environment;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final DatabaseLockRegistry databaseLocks;
 
     public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
                                ManagedDatabaseRepository managedDatabaseRepository,
@@ -90,7 +79,8 @@ public class ProvisioningService {
                                PasswordGenerator passwordGenerator,
                                Clock clock,
                                Environment environment,
-                               ApplicationEventPublisher applicationEventPublisher) {
+                               ApplicationEventPublisher applicationEventPublisher,
+                               DatabaseLockRegistry databaseLocks) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.managedDatabaseRepository = managedDatabaseRepository;
         this.auditLogRepository = auditLogRepository;
@@ -99,6 +89,7 @@ public class ProvisioningService {
         this.clock = clock;
         this.environment = environment;
         this.applicationEventPublisher = applicationEventPublisher;
+        this.databaseLocks = databaseLocks;
     }
 
     /**
@@ -131,7 +122,7 @@ public class ProvisioningService {
         nameValidator.validateUserName(userName);
         nameValidator.validatePassword(requestedPassword);
 
-        return withDatabaseLock(dbName, () -> {
+        return databaseLocks.withLock(dbName, () -> {
             if (managedDatabaseRepository.existsByDbName(dbName) || mongoDatabaseRepository.databaseExists(dbName)) {
                 throw new DatabaseAlreadyExistsException("Database '" + dbName + "' already exists");
             }
@@ -183,7 +174,7 @@ public class ProvisioningService {
         String requestedPassword = form.password() == null ? "" : form.password().trim();
         nameValidator.validatePassword(requestedPassword);
 
-        return withDatabaseLock(dbName, () -> {
+        return databaseLocks.withLock(dbName, () -> {
             ManagedDatabase metadata = managedDatabaseRepository.findByDbName(dbName)
                     .orElseThrow(() -> new DatabaseNotFoundException("Database '" + dbName + "' is not provisioned"));
 
@@ -216,7 +207,7 @@ public class ProvisioningService {
      */
     public void delete(String dbName) {
         nameValidator.validateDatabaseName(dbName);
-        withDatabaseLock(dbName, () -> {
+        databaseLocks.withLock(dbName, () -> {
             Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByDbName(dbName);
 
             try {
@@ -253,7 +244,7 @@ public class ProvisioningService {
     public void createCollection(String dbName, String collectionName) {
         nameValidator.validateDatabaseName(dbName);
         nameValidator.validateCollectionName(collectionName);
-        withDatabaseLock(dbName, () -> {
+        databaseLocks.withLock(dbName, () -> {
             requireDatabase(dbName);
             if (mongoDatabaseRepository.collectionExists(dbName, collectionName)) {
                 throw new DatabaseAlreadyExistsException("Collection '" + collectionName + "' already exists");
@@ -275,7 +266,7 @@ public class ProvisioningService {
     public void dropCollection(String dbName, String collectionName) {
         nameValidator.validateDatabaseName(dbName);
         nameValidator.validateCollectionName(collectionName);
-        withDatabaseLock(dbName, () -> {
+        databaseLocks.withLock(dbName, () -> {
             requireDatabase(dbName);
             if (!mongoDatabaseRepository.collectionExists(dbName, collectionName)) {
                 throw new DatabaseNotFoundException("Collection '" + collectionName + "' does not exist");
@@ -329,7 +320,7 @@ public class ProvisioningService {
     public void revokeUser(String dbName, String userName) {
         nameValidator.validateDatabaseName(dbName);
         nameValidator.validateUserName(userName);
-        withDatabaseLock(dbName, () -> {
+        databaseLocks.withLock(dbName, () -> {
             requireDatabase(dbName);
             List<Document> users = mongoDatabaseRepository.getUsers(dbName);
             if (users.size() <= 1) {
@@ -424,24 +415,6 @@ public class ProvisioningService {
     private void requireDatabase(String dbName) {
         if (!mongoDatabaseRepository.databaseExists(dbName)) {
             throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
-        }
-    }
-
-    /**
-     * Runs {@code action} while holding the per-database lock for {@code dbName}.
-     */
-    private void withDatabaseLock(String dbName, Runnable action) {
-        synchronized (databaseLocks.computeIfAbsent(dbName, key -> new Object())) {
-            action.run();
-        }
-    }
-
-    /**
-     * Runs {@code action} while holding the per-database lock for {@code dbName}.
-     */
-    private <T> T withDatabaseLock(String dbName, Supplier<T> action) {
-        synchronized (databaseLocks.computeIfAbsent(dbName, key -> new Object())) {
-            return action.get();
         }
     }
 

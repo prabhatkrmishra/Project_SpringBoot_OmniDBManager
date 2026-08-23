@@ -80,7 +80,8 @@ class ProvisioningServiceTest {
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         service = new ProvisioningService(mongoDatabaseRepository, managedDatabaseRepository,
                 auditLogRepository, new MongoNameValidator(), passwordGenerator,
-                Clock.fixed(NOW, ZoneOffset.UTC), environment, applicationEventPublisher);
+                Clock.fixed(NOW, ZoneOffset.UTC), environment, applicationEventPublisher,
+                new DatabaseLockRegistry());
     }
 
     @AfterEach

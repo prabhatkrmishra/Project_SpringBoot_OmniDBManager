@@ -61,17 +61,20 @@ public class BackupService {
     private final MongoNameValidator nameValidator;
     private final AuditLogRepository auditLogRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final DatabaseLockRegistry databaseLocks;
     private final Clock clock;
 
     public BackupService(MongoDatabaseRepository mongoDatabaseRepository,
                          MongoNameValidator nameValidator,
                          AuditLogRepository auditLogRepository,
                          ApplicationEventPublisher applicationEventPublisher,
+                         DatabaseLockRegistry databaseLocks,
                          Clock clock) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.nameValidator = nameValidator;
         this.auditLogRepository = auditLogRepository;
         this.applicationEventPublisher = applicationEventPublisher;
+        this.databaseLocks = databaseLocks;
         this.clock = clock;
     }
 
@@ -191,33 +194,41 @@ public class BackupService {
         if (!confirmed) {
             throw new NameNotAllowedException("Restore requires confirmation that existing data may be replaced");
         }
+        // Parsing is a pure function of the file content - run it before taking
+        // the per-database lock so a malformed upload never blocks other admins.
         List<BackupCollection> collections = readBackup(backupContent);
 
-        try {
-            if (mongoDatabaseRepository.databaseExists(dbName)) {
-                for (String existing : mongoDatabaseRepository.listCollectionNames(dbName)) {
-                    mongoDatabaseRepository.dropCollection(dbName, existing);
+        // The drop-then-recreate sequence is a check-then-act span; hold the same
+        // per-database lock as the provisioning lifecycle so a concurrent
+        // delete/provision cannot interleave (e.g. resurrecting a just-dropped
+        // database as a zombie with no metadata or user).
+        return databaseLocks.withLock(dbName, () -> {
+            try {
+                if (mongoDatabaseRepository.databaseExists(dbName)) {
+                    for (String existing : mongoDatabaseRepository.listCollectionNames(dbName)) {
+                        mongoDatabaseRepository.dropCollection(dbName, existing);
+                    }
                 }
-            }
-            long totalDocuments = 0;
-            for (BackupCollection collection : collections) {
-                mongoDatabaseRepository.createCollection(dbName, collection.name());
-                recreateIndexes(dbName, collection);
-                List<Document> documents = collection.documents();
-                totalDocuments += documents.size();
-                for (int i = 0; i < documents.size(); i += INSERT_BATCH_SIZE) {
-                    mongoDatabaseRepository.insertDocuments(dbName, collection.name(),
-                            documents.subList(i, Math.min(i + INSERT_BATCH_SIZE, documents.size())));
+                long totalDocuments = 0;
+                for (BackupCollection collection : collections) {
+                    mongoDatabaseRepository.createCollection(dbName, collection.name());
+                    recreateIndexes(dbName, collection);
+                    List<Document> documents = collection.documents();
+                    totalDocuments += documents.size();
+                    for (int i = 0; i < documents.size(); i += INSERT_BATCH_SIZE) {
+                        mongoDatabaseRepository.insertDocuments(dbName, collection.name(),
+                                documents.subList(i, Math.min(i + INSERT_BATCH_SIZE, documents.size())));
+                    }
                 }
+                audit(AuditEvent.BACKUP_RESTORED, dbName, clock.instant());
+                log.info("Restored database '{}': {} collections, {} documents",
+                        dbName, collections.size(), totalDocuments);
+                return new RestoreResult(dbName, collections.size(), totalDocuments);
+            } catch (MongoException e) {
+                log.error("Failed to restore database '{}'", dbName, e);
+                throw new ProvisioningException("Could not restore database '" + dbName + "'", e);
             }
-            audit(AuditEvent.BACKUP_RESTORED, dbName, clock.instant());
-            log.info("Restored database '{}': {} collections, {} documents",
-                    dbName, collections.size(), totalDocuments);
-            return new RestoreResult(dbName, collections.size(), totalDocuments);
-        } catch (MongoException e) {
-            log.error("Failed to restore database '{}'", dbName, e);
-            throw new ProvisioningException("Could not restore database '" + dbName + "'", e);
-        }
+        });
     }
 
     /**

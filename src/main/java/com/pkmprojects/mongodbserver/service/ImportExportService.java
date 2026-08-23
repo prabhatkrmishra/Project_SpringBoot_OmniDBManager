@@ -61,17 +61,20 @@ public class ImportExportService {
     private final MongoNameValidator nameValidator;
     private final AuditLogRepository auditLogRepository;
     private final ApplicationEventPublisher applicationEventPublisher;
+    private final DatabaseLockRegistry databaseLocks;
     private final Clock clock;
 
     public ImportExportService(MongoDatabaseRepository mongoDatabaseRepository,
                                MongoNameValidator nameValidator,
                                AuditLogRepository auditLogRepository,
                                ApplicationEventPublisher applicationEventPublisher,
+                               DatabaseLockRegistry databaseLocks,
                                Clock clock) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.nameValidator = nameValidator;
         this.auditLogRepository = auditLogRepository;
         this.applicationEventPublisher = applicationEventPublisher;
+        this.databaseLocks = databaseLocks;
         this.clock = clock;
     }
 
@@ -172,21 +175,29 @@ public class ImportExportService {
      *                                 exist
      */
     public ImportResult importDocuments(String dbName, String collectionName, byte[] content) {
-        requireCollection(dbName, collectionName);
+        // Parsing is a pure function of the file content - run it before taking
+        // the per-database lock so a malformed upload never blocks other admins.
         List<Document> documents = parse(content);
 
-        try {
-            for (int i = 0; i < documents.size(); i += INSERT_BATCH_SIZE) {
-                mongoDatabaseRepository.insertDocuments(dbName, collectionName,
-                        documents.subList(i, Math.min(i + INSERT_BATCH_SIZE, documents.size())));
+        // Existence check plus batched inserts are a check-then-act span; hold
+        // the same per-database lock as the provisioning lifecycle so a
+        // concurrent delete cannot drop the collection (or database) between
+        // the check and the inserts.
+        return databaseLocks.withLock(dbName, () -> {
+            requireCollection(dbName, collectionName);
+            try {
+                for (int i = 0; i < documents.size(); i += INSERT_BATCH_SIZE) {
+                    mongoDatabaseRepository.insertDocuments(dbName, collectionName,
+                            documents.subList(i, Math.min(i + INSERT_BATCH_SIZE, documents.size())));
+                }
+                audit(AuditEvent.IMPORT, dbName, collectionName, clock.instant());
+            } catch (MongoException e) {
+                log.error("Failed to import into {}.{}", dbName, collectionName, e);
+                throw new ProvisioningException("Could not import into collection '" + collectionName + "'", e);
             }
-            audit(AuditEvent.IMPORT, dbName, collectionName, clock.instant());
-        } catch (MongoException e) {
-            log.error("Failed to import into {}.{}", dbName, collectionName, e);
-            throw new ProvisioningException("Could not import into collection '" + collectionName + "'", e);
-        }
-        log.info("Imported {} document(s) into {}.{}", documents.size(), dbName, collectionName);
-        return new ImportResult(dbName, collectionName, documents.size());
+            log.info("Imported {} document(s) into {}.{}", documents.size(), dbName, collectionName);
+            return new ImportResult(dbName, collectionName, documents.size());
+        });
     }
 
     /**

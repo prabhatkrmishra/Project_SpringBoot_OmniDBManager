@@ -67,7 +67,8 @@ class BackupServiceTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         service = new BackupService(mongoDatabaseRepository, new MongoNameValidator(),
-                auditLogRepository, applicationEventPublisher, Clock.fixed(NOW, ZoneOffset.UTC));
+                auditLogRepository, applicationEventPublisher, new DatabaseLockRegistry(),
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @AfterEach

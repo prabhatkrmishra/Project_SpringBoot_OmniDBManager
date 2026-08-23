@@ -64,7 +64,8 @@ class ImportExportServiceTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         service = new ImportExportService(mongoDatabaseRepository, new MongoNameValidator(),
-                auditLogRepository, applicationEventPublisher, Clock.fixed(NOW, ZoneOffset.UTC));
+                auditLogRepository, applicationEventPublisher, new DatabaseLockRegistry(),
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @AfterEach
@@ -265,7 +266,7 @@ class ImportExportServiceTest {
 
     @Test
     void jsonImportRejectsNonObjectElements() {
-        stubExistingCollection();
+        // Parse failures reject before any repository access.
 
         assertThatThrownBy(() -> service.importDocuments("myapp", "users",
                 "[1,2]".getBytes(StandardCharsets.UTF_8)))
@@ -275,8 +276,6 @@ class ImportExportServiceTest {
 
     @Test
     void jsonImportRejectsMalformedJson() {
-        stubExistingCollection();
-
         assertThatThrownBy(() -> service.importDocuments("myapp", "users",
                 "[{\"name\":".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(NameNotAllowedException.class);
@@ -316,8 +315,6 @@ class ImportExportServiceTest {
 
     @Test
     void csvImportRequiresHeaderRow() {
-        stubExistingCollection();
-
         assertThatThrownBy(() -> service.importDocuments("myapp", "users",
                 "".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(NameNotAllowedException.class);
@@ -325,8 +322,6 @@ class ImportExportServiceTest {
 
     @Test
     void csvImportRejectsDuplicateColumns() {
-        stubExistingCollection();
-
         assertThatThrownBy(() -> service.importDocuments("myapp", "users",
                 "a,a\n1,2\n".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(NameNotAllowedException.class)
@@ -335,8 +330,6 @@ class ImportExportServiceTest {
 
     @Test
     void csvImportRejectsDollarColumn() {
-        stubExistingCollection();
-
         assertThatThrownBy(() -> service.importDocuments("myapp", "users",
                 "$x\n1\n".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(NameNotAllowedException.class)
@@ -439,8 +432,6 @@ class ImportExportServiceTest {
 
     @Test
     void csvImportRejectsDottedColumn() {
-        stubExistingCollection();
-
         assertThatThrownBy(() -> service.importDocuments("myapp", "users",
                 "a.b\n1\n".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(NameNotAllowedException.class)
@@ -451,8 +442,6 @@ class ImportExportServiceTest {
 
     @Test
     void importEmptyFileIsRejected() {
-        stubExistingCollection();
-
         assertThatThrownBy(() -> service.importDocuments("myapp", "users", new byte[0]))
                 .isInstanceOf(NameNotAllowedException.class);
     }
