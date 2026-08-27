@@ -57,7 +57,8 @@ public class DatabaseController {
     public String provision(@Valid @ModelAttribute("form") CreateDatabaseForm form,
                             BindingResult bindingResult, Model model, RedirectAttributes redirectAttributes) {
         if (bindingResult.hasErrors()) {
-            return "provision";
+            model.addAttribute("engine", com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO);
+            return "provision-mongo";
         }
         DatabaseInfo created = provisioningService.provision(form);
         redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned");

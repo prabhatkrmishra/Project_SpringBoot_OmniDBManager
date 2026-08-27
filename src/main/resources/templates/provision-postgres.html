@@ -20,7 +20,7 @@
                         <div class="card-body">
                             <p class="text-body-secondary mb-4">Creates a PostgreSQL database with a dedicated role. Name must be lowercase, start with letter/underscore, max 63 chars.</p>
                             <form class="form-grid" method="post" th:action="@{/postgres/databases}" th:object="${form}">
-                                <input type="hidden" th:field="*{engineType}" th:value="${engine}" />
+                                <input type="hidden" th:field="*{engineType}" />
                                 <div class="mb-3">
                                     <label class="form-label" for="dbName">Database name</label>
                                     <input class="form-control" id="dbName" maxlength="63" required th:field="*{dbName}" type="text" placeholder="e.g., myapp">

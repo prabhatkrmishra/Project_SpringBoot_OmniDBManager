@@ -19,7 +19,13 @@ public class ProvisionController {
 
     @GetMapping("/provision")
     public String chooser(Model model) {
-        model.addAttribute("mongoCount", provisioningService.listDatabases(DatabaseEngineType.MONGO).size());
+        int mongoCount;
+        try {
+            mongoCount = provisioningService.listDatabases(DatabaseEngineType.MONGO).size();
+        } catch (Exception e) {
+            mongoCount = 0;
+        }
+        model.addAttribute("mongoCount", mongoCount);
         try {
             model.addAttribute("postgresCount", provisioningService.listDatabases(DatabaseEngineType.POSTGRES).size());
         } catch (Exception e) {

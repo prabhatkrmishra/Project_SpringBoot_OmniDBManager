@@ -2,8 +2,6 @@ package com.pkmprojects.mongodbserver.dto;
 
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -14,14 +12,12 @@ public record CreateDatabaseForm(
 
         @NotBlank(message = "Database name is required")
         @Size(max = 64, message = "Database name must be at most 64 characters")
-        @Pattern(regexp = "[A-Za-z0-9_-]+", message = "Database name may only contain letters, digits, '_' and '-'")
         String dbName,
 
         DatabaseEngineType engineType,
 
         @NotBlank(message = "Database user name is required")
         @Size(max = 64, message = "Database user name must be at most 64 characters")
-        @Pattern(regexp = "[A-Za-z0-9_.-]+", message = "Database user name may only contain letters, digits, '.', '_' and '-'")
         String userName,
 
         @Size(max = 128, message = "Password must be at most 128 characters")

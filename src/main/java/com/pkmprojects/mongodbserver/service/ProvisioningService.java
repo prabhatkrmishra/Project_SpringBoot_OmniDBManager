@@ -118,16 +118,15 @@ public class ProvisioningService {
                     : requestedPassword;
 
             DatabaseEngine engine = engineFor(engineType);
+            boolean pgUserCreated = false;
+            boolean pgDbCreated = false;
             try {
                 if (engineType == DatabaseEngineType.POSTGRES) {
                     engine.createUser(dbName, userName, password);
-                    try {
-                        engine.createDatabase(dbName, userName);
-                        engine.grantPrivileges(dbName, userName);
-                    } catch (Exception dbEx) {
-                        try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Cleanup role after DB create failure", ce); }
-                        throw dbEx;
-                    }
+                    pgUserCreated = true;
+                    engine.createDatabase(dbName, userName);
+                    pgDbCreated = true;
+                    engine.grantPrivileges(dbName, userName);
                 } else {
                     engine.createUser(dbName, userName, password);
                     engine.createDatabase(dbName, userName);
@@ -141,7 +140,12 @@ public class ProvisioningService {
                 throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
             } catch (Exception e) {
                 if (engineType == DatabaseEngineType.POSTGRES) {
-                    try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created PG role '{}'", userName, ce); }
+                    if (pgDbCreated) {
+                        try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up partially created PG database '{}'", dbName, ce); }
+                    }
+                    if (pgUserCreated) {
+                        try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created PG role '{}'", userName, ce); }
+                    }
                 }
                 log.error("Failed to provision database '{}' (user '{}')", dbName, userName, e);
                 throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
@@ -381,7 +385,7 @@ public class ProvisioningService {
                 : DatabaseNameValidator.SYSTEM_DATABASES;
         return dbNames.stream()
                 .filter(dbName -> !systemDbs.contains(dbName.toLowerCase(Locale.ROOT)))
-                .map(dbName -> toInfo(dbName, byName.get(dbName), collectionCount(dbName, engineType), null, sizes.getOrDefault(dbName, 0L)))
+                .map(dbName -> toInfo(dbName, engineType, byName.get(dbName), collectionCount(dbName, engineType), null, sizes.getOrDefault(dbName, 0L)))
                 .sorted(Comparator.comparing(DatabaseInfo::dbName))
                 .toList();
     }
@@ -407,7 +411,7 @@ public class ProvisioningService {
         }
         long size = 0L;
         try { size = engineFor(engineType).getDatabaseSizes().getOrDefault(dbName, 0L); } catch (Exception ignored) {}
-        return toInfo(dbName, md, collectionCount(dbName, engineType), connectionString, size);
+        return toInfo(dbName, engineType, md, collectionCount(dbName, engineType), connectionString, size);
     }
 
     String resolveConnectionHost() { return mongoEngine.resolveConnectionHost(); }
@@ -451,6 +455,11 @@ public class ProvisioningService {
     private DatabaseInfo toInfo(String dbName, ManagedDatabase metadata, Long collectionsCount, String connectionString, long sizeBytes) {
         if (metadata == null) return new DatabaseInfo(dbName, null, null, List.of(), collectionsCount, null, null, null, false, connectionString, sizeBytes);
         return new DatabaseInfo(dbName, metadata.getEngineType(), metadata.getUserName(), metadata.getRoles(), collectionsCount, metadata.getCreatedAt(), metadata.getUpdatedAt(), metadata.getLastPasswordResetAt(), true, connectionString, sizeBytes);
+    }
+
+    private DatabaseInfo toInfo(String dbName, DatabaseEngineType engineType, ManagedDatabase metadata, Long collectionsCount, String connectionString, long sizeBytes) {
+        if (metadata == null) return new DatabaseInfo(dbName, engineType, null, List.of(), collectionsCount, null, null, null, false, connectionString, sizeBytes);
+        return toInfo(dbName, metadata, collectionsCount, connectionString, sizeBytes);
     }
 
     private boolean isMongoCode(MongoCommandException e, int code) { return e.getErrorCode() == code; }

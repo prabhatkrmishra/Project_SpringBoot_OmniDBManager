@@ -98,7 +98,7 @@ class DatabaseControllerTest {
                         .with(user("admin").roles("ADMIN"))
                         .with(csrf()))
                 .andExpect(status().isOk())
-                .andExpect(view().name("provision"))
+                .andExpect(view().name("provision-mongo"))
                 .andExpect(model().attributeHasFieldErrors("form", "dbName", "userName"));
 
         verify(provisioningService, never()).provision(any());

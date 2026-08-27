@@ -20,7 +20,7 @@
                         <div class="card-body">
                             <p class="text-body-secondary mb-4">Creates a MongoDB database with a dedicated user scoped to it.</p>
                             <form class="form-grid" method="post" th:action="@{/mongo/databases}" th:object="${form}">
-                                <input type="hidden" th:field="*{engineType}" th:value="${engine}" />
+                                <input type="hidden" th:field="*{engineType}" />
                                 <div class="mb-3">
                                     <label class="form-label" for="dbName">Database name</label>
                                     <input class="form-control" id="dbName" maxlength="64" required th:field="*{dbName}" type="text" placeholder="e.g., myapp_db">

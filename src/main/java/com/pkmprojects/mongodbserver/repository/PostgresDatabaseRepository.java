@@ -67,10 +67,14 @@ public class PostgresDatabaseRepository {
             return uri;
         }
         int slash = uri.indexOf('/', schemeEnd + 3);
+        int q = uri.indexOf('?', schemeEnd + 3);
         if (slash < 0) {
+            // No slash: host[:port][?query] -> insert /dbName before query
+            if (q >= 0) {
+                return uri.substring(0, q) + "/" + dbName + uri.substring(q);
+            }
             return uri + "/" + dbName;
         }
-        int q = uri.indexOf('?', slash);
         String prefix = uri.substring(0, slash + 1);
         String suffix = q >= 0 ? uri.substring(q) : "";
         return prefix + dbName + suffix;

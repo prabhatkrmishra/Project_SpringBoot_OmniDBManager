@@ -104,7 +104,14 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
     private String rewriteLocation(String value) {
         if (value == null) return value;
         String origin = targetBase.getScheme() + "://" + targetBase.getAuthority();
-        if (value.startsWith(origin)) return value.substring(origin.length());
+        if (value.startsWith(origin)) {
+            String path = value.substring(origin.length());
+            if (path.isEmpty()) path = "/";
+            return PROXY_PREFIX + (path.startsWith("/") ? path : "/" + path);
+        }
+        if (value.startsWith("/")) {
+            return PROXY_PREFIX + value;
+        }
         return value;
     }
 
