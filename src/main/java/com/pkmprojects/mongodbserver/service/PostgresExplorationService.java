@@ -46,6 +46,7 @@ public class PostgresExplorationService {
     private final DatabaseLockRegistry locks;
     private final Clock clock;
 
+    @Autowired
     public PostgresExplorationService(@Autowired(required = false) PostgresDatabaseRepository postgresRepository,
                                       DatabaseNameValidator nameValidator,
                                       @Autowired(required = false) AuditLogRepository auditLogRepository,

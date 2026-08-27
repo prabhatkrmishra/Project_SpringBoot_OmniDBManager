@@ -57,6 +57,7 @@ public class ProvisioningService {
     private final Optional<PostgresDatabaseRepository> postgresRepository;
     private final EncryptionService encryptionService;
 
+    @Autowired
     public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
                                ManagedDatabaseRepository managedDatabaseRepository,
                                AuditLogRepository auditLogRepository,
