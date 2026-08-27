@@ -140,28 +140,43 @@ public class PostgresBackupService {
         if (!confirmed) throw new NameNotAllowedException("Restore requires confirmation that existing data may be replaced");
         List<ParsedTable> parsed = readBackup(content);
         return locks.withLock(DatabaseEngineType.POSTGRES.name() + ":" + dbName, () -> {
-            // Ensure DB exists (create if missing - need owner; use metadata or fail)
             if (!postgresRepository.databaseExists(dbName)) {
                 throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist; provision it first");
             }
             long totalRows = 0;
             for (ParsedTable pt : parsed) {
                 nameValidator.validateTableName(pt.name);
-                // If table missing, create with TEXT columns
+                List<String> cols = resolveColumns(pt);
                 if (!postgresRepository.tableExists(dbName, pt.name)) {
-                    createTable(dbName, pt.name, pt.columns);
+                    createTable(dbName, pt.name, cols);
+                } else if (!cols.isEmpty()) {
+                    // Ensure existing table has all backup columns (schema drift)
+                    try {
+                        List<String> existing = postgresRepository.getTableColumns(dbName, pt.name);
+                        java.util.Set<String> existingSet = new java.util.HashSet<>(existing);
+                        for (String col : cols) {
+                            if (!existingSet.contains(col)) {
+                                postgresRepository.executeInDatabase(dbName,
+                                        "ALTER TABLE public." + PostgresDatabaseRepository.quoteIdentifier(pt.name)
+                                                + " ADD COLUMN " + PostgresDatabaseRepository.quoteIdentifier(col) + " TEXT");
+                            }
+                        }
+                    } catch (Exception e) {
+                        throw new ProvisioningException("Could not reconcile schema for table '" + pt.name + "'", e);
+                    }
                 }
-                // Truncate
                 try {
                     postgresRepository.truncateTable(dbName, pt.name);
                 } catch (Exception e) {
                     throw new ProvisioningException("Could not truncate table '" + pt.name + "'", e);
                 }
-                // Insert rows in batches
+                if (cols.isEmpty() || pt.rows.isEmpty()) {
+                    continue;
+                }
                 for (int i = 0; i < pt.rows.size(); i += INSERT_BATCH_SIZE) {
                     List<Map<String, Object>> batch = pt.rows.subList(i, Math.min(i + INSERT_BATCH_SIZE, pt.rows.size()));
                     try {
-                        postgresRepository.insertRows(dbName, pt.name, pt.columns, batch);
+                        postgresRepository.insertRows(dbName, pt.name, cols, batch);
                     } catch (Exception e) {
                         throw new ProvisioningException("Could not restore rows into '" + pt.name + "'", e);
                     }
@@ -175,15 +190,26 @@ public class PostgresBackupService {
     }
 
     private void createTable(String dbName, String table, List<String> columns) {
-        if (columns.isEmpty()) {
-            // No columns info - create with single id column
+        List<String> effectiveColumns = columns;
+        if (effectiveColumns.isEmpty()) {
+            // No columns info - try to derive from first row keys if available (handled by caller)
             postgresRepository.executeInDatabase(dbName, "CREATE TABLE " + PostgresDatabaseRepository.quoteIdentifier(table) + " (id TEXT)");
             return;
         }
-        String cols = columns.stream()
+        String cols = effectiveColumns.stream()
                 .map(c -> PostgresDatabaseRepository.quoteIdentifier(c) + " TEXT")
                 .collect(java.util.stream.Collectors.joining(", "));
         postgresRepository.executeInDatabase(dbName, "CREATE TABLE " + PostgresDatabaseRepository.quoteIdentifier(table) + " (" + cols + ")");
+    }
+
+    private List<String> resolveColumns(ParsedTable pt) {
+        if (pt.columns != null && !pt.columns.isEmpty()) return pt.columns;
+        // Derive columns from row keys when backup has empty columns (e.g. empty table backup)
+        java.util.LinkedHashSet<String> keys = new java.util.LinkedHashSet<>();
+        for (Map<String, Object> row : pt.rows) {
+            keys.addAll(row.keySet());
+        }
+        return new ArrayList<>(keys);
     }
 
     private String toJsonRow(Map<String, Object> row, List<String> columns) {

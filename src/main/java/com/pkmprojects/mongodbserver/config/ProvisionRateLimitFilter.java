@@ -27,23 +27,39 @@ public class ProvisionRateLimitFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         if (!HttpMethod.POST.matches(request.getMethod())) return true;
-        String path = request.getRequestURI().substring(request.getContextPath().length());
-        // Only throttle provision/reset/delete and backup/restore
-        boolean isProvision = path.equals("/mongo/databases") || path.equals("/postgres/databases");
-        boolean isReset = path.matches(".*/(mongo|postgres)/databases/[^/]+/reset");
+        String raw = request.getRequestURI().substring(request.getContextPath().length());
+        // Normalize trailing slash so /postgres/databases/ matches provision
+        String path = raw.endsWith("/") && raw.length() > 1 ? raw.substring(0, raw.length() - 1) : raw;
+        boolean isProvision = path.equals("/mongo/databases") || path.equals("/postgres/databases")
+                || path.equals("/databases");
+        boolean isReset = path.matches(".*/(mongo|postgres)/databases/[^/]+/reset")
+                || path.matches(".*/databases/[^/]+/reset");
         boolean isDelete = path.matches(".*/(mongo|postgres)/databases/[^/]+/delete")
-                || path.matches(".*/(mongo|postgres)/databases/[^/]+/users/[^/]+/delete");
+                || path.matches(".*/(mongo|postgres)/databases/[^/]+/users/[^/]+/delete")
+                || path.matches(".*/databases/[^/]+/delete")
+                || path.matches(".*/databases/[^/]+/users/[^/]+/delete")
+                || path.matches(".*/databases/[^/]+/collections/[^/]+/delete");
         boolean isBackupRestore = path.matches(".*/(mongo|postgres)/databases/[^/]+/(backup|restore)")
                 || path.matches(".*/databases/[^/]+/(backup|restore)");
-        return !(isProvision || isReset || isDelete || isBackupRestore);
+        boolean isCollectionCreate = path.matches(".*/databases/[^/]+/collections");
+        boolean isImport = path.matches(".*/databases/[^/]+/collections/[^/]+/import");
+        return !(isProvision || isReset || isDelete || isBackupRestore || isCollectionCreate || isImport);
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String engine = request.getRequestURI().contains("/postgres/") ? "POSTGRES" : "MONGO";
-        // legacy /databases/* without prefix -> treat as MONGO for rate limit bucket
-        if (request.getRequestURI().startsWith("/databases/")) engine = "MONGO";
+        String uri = request.getRequestURI();
+        String path = uri.substring(request.getContextPath().length());
+        String engine;
+        if (path.startsWith("/postgres/") || path.equals("/postgres")) {
+            engine = "POSTGRES";
+        } else if (path.startsWith("/mongo/") || path.equals("/mongo")) {
+            engine = "MONGO";
+        } else {
+            // legacy /databases/* and /provision etc -> treat as MONGO bucket
+            engine = "MONGO";
+        }
         String key = clientKey(request) + ":" + engine;
         if (rateLimiter.isAllowed(key, properties.maxAttempts(), properties.window())) {
             chain.doFilter(request, response);

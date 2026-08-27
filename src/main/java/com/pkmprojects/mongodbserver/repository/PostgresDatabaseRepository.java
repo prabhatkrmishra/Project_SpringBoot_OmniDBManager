@@ -46,7 +46,7 @@ public class PostgresDatabaseRepository {
     }
 
     public void truncateTable(String dbName, String tableName) {
-        jdbcFor(dbName).execute("TRUNCATE TABLE public." + quoteIdentifier(tableName));
+        jdbcFor(dbName).execute("TRUNCATE TABLE public." + quoteIdentifier(tableName) + " CASCADE");
     }
 
     public void insertRows(String dbName, String tableName, List<String> columns, List<Map<String, Object>> rows) {
@@ -60,7 +60,15 @@ public class PostgresDatabaseRepository {
             Object[] args = new Object[columns.size()];
             for (int i = 0; i < columns.size(); i++) {
                 Object v = row.get(columns.get(i));
-                args[i] = v == null ? null : v.toString();
+                // Preserve native types so PG can cast correctly; only stringify unknown types
+                if (v == null) {
+                    args[i] = null;
+                } else if (v instanceof Number || v instanceof Boolean || v instanceof java.sql.Timestamp
+                        || v instanceof java.sql.Date || v instanceof java.util.Date) {
+                    args[i] = v;
+                } else {
+                    args[i] = v.toString();
+                }
             }
             batch.add(args);
         }

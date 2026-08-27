@@ -31,18 +31,19 @@
                             <strong th:text="${database.dbName}">myapp</strong>.
                             <span th:if="${database.exists}">
                                 The database currently exists with
-                                <strong th:text="${database.collectionCount}">0</strong> collection(s).
+                                <strong th:text="${database.collectionCount}">0</strong>
+                                <span th:text="${engine != null and engine.name() == 'POSTGRES'} ? 'table(s)' : 'collection(s)'">collection(s)</span>.
                             </span>
                             <span th:if="${!database.exists}">
-                                The database does not exist yet and will be created.
+                                <span th:if="${engine != null and engine.name() == 'POSTGRES'}">The database does not exist — provision it first before restoring.</span>
+                                <span th:if="${engine == null or engine.name() != 'POSTGRES'}">The database does not exist yet and will be created.</span>
                             </span>
                         </p>
 
                         <div class="alert alert-danger" role="alert">
                             <i class="bi bi-exclamation-triangle me-2"></i>
-                            Restoring <strong>replaces</strong> the database's current content:
-                            every existing collection is dropped before the backup is recreated.
-                            This cannot be undone.
+                            <span th:if="${engine != null and engine.name() == 'POSTGRES'}">Restoring <strong>replaces</strong> the database's current content: every table is truncated (with CASCADE) before rows are re-inserted. This cannot be undone.</span>
+                            <span th:if="${engine == null or engine.name() != 'POSTGRES'}">Restoring <strong>replaces</strong> the database's current content: every existing collection is dropped before the backup is recreated. This cannot be undone.</span>
                         </div>
 
                         <form method="post" enctype="multipart/form-data"

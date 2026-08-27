@@ -243,7 +243,10 @@ public class PostgresController {
             redirectAttributes.addFlashAttribute("flashSuccess",
                     "Restored " + result.documentsRestored() + " rows across " + result.collectionsRestored() + " tables into '" + dbName + "'");
             return "redirect:/postgres/databases/" + dbName;
-        } catch (NameNotAllowedException e) {
+        } catch (NameNotAllowedException | com.pkmprojects.mongodbserver.error.DatabaseNotFoundException e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+            return "redirect:/postgres/databases/" + dbName + "/restore";
+        } catch (com.pkmprojects.mongodbserver.error.ProvisioningException e) {
             redirectAttributes.addFlashAttribute("flashError", e.getMessage());
             return "redirect:/postgres/databases/" + dbName + "/restore";
         }

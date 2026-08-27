@@ -31,22 +31,24 @@ public class EncryptionService {
         if (raw == null || raw.isBlank()) {
             this.key = null;
             this.enabled = false;
+            org.slf4j.LoggerFactory.getLogger(EncryptionService.class)
+                    .warn("APP_ENCRYPTION_KEY not set - stored passwords will be plaintext (dev only)");
             return;
         }
         String trimmed = raw.trim();
         byte[] decoded;
-        try {
-            decoded = Base64.getDecoder().decode(trimmed);
-        } catch (IllegalArgumentException e) {
-            // Also accept hex (64 hex chars = 32 bytes)
-            if (trimmed.matches("[0-9a-fA-F]{64}")) {
-                decoded = hexToBytes(trimmed);
-            } else {
-                throw new IllegalStateException("APP_ENCRYPTION_KEY must be base64 (or 64 hex chars) encoding 32 bytes", e);
+        // Hex is unambiguous (64 hex chars); check first before base64 which would also decode hex chars
+        if (trimmed.matches("[0-9a-fA-F]{64}")) {
+            decoded = hexToBytes(trimmed);
+        } else {
+            try {
+                decoded = Base64.getDecoder().decode(trimmed);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalStateException("APP_ENCRYPTION_KEY must be base64 (32 bytes) or 64 hex chars", e);
             }
-        }
-        if (decoded.length != 32) {
-            throw new IllegalStateException("APP_ENCRYPTION_KEY must decode to 32 bytes (got " + decoded.length + ")");
+            if (decoded.length != 32) {
+                throw new IllegalStateException("APP_ENCRYPTION_KEY must decode to 32 bytes (got " + decoded.length + ")");
+            }
         }
         this.key = decoded;
         this.enabled = true;
@@ -85,6 +87,9 @@ public class EncryptionService {
         }
         try {
             byte[] combined = Base64.getDecoder().decode(stored.substring(PREFIX.length()));
+            if (combined.length < IV_LEN + 1) {
+                throw new IllegalStateException("Invalid encrypted payload: too short");
+            }
             byte[] iv = new byte[IV_LEN];
             System.arraycopy(combined, 0, iv, 0, IV_LEN);
             byte[] ct = new byte[combined.length - IV_LEN];
@@ -93,6 +98,8 @@ public class EncryptionService {
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"), new GCMParameterSpec(GCM_TAG_BITS, iv));
             byte[] pt = cipher.doFinal(ct);
             return new String(pt, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalStateException("Decryption failed", e);
         }
