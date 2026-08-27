@@ -84,6 +84,14 @@ public class DatabaseNameValidator {
                 "Collection name may only contain letters, digits, '_' and '-'");
     }
 
+    public void validateTableName(String tableName) {
+        requireValid(tableName, POSTGRES_PATTERN, MAX_POSTGRES_NAME_LENGTH,
+                "Table name must start with a letter or underscore and contain only lowercase letters, digits, and underscores");
+        if (!tableName.equals(tableName.toLowerCase(Locale.ROOT))) {
+            throw new NameNotAllowedException("Table name must be lowercase");
+        }
+    }
+
     public void validatePassword(String password) {
         if (password == null || password.isBlank()) {
             return;

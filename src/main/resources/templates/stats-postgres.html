@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/nav :: head('Statistics ' + ${database.dbName})}"></head>
+<body>
+    <div class="layout">
+        <aside th:replace="~{fragments/nav :: nav('database')}"></aside>
+
+        <div class="main">
+            <main th:replace="~{fragments/nav :: flash}"></main>
+
+            <main class="container-xxl py-4">
+                <nav aria-label="breadcrumb" class="mb-3">
+                    <ol class="breadcrumb mb-0">
+                        <li class="breadcrumb-item"><a class="link-primary" th:href="@{/}">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a class="link-primary"
+                                                       th:href="@{/postgres/databases/{name}(name=${database.dbName})}"
+                                                       th:text="${database.dbName}">database</a></li>
+                        <li class="breadcrumb-item active">Statistics</li>
+                    </ol>
+                </nav>
+
+                <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                    <div>
+                        <h1 class="mb-1">
+                            <i class="bi bi-bar-chart-line text-primary me-1"></i>
+                            <span th:text="${database.dbName}">database</span>
+                            <span class="badge engine-badge-pg ms-2">POSTGRES</span>
+                        </h1>
+                        <p class="mb-0 text-body-secondary">Storage and row statistics for this PostgreSQL database.</p>
+                    </div>
+                    <a class="btn btn-sm btn-outline-secondary"
+                       th:href="@{/postgres/databases/{name}(name=${database.dbName})}">
+                        <i class="bi bi-arrow-left"></i> Back to database
+                    </a>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-sm-6 col-xl-3">
+                        <div class="card stat-card h-100">
+                            <div class="card-body d-flex align-items-center gap-3">
+                                <div class="stat-icon stat-icon-violet">
+                                    <i class="bi bi-table"></i>
+                                </div>
+                                <div>
+                                    <div class="stat-value" th:text="${pgStats.tableCount}">0</div>
+                                    <div class="stat-label">Tables</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-xl-3">
+                        <div class="card stat-card h-100">
+                            <div class="card-body d-flex align-items-center gap-3">
+                                <div class="stat-icon stat-icon-cyan">
+                                    <i class="bi bi-file-earmark-text"></i>
+                                </div>
+                                <div>
+                                    <div class="stat-value" th:text="${pgStats.totalRows}">0</div>
+                                    <div class="stat-label">Total rows</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-xl-3">
+                        <div class="card stat-card h-100">
+                            <div class="card-body d-flex align-items-center gap-3">
+                                <div class="stat-icon stat-icon-rose">
+                                    <i class="bi bi-hdd"></i>
+                                </div>
+                                <div>
+                                    <div class="stat-value" th:text="${pgStats.totalSizeLabel()}">0 B</div>
+                                    <div class="stat-label">Total size</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <section class="card shadow-sm mb-4">
+                    <div class="card-header bg-transparent">
+                        <h3 class="h6 mb-0"><i class="bi bi-table text-primary"></i> Tables</h3>
+                    </div>
+                    <div class="card-body p-0">
+                        <p class="text-body-secondary p-3 mb-0" th:if="${#lists.isEmpty(pgStats.tables)}">
+                            This database has no tables yet.
+                        </p>
+                        <div class="table-responsive" th:if="${!#lists.isEmpty(pgStats.tables)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Table</th>
+                                        <th class="text-end">Rows</th>
+                                        <th class="text-end">Size</th>
+                                        <th class="text-end">Live tuples</th>
+                                        <th class="text-end">Dead tuples</th>
+                                        <th>Last vacuum</th>
+                                        <th>Last analyze</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="table : ${pgStats.tables}">
+                                        <td>
+                                            <i class="bi bi-table text-primary me-1"></i>
+                                            <span th:text="${table.name}">table</span>
+                                        </td>
+                                        <td class="text-end" th:text="${table.rowCount}">0</td>
+                                        <td class="text-end" th:text="${table.sizeLabel()}">0 B</td>
+                                        <td class="text-end" th:text="${table.liveTuples}">0</td>
+                                        <td class="text-end" th:text="${table.deadTuples}">0</td>
+                                        <td th:text="${table.lastVacuum} ?: '—'">—</td>
+                                        <td th:text="${table.lastAnalyze} ?: '—'">—</td>
+                                        <td class="text-end">
+                                            <a class="btn btn-sm btn-outline-primary"
+                                               th:href="@{/postgres/databases/{name}/tables/{tname}(name=${database.dbName}, tname=${table.name})}">
+                                                <i class="bi bi-search"></i> Browse
+                                            </a>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+</body>
+</html>

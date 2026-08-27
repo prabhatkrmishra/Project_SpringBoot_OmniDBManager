@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/nav :: head('Table ' + ${tablePage.tableName})}"></head>
+<body>
+    <div class="layout">
+        <aside th:replace="~{fragments/nav :: nav('database')}"></aside>
+
+        <div class="main">
+            <main th:replace="~{fragments/nav :: flash}"></main>
+
+            <main class="container-xxl py-4">
+                <nav aria-label="breadcrumb" class="mb-3">
+                    <ol class="breadcrumb mb-0">
+                        <li class="breadcrumb-item"><a class="link-primary" th:href="@{/}">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a class="link-primary"
+                                                       th:href="@{/postgres/databases/{name}(name=${tablePage.dbName})}"
+                                                       th:text="${tablePage.dbName}">database</a></li>
+                        <li class="breadcrumb-item active" th:text="${tablePage.tableName}">table</li>
+                    </ol>
+                </nav>
+
+                <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+                    <div>
+                        <h1 class="mb-1">
+                            <i class="bi bi-table text-primary"></i>
+                            <span th:text="${tablePage.tableName}">table</span>
+                        </h1>
+                        <p class="mb-0" th:if="${tablePage.totalPages > 0}">
+                            <span th:text="${tablePage.totalCount}">0</span> row(s) —
+                            page <span th:text="${tablePage.page}">1</span> of <span th:text="${tablePage.totalPages}">1</span>
+                        </p>
+                        <p class="mb-0" th:if="${tablePage.totalPages == 0}">This table is empty.</p>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <a class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/postgres/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page - 1})}"
+                           th:if="${tablePage.hasPrev}"><i class="bi bi-chevron-left"></i> Previous</a>
+                        <a class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/postgres/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page + 1})}"
+                           th:if="${tablePage.hasNext}">Next <i class="bi bi-chevron-right"></i></a>
+                        <a class="btn btn-sm btn-outline-primary"
+                           th:href="@{/postgres/databases/{name}/tables/{tname}/export(name=${tablePage.dbName}, tname=${tablePage.tableName})}"
+                           th:if="${tablePage.totalCount > 0}">
+                            <i class="bi bi-download"></i> Export JSON
+                        </a>
+                        <a class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/postgres/databases/{name}(name=${tablePage.dbName})}">
+                            <i class="bi bi-arrow-left"></i> Back to database
+                        </a>
+                    </div>
+                </div>
+
+                <div class="card" th:if="${#lists.isEmpty(tablePage.rows)}">
+                    <div class="empty-state">
+                        <span class="empty-state-icon"><i class="bi bi-inbox"></i></span>
+                        <p class="empty-state-title">No rows in this table</p>
+                        <p class="empty-state-text">Rows will appear here once your application writes data.</p>
+                    </div>
+                </div>
+
+                <div class="card shadow-sm" th:if="${!#lists.isEmpty(tablePage.rows)}">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th th:each="col : ${tablePage.columns}" th:text="${col}">col</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr th:each="row : ${tablePage.rows}">
+                                    <td th:each="col : ${tablePage.columns}">
+                                        <span th:if="${row.get(col) == null}" class="text-body-secondary fst-italic">NULL</span>
+                                        <span th:if="${row.get(col) != null}" th:text="${row.get(col)}">value</span>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+</body>
+</html>

@@ -4,8 +4,14 @@ import com.pkmprojects.mongodbserver.dto.CreateDatabaseForm;
 import com.pkmprojects.mongodbserver.dto.DatabaseInfo;
 import com.pkmprojects.mongodbserver.dto.ResetPasswordForm;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
+import com.pkmprojects.mongodbserver.service.PostgresExplorationService;
+import com.pkmprojects.mongodbserver.service.PostgresStatisticsService;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -15,16 +21,26 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+
+import java.util.Optional;
 
 @Controller
 @RequestMapping("/postgres")
 public class PostgresController {
 
     private final ProvisioningService provisioningService;
+    private final Optional<PostgresExplorationService> explorationService;
+    private final Optional<PostgresStatisticsService> statisticsService;
 
-    public PostgresController(ProvisioningService provisioningService) {
+    public PostgresController(ProvisioningService provisioningService,
+                              @Autowired(required = false) PostgresExplorationService explorationService,
+                              @Autowired(required = false) PostgresStatisticsService statisticsService) {
         this.provisioningService = provisioningService;
+        this.explorationService = Optional.ofNullable(explorationService);
+        this.statisticsService = Optional.ofNullable(statisticsService);
     }
 
     @GetMapping
@@ -57,9 +73,51 @@ public class PostgresController {
     @GetMapping("/databases/{dbName}")
     public String detail(@PathVariable String dbName, Model model) {
         model.addAttribute("database", provisioningService.getDatabase(DatabaseEngineType.POSTGRES, dbName));
+        explorationService.ifPresent(svc -> {
+            try {
+                model.addAttribute("tables", svc.listTables(dbName));
+            } catch (Exception e) {
+                model.addAttribute("tables", java.util.List.of());
+            }
+        });
+        if (!model.containsAttribute("tables") && explorationService.isEmpty()) {
+            model.addAttribute("tables", java.util.List.of());
+        }
         model.addAttribute("engine", DatabaseEngineType.POSTGRES);
         if (!model.containsAttribute("resetForm")) model.addAttribute("resetForm", new ResetPasswordForm(""));
         return "database";
+    }
+
+    @GetMapping("/databases/{dbName}/tables/{tableName}")
+    public String tableRows(@PathVariable String dbName, @PathVariable String tableName,
+                            @RequestParam(name = "page", defaultValue = "1") int page, Model model) {
+        model.addAttribute("database", provisioningService.getDatabase(DatabaseEngineType.POSTGRES, dbName));
+        model.addAttribute("engine", DatabaseEngineType.POSTGRES);
+        var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        model.addAttribute("tablePage", svc.getRows(dbName, tableName, page));
+        return "table-rows";
+    }
+
+    @GetMapping("/databases/{dbName}/tables/{tableName}/export")
+    public ResponseEntity<StreamingResponseBody> exportTable(@PathVariable String dbName, @PathVariable String tableName) {
+        var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        // Validate before streaming so missing table yields 404 page, not truncated download
+        svc.getRows(dbName, tableName, 1);
+        String filename = dbName + "." + tableName + ".json";
+        StreamingResponseBody body = out -> svc.writeAllRowsAsJson(dbName, tableName, out);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body);
+    }
+
+    @GetMapping("/databases/{dbName}/stats")
+    public String stats(@PathVariable String dbName, Model model) {
+        model.addAttribute("database", provisioningService.getDatabase(DatabaseEngineType.POSTGRES, dbName));
+        model.addAttribute("engine", DatabaseEngineType.POSTGRES);
+        var svc = statisticsService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        model.addAttribute("pgStats", svc.getDatabaseStats(dbName));
+        return "stats-postgres";
     }
 
     @GetMapping("/databases/{dbName}/reset")

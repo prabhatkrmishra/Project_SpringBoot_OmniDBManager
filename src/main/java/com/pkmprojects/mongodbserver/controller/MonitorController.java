@@ -1,18 +1,22 @@
 package com.pkmprojects.mongodbserver.controller;
 
-import com.pkmprojects.mongodbserver.dto.MonitorSnapshot;
 import com.pkmprojects.mongodbserver.service.MonitorService;
+import com.pkmprojects.mongodbserver.service.PostgresMonitorService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -32,10 +36,13 @@ public class MonitorController {
     private static final long TICK_MILLIS = 2000;
 
     private final MonitorService monitorService;
+    private final Optional<PostgresMonitorService> postgresMonitorService;
     private final ScheduledExecutorService scheduler;
 
-    public MonitorController(MonitorService monitorService) {
+    public MonitorController(MonitorService monitorService,
+                             @Autowired(required = false) PostgresMonitorService postgresMonitorService) {
         this.monitorService = monitorService;
+        this.postgresMonitorService = Optional.ofNullable(postgresMonitorService);
         this.scheduler = Executors.newScheduledThreadPool(4, runnable -> {
             Thread thread = new Thread(runnable, "monitor-sse");
             thread.setDaemon(true);
@@ -44,14 +51,20 @@ public class MonitorController {
     }
 
     @GetMapping("/monitor")
-    public String monitor() {
+    public String monitor(@RequestParam(name = "engine", required = false) String engine, Model model) {
+        String eng = engine != null ? engine.toLowerCase() : "mongo";
+        if (!eng.equals("postgres")) eng = "mongo";
+        model.addAttribute("monitorEngine", eng);
+        model.addAttribute("postgresAvailable", postgresMonitorService.isPresent());
         return "monitor";
     }
 
     @GetMapping("/monitor/stream")
-    public ResponseEntity<SseEmitter> stream() {
+    public ResponseEntity<SseEmitter> stream(@RequestParam(name = "engine", required = false) String engine) {
+        String eng = engine != null ? engine.toLowerCase() : "mongo";
+        boolean pg = eng.equals("postgres") && postgresMonitorService.isPresent();
         SseEmitter emitter = new SseEmitter(0L);
-        ScheduledFuture<?> future = scheduler.scheduleWithFixedDelay(() -> sendTick(emitter),
+        ScheduledFuture<?> future = scheduler.scheduleWithFixedDelay(() -> sendTick(emitter, pg),
                 0, TICK_MILLIS, TimeUnit.MILLISECONDS);
         emitter.onCompletion(() -> future.cancel(true));
         emitter.onTimeout(() -> future.cancel(true));
@@ -62,10 +75,17 @@ public class MonitorController {
                 .body(emitter);
     }
 
-    private void sendTick(SseEmitter emitter) {
+    private void sendTick(SseEmitter emitter, boolean postgres) {
         try {
-            MonitorSnapshot snapshot = monitorService.getSnapshot();
-            emitter.send(SseEmitter.event().name("tick").data(monitorService.serialize(snapshot)));
+            String data;
+            if (postgres) {
+                var snapshot = postgresMonitorService.get().getSnapshot();
+                data = postgresMonitorService.get().serialize(snapshot);
+            } else {
+                var snapshot = monitorService.getSnapshot();
+                data = monitorService.serialize(snapshot);
+            }
+            emitter.send(SseEmitter.event().name("tick").data(data));
         } catch (IOException e) {
             // Client went away. The underlying response is already unusable, so
             // do not complete() it (that throws AsyncRequestNotUsableException).

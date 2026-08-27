@@ -12,10 +12,14 @@
                 <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                     <div>
                         <h1 class="mb-1">Live monitoring</h1>
-                        <p class="mb-0 text-body-secondary">Real-time activity for the connected MongoDB server,
-                            refreshed every 2 seconds.</p>
+                        <p class="mb-0 text-body-secondary" th:if="${monitorEngine == 'postgres'}">Real-time activity for the connected PostgreSQL server, refreshed every 2 seconds.</p>
+                        <p class="mb-0 text-body-secondary" th:if="${monitorEngine != 'postgres'}">Real-time activity for the connected MongoDB server, refreshed every 2 seconds.</p>
                     </div>
                     <div class="d-flex align-items-center gap-3">
+                        <div class="btn-group btn-group-sm" role="group" th:if="${postgresAvailable}">
+                            <a class="btn" th:classappend="${monitorEngine != 'postgres'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='mongo')}">MongoDB</a>
+                            <a class="btn" th:classappend="${monitorEngine == 'postgres'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='postgres')}">PostgreSQL</a>
+                        </div>
                         <span id="streamStatus" class="badge badge-soft-secondary">
                             <span id="streamDot" class="live-dot"></span> Connecting…
                         </span>
@@ -61,7 +65,8 @@
                     </div>
                 </section>
 
-                <section class="card shadow-sm mb-4" id="opsCard">
+                <!-- Mongo-only: ops / network / memory / lock -->
+                <section class="card shadow-sm mb-4" id="opsCard" th:if="${monitorEngine != 'postgres'}">
                     <div class="card-header bg-transparent d-flex align-items-center gap-2">
                         <i class="bi bi-activity text-primary"></i>
                         <span class="fw-medium">Operations</span>
@@ -103,7 +108,7 @@
                     </div>
                 </section>
 
-                <section class="row g-4 mb-4">
+                <section class="row g-4 mb-4" th:if="${monitorEngine != 'postgres'}">
                     <div class="col-lg-4">
                         <div class="card shadow-sm h-100">
                             <div class="card-header bg-transparent d-flex align-items-center gap-2">
@@ -178,7 +183,7 @@
                     </div>
                 </section>
 
-                <section class="card shadow-sm mb-4" id="lockCard">
+                <section class="card shadow-sm mb-4" id="lockCard" th:if="${monitorEngine != 'postgres'}">
                     <div class="card-header bg-transparent d-flex align-items-center gap-2">
                         <i class="bi bi-lock text-danger"></i>
                         <span class="fw-medium">Global lock</span>
@@ -225,12 +230,89 @@
                         </div>
                     </div>
                 </section>
+
+                <!-- Postgres-only: activity + transactions -->
+                <section class="row g-4 mb-4" th:if="${monitorEngine == 'postgres'}">
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                                <i class="bi bi-activity text-primary"></i>
+                                <span class="fw-medium">Activity</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Active</div>
+                                            <div class="health-metric-value" id="pgActive">—</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Idle</div>
+                                            <div class="health-metric-value" id="pgIdle">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                                <i class="bi bi-arrow-left-right text-success"></i>
+                                <span class="fw-medium">Transactions</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Committed</div>
+                                            <div class="health-metric-value" id="pgCommitted">—</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Rolled back</div>
+                                            <div class="health-metric-value" id="pgRolledBack">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                                <i class="bi bi-layers text-primary"></i>
+                                <span class="fw-medium">Databases</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Count</div>
+                                            <div class="health-metric-value" id="pgDatabaseCount">—</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Storage</div>
+                                            <div class="health-metric-value" id="pgTotalStorage">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </main>
         </div>
     </div>
 
     <script th:inline="javascript">
-        const streamUrl = /*[[@{/monitor/stream}]]*/ '/monitor/stream';
+        const monitorEngine = /*[[${monitorEngine}]]*/ 'mongo';
+        const streamUrl = /*[[@{/monitor/stream(engine=${monitorEngine})}]]*/ '/monitor/stream';
 
         const fmtNum = (n) => (n == null ? '—' : Number(n).toLocaleString());
         const fmtRate = (n) => (n == null ? '—' : Number(n).toLocaleString() + '/s');
@@ -257,46 +339,63 @@
             document.getElementById(id).textContent = value;
         }
 
+        function safeSet(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+        }
+
         function render(s) {
             if (s.reachable) {
-                set('reachableBadge', 'Online');
-                document.getElementById('reachableBadge').className = 'badge badge-soft-success';
+                safeSet('reachableBadge', 'Online');
+                const b = document.getElementById('reachableBadge');
+                if (b) b.className = 'badge badge-soft-success';
             } else {
-                set('reachableBadge', 'Unreachable');
-                document.getElementById('reachableBadge').className = 'badge badge-soft-danger';
+                safeSet('reachableBadge', 'Unreachable');
+                const b = document.getElementById('reachableBadge');
+                if (b) b.className = 'badge badge-soft-danger';
             }
-            set('versionValue', s.version || '—');
-            set('uptimeValue', fmtUptime(s.uptimeSeconds));
-            set('connectionsValue', fmtNum(s.connectionCount));
-            set('lastUpdatedValue', new Date(s.measuredAt).toLocaleTimeString());
+            safeSet('versionValue', s.version || '—');
+            safeSet('uptimeValue', fmtUptime(s.uptimeSeconds));
+            safeSet('connectionsValue', fmtNum(s.connectionCount));
+            safeSet('lastUpdatedValue', new Date(s.measuredAt).toLocaleTimeString());
+
+            if (monitorEngine === 'postgres') {
+                safeSet('pgActive', fmtNum(s.activeConnections));
+                safeSet('pgIdle', fmtNum(s.idleConnections));
+                safeSet('pgCommitted', fmtNum(s.transactionsCommitted));
+                safeSet('pgRolledBack', fmtNum(s.transactionsRolledBack));
+                safeSet('pgDatabaseCount', fmtNum(s.databaseCount));
+                safeSet('pgTotalStorage', s.totalStorageBytes == null ? '—' : formatStorage(s.totalStorageBytes));
+                return;
+            }
 
             if (s.ops) {
-                set('opsInsert', fmtRate(s.ops.insert));
-                set('opsQuery', fmtRate(s.ops.query));
-                set('opsUpdate', fmtRate(s.ops.update));
-                set('opsDelete', fmtRate(s.ops.delete));
-                set('opsCommand', fmtRate(s.ops.command));
+                safeSet('opsInsert', fmtRate(s.ops.insert));
+                safeSet('opsQuery', fmtRate(s.ops.query));
+                safeSet('opsUpdate', fmtRate(s.ops.update));
+                safeSet('opsDelete', fmtRate(s.ops.delete));
+                safeSet('opsCommand', fmtRate(s.ops.command));
             } else {
-                ['opsInsert', 'opsQuery', 'opsUpdate', 'opsDelete', 'opsCommand'].forEach(id => set(id, '—'));
+                ['opsInsert', 'opsQuery', 'opsUpdate', 'opsDelete', 'opsCommand'].forEach(id => safeSet(id, '—'));
             }
 
-            set('networkIn', s.network ? fmtBytes(s.network.bytesInPerSecond) : '—');
-            set('networkOut', s.network ? fmtBytes(s.network.bytesOutPerSecond) : '—');
-            set('memResident', s.mem ? fmtMb(s.mem.residentMb) : '—');
-            set('memVirtual', s.mem ? fmtMb(s.mem.virtualMb) : '—');
-            set('databaseCount', fmtNum(s.databaseCount));
-            set('totalStorage', s.totalStorageBytes == null ? '—' : formatStorage(s.totalStorageBytes));
+            safeSet('networkIn', s.network ? fmtBytes(s.network.bytesInPerSecond) : '—');
+            safeSet('networkOut', s.network ? fmtBytes(s.network.bytesOutPerSecond) : '—');
+            safeSet('memResident', s.mem ? fmtMb(s.mem.residentMb) : '—');
+            safeSet('memVirtual', s.mem ? fmtMb(s.mem.virtualMb) : '—');
+            safeSet('databaseCount', fmtNum(s.databaseCount));
+            safeSet('totalStorage', s.totalStorageBytes == null ? '—' : formatStorage(s.totalStorageBytes));
 
             if (s.lock) {
-                set('lockQueueTotal', fmtNum(s.lock.queueTotal));
-                set('lockQueueReaders', fmtNum(s.lock.queueReaders));
-                set('lockQueueWriters', fmtNum(s.lock.queueWriters));
-                set('lockActiveTotal', fmtNum(s.lock.activeClientsTotal));
-                set('lockActiveReaders', fmtNum(s.lock.activeClientsReaders));
-                set('lockActiveWriters', fmtNum(s.lock.activeClientsWriters));
+                safeSet('lockQueueTotal', fmtNum(s.lock.queueTotal));
+                safeSet('lockQueueReaders', fmtNum(s.lock.queueReaders));
+                safeSet('lockQueueWriters', fmtNum(s.lock.queueWriters));
+                safeSet('lockActiveTotal', fmtNum(s.lock.activeClientsTotal));
+                safeSet('lockActiveReaders', fmtNum(s.lock.activeClientsReaders));
+                safeSet('lockActiveWriters', fmtNum(s.lock.activeClientsWriters));
             } else {
                 ['lockQueueTotal', 'lockQueueReaders', 'lockQueueWriters',
-                 'lockActiveTotal', 'lockActiveReaders', 'lockActiveWriters'].forEach(id => set(id, '—'));
+                 'lockActiveTotal', 'lockActiveReaders', 'lockActiveWriters'].forEach(id => safeSet(id, '—'));
             }
         }
 

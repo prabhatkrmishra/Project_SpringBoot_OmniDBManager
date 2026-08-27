@@ -174,4 +174,82 @@ public class PostgresDatabaseRepository {
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name",
                 String.class);
     }
+
+    public boolean tableExists(String dbName, String tableName) {
+        JdbcTemplate target = jdbcFor(dbName);
+        Integer count = target.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name = ?",
+                Integer.class, tableName);
+        return count != null && count > 0;
+    }
+
+    public long countRows(String dbName, String tableName) {
+        JdbcTemplate target = jdbcFor(dbName);
+        Long count = target.queryForObject("SELECT COUNT(*) FROM " + quoteIdentifier(tableName), Long.class);
+        return count != null ? count : 0L;
+    }
+
+    public long getTableSize(String dbName, String tableName) {
+        JdbcTemplate target = jdbcFor(dbName);
+        Long size = target.queryForObject("SELECT pg_total_relation_size(?)", Long.class, quoteIdentifier(tableName));
+        return size != null ? size : 0L;
+    }
+
+    public long getTableSizeQualified(String dbName, String tableName) {
+        JdbcTemplate target = jdbcFor(dbName);
+        Long size = target.queryForObject("SELECT pg_total_relation_size(?)", Long.class, "public." + quoteIdentifier(tableName));
+        return size != null ? size : 0L;
+    }
+
+    public List<Map<String, Object>> listRows(String dbName, String tableName, int limit, int offset) {
+        JdbcTemplate target = jdbcFor(dbName);
+        String sql = "SELECT * FROM " + quoteIdentifier(tableName) + " LIMIT ? OFFSET ?";
+        return target.queryForList(sql, limit, offset);
+    }
+
+    public List<String> getTableColumns(String dbName, String tableName) {
+        JdbcTemplate target = jdbcFor(dbName);
+        return target.queryForList(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ? ORDER BY ordinal_position",
+                String.class, tableName);
+    }
+
+    public Map<String, Object> getTableStats(String dbName, String tableName) {
+        JdbcTemplate target = jdbcFor(dbName);
+        List<Map<String, Object>> rows = target.queryForList(
+                "SELECT relname, n_live_tup, n_dead_tup, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE schemaname = 'public' AND relname = ?",
+                tableName);
+        if (rows.isEmpty()) {
+            return Map.of("relname", tableName, "n_live_tup", 0L, "n_dead_tup", 0L);
+        }
+        return rows.get(0);
+    }
+
+    public List<Map<String, Object>> getAllTableStats(String dbName) {
+        JdbcTemplate target = jdbcFor(dbName);
+        return target.queryForList(
+                "SELECT relname, n_live_tup, n_dead_tup, last_vacuum, last_autovacuum, last_analyze, last_autoanalyze FROM pg_stat_user_tables WHERE schemaname = 'public' ORDER BY relname");
+    }
+
+    public JdbcTemplate getJdbcTemplate() {
+        return jdbcTemplate;
+    }
+
+    public Map<String, Object> getPostgresMonitorData() {
+        try {
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            Integer connCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM pg_stat_activity", Integer.class);
+            result.put("connectionCount", connCount != null ? connCount : 0);
+            String version = jdbcTemplate.queryForObject("SELECT current_setting('server_version')", String.class);
+            result.put("version", version);
+            java.sql.Timestamp start = jdbcTemplate.queryForObject("SELECT pg_postmaster_start_time()", java.sql.Timestamp.class);
+            if (start != null) {
+                long uptime = (System.currentTimeMillis() - start.getTime()) / 1000;
+                result.put("uptimeSeconds", uptime);
+            }
+            return result;
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
 }

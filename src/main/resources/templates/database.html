@@ -91,7 +91,7 @@
                             </div>
                             <div th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES'}">
                                 <dt>Tables</dt>
-                                <dd class="text-body-secondary">Available in Phase 3</dd>
+                                <dd th:text="${tables != null ? tables.size() : '—'}">0</dd>
                             </div>
                             <div>
                                 <dt>Storage size</dt>
@@ -167,7 +167,7 @@
                     </div>
                 </section>
 
-                <section class="card shadow-sm mb-4" th:if="${canWrite}">
+                <section class="card shadow-sm mb-4" th:if="${canWrite and (database.engineType == null or database.engineType.name() == 'MONGO')}">
                     <div class="card-body">
                         <h3 class="h6 mb-2"><i class="bi bi-folder-plus text-primary"></i> Create collection</h3>
                         <form class="d-flex gap-2 flex-wrap" method="post"
@@ -181,7 +181,7 @@
                     </div>
                 </section>
 
-                <section class="card shadow-sm mb-4">
+                <section class="card shadow-sm mb-4" th:if="${database.engineType == null or database.engineType.name() == 'MONGO'}">
                     <div class="card-header bg-transparent">
                         <h3 class="h6 mb-0"><i class="bi bi-collection text-primary"></i> Collections</h3>
                     </div>
@@ -218,6 +218,47 @@
                                                     <i class="bi bi-trash"></i> Drop
                                                 </button>
                                             </form>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-4" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES'}">
+                    <div class="card-header bg-transparent">
+                        <h3 class="h6 mb-0"><i class="bi bi-table text-primary"></i> Tables</h3>
+                    </div>
+                    <div class="card-body p-0">
+                        <p class="text-body-secondary p-3 mb-0" th:if="${tables == null or #lists.isEmpty(tables)}">
+                            This database has no tables yet.
+                        </p>
+                        <div class="table-responsive" th:if="${tables != null and !#lists.isEmpty(tables)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Table</th>
+                                        <th class="text-end">Rows</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="table : ${tables}">
+                                        <td>
+                                            <i class="bi bi-table text-primary me-1"></i>
+                                            <span th:text="${table.name}">table</span>
+                                        </td>
+                                        <td class="text-end" th:text="${table.rowCount}">0</td>
+                                        <td class="text-end text-nowrap">
+                                            <a class="btn btn-sm btn-outline-primary"
+                                               th:href="@{/postgres/databases/{name}/tables/{tname}(name=${database.dbName}, tname=${table.name})}">
+                                                <i class="bi bi-search"></i> Browse
+                                            </a>
+                                            <a class="btn btn-sm btn-outline-secondary"
+                                               th:href="@{/postgres/databases/{name}/tables/{tname}/export(name=${database.dbName}, tname=${table.name})}">
+                                                <i class="bi bi-download"></i> Export
+                                            </a>
                                         </td>
                                     </tr>
                                 </tbody>
