@@ -112,6 +112,10 @@ public class PostgresDatabaseRepository {
         jdbcTemplate.queryForObject("SELECT 1", Integer.class);
     }
 
+    public String getVersion() {
+        return jdbcTemplate.queryForObject("SHOW server_version", String.class);
+    }
+
     public void createDatabase(String dbName, String owner) {
         String sql = "CREATE DATABASE " + quoteIdentifier(dbName)
                 + " OWNER " + quoteIdentifier(owner)

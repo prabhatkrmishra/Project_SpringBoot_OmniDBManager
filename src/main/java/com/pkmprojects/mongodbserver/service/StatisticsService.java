@@ -84,15 +84,11 @@ public class StatisticsService {
         if (collectionNames.size() <= 1) {
             return collectionNames.stream().map(name -> collectionStats(dbName, name)).toList();
         }
-        int threads = Math.min(collectionNames.size(), MAX_PARALLEL_COLLECTIONS);
-        ExecutorService executor = Executors.newFixedThreadPool(threads);
-        try {
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<CompletableFuture<CollectionStats>> futures = collectionNames.stream()
                     .map(name -> CompletableFuture.supplyAsync(() -> collectionStats(dbName, name), executor))
                     .toList();
             return futures.stream().map(StatisticsService::joinUnwrapping).toList();
-        } finally {
-            executor.shutdown();
         }
     }
 

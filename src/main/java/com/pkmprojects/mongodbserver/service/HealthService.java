@@ -3,21 +3,24 @@ package com.pkmprojects.mongodbserver.service;
 import com.mongodb.MongoException;
 import com.pkmprojects.mongodbserver.dto.ServerHealth;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
+import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * Assembles MongoDB server health metrics for the health dashboard.
+ * Assembles server health metrics for the health dashboard.
  *
- * <p>Reachability comes from {@code ping}, which any authenticated user can
- * run. Version/uptime/connections require {@code serverStatus} (admin or
- * {@code clusterMonitor} privileges) and degrade to {@code null} when the
- * connected user lacks them. Database count/storage come from the same
- * {@code listDatabases} calls the rest of the app uses.
+ * <p>Mongo reachability comes from {@code ping}; Postgres reachability from
+ * {@code SELECT 1} when {@code app.postgres.enabled=true}. Version/uptime/
+ * connections require {@code serverStatus} and degrade to {@code null} when
+ * unavailable.</p>
  */
 @Service
 public class HealthService {
@@ -25,18 +28,24 @@ public class HealthService {
     private static final Logger log = LoggerFactory.getLogger(HealthService.class);
 
     private final MongoDatabaseRepository mongoDatabaseRepository;
+    private final Optional<PostgresDatabaseRepository> postgresRepository;
+    private final boolean postgresEnabled;
 
-    public HealthService(MongoDatabaseRepository mongoDatabaseRepository) {
+    public HealthService(MongoDatabaseRepository mongoDatabaseRepository,
+                         @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
+                         @Value("${app.postgres.enabled:false}") boolean postgresEnabled) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
+        this.postgresRepository = Optional.ofNullable(postgresRepository);
+        this.postgresEnabled = postgresEnabled;
     }
 
     public ServerHealth getHealth() {
-        boolean reachable = ping();
+        boolean mongoReachable = pingMongo();
 
         String version = null;
         Long uptimeSeconds = null;
         Integer connectionCount = null;
-        if (reachable) {
+        if (mongoReachable) {
             try {
                 Document status = mongoDatabaseRepository.getServerStatus();
                 version = status.getString("version");
@@ -53,7 +62,7 @@ public class HealthService {
 
         int databaseCount = 0;
         Long totalStorageBytes = null;
-        if (reachable) {
+        if (mongoReachable) {
             try {
                 Map<String, Long> sizes = mongoDatabaseRepository.getDatabaseSizes();
                 databaseCount = sizes.size();
@@ -63,10 +72,27 @@ public class HealthService {
             }
         }
 
-        return new ServerHealth(reachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount);
+        boolean postgresReachable = false;
+        String postgresVersion = null;
+        if (postgresEnabled && postgresRepository.isPresent()) {
+            try {
+                postgresRepository.get().ping();
+                postgresReachable = true;
+                try {
+                    postgresVersion = postgresRepository.get().getVersion();
+                } catch (Exception e) {
+                    log.debug("Could not read Postgres version", e);
+                }
+            } catch (Exception e) {
+                log.warn("Postgres ping failed", e);
+            }
+        }
+
+        return new ServerHealth(mongoReachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
+                mongoReachable, postgresReachable, postgresVersion, postgresEnabled);
     }
 
-    private boolean ping() {
+    private boolean pingMongo() {
         try {
             mongoDatabaseRepository.ping();
             return true;

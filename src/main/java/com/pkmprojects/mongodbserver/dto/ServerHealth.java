@@ -4,6 +4,10 @@ package com.pkmprojects.mongodbserver.dto;
  * View model for the health dashboard. Metrics that require elevated MongoDB
  * privileges (version, uptime, connections) are {@code null} when unavailable
  * rather than failing the page.
+ *
+ * <p>Phase 2 adds per-engine reachability: {@code mongoReachable} and
+ * {@code postgresReachable}. {@code reachable} is kept as an alias for
+ * {@code mongoReachable} for backward compat.</p>
  */
 public record ServerHealth(
         boolean reachable,
@@ -11,7 +15,20 @@ public record ServerHealth(
         Long uptimeSeconds,
         int databaseCount,
         Long totalStorageBytes,
-        Integer connectionCount) {
+        Integer connectionCount,
+        boolean mongoReachable,
+        boolean postgresReachable,
+        String postgresVersion,
+        boolean postgresEnabled) {
+
+    /**
+     * Legacy constructor — defaults postgres fields to disabled.
+     */
+    public ServerHealth(boolean reachable, String version, Long uptimeSeconds,
+                        int databaseCount, Long totalStorageBytes, Integer connectionCount) {
+        this(reachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
+                reachable, false, null, false);
+    }
 
     /**
      * Human-readable uptime (e.g. {@code 3d 4h 12m}), or {@code null} when unknown.

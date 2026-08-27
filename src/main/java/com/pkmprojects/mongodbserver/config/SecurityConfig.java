@@ -40,6 +40,7 @@ public class SecurityConfig {
                                 "/databases/*/collections/*/import").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/databases", "/databases/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/mongo/databases/**", "/postgres/databases/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/mongo/**", "/postgres/**").authenticated()
                         .requestMatchers("/webhooks", "/webhooks/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 // The proxied UIs have their own CSRF protection; Spring's token would otherwise reject their POSTs.

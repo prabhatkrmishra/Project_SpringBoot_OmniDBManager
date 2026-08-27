@@ -1,6 +1,7 @@
 package com.pkmprojects.mongodbserver.controller;
 
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
+import com.pkmprojects.mongodbserver.service.HealthService;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -14,10 +15,13 @@ public class DashboardController {
 
     private final ProvisioningService provisioningService;
     private final AuditLogRepository auditLogRepository;
+    private final HealthService healthService;
 
-    public DashboardController(ProvisioningService provisioningService, AuditLogRepository auditLogRepository) {
+    public DashboardController(ProvisioningService provisioningService, AuditLogRepository auditLogRepository,
+                               HealthService healthService) {
         this.provisioningService = provisioningService;
         this.auditLogRepository = auditLogRepository;
+        this.healthService = healthService;
     }
 
     /**
@@ -37,6 +41,10 @@ public class DashboardController {
             model.addAttribute("postgresCount", 0);
         }
         model.addAttribute("mongoCount", mongoDbs.size());
+        var health = healthService.getHealth();
+        model.addAttribute("mongoReachable", health.mongoReachable());
+        model.addAttribute("postgresReachable", health.postgresReachable());
+        model.addAttribute("postgresEnabled", health.postgresEnabled());
         model.addAttribute("recentActivity", auditLogRepository.findTop10ByOrderByPerformedAtDesc());
         model.addAttribute("engine", null);
         return "index";

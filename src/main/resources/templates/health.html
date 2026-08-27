@@ -11,24 +11,23 @@
             <main class="container-xxl py-4">
                 <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                     <div>
-                        <h1 class="mb-1">MongoDB health</h1>
-                        <p class="mb-0 text-body-secondary">Reachability and metrics for the connected MongoDB
-                            server.</p>
+                        <h1 class="mb-1">Server health</h1>
+                        <p class="mb-0 text-body-secondary">Reachability and metrics per engine.</p>
                     </div>
                     <a class="btn btn-sm btn-outline-secondary" th:href="@{/}">
                         <i class="bi bi-arrow-left"></i> Dashboard
                     </a>
                 </div>
 
-                <section class="card shadow-sm mb-4" th:if="${health.reachable}">
+                <!-- MongoDB -->
+                <section class="card shadow-sm mb-4">
                     <div class="card-header bg-transparent d-flex align-items-center gap-2">
-                        <i class="bi bi-broadcast text-success"></i>
-                        <span class="fw-medium">Connected</span>
-                        <span class="badge badge-soft-success ms-auto">
-                            <i class="bi bi-check-circle me-1"></i>Reachable
-                        </span>
+                        <i class="bi bi-database text-primary"></i>
+                        <span class="fw-medium">MongoDB</span>
+                        <span class="ms-2" th:class="${health.mongoReachable} ? 'live-dot' : 'live-dot-off'"></span>
+                        <span class="badge ms-auto" th:classappend="${health.mongoReachable} ? 'badge-soft-success' : 'badge-soft-danger'" th:text="${health.mongoReachable} ? 'Reachable' : 'Unreachable'">Reachable</span>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body" th:if="${health.mongoReachable}">
                         <div class="row g-3">
                             <div class="col-sm-6 col-lg-3">
                                 <div class="health-metric">
@@ -62,32 +61,46 @@
                             <code>serverStatus</code> privileges.
                         </p>
                     </div>
-                </section>
-
-                <section class="card shadow-sm mb-4" th:if="${!health.reachable}">
-                    <div class="card-body text-center py-5">
-                        <div class="empty-state-icon text-danger mb-3">
-                            <i class="bi bi-exclamation-triangle"></i>
-                        </div>
-                        <h2 class="h5 text-danger mb-2">MongoDB unreachable</h2>
-                        <p class="text-body-secondary mb-0">The server could not be reached. Check that MongoDB is
-                            running and the configured credentials are valid.</p>
+                    <div class="card-body text-center py-4" th:if="${!health.mongoReachable}">
+                        <p class="text-body-secondary mb-0">MongoDB could not be reached. Check that it is running and credentials are valid.</p>
                     </div>
-                </section>
-
-                <section class="card shadow-sm mb-4" th:if="${health.reachable}">
-                    <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                    <div class="card-footer bg-transparent d-flex align-items-center gap-2" th:if="${health.mongoReachable}">
                         <i class="bi bi-database text-primary"></i>
                         <span class="fw-medium">Databases</span>
-                        <span class="badge badge-soft-info ms-auto"
-                              th:text="${health.databaseCount} + ' on server'">0 on server</span>
+                        <span class="badge badge-soft-info ms-auto" th:text="${health.databaseCount} + ' on server'">0 on server</span>
                     </div>
-                    <div class="card-body">
-                        <p class="text-body-secondary mb-0">
-                            <i class="bi bi-arrow-right me-1"></i>
-                            Manage databases and their users from the
-                            <a class="link-primary" th:href="@{/}">dashboard</a>.
-                        </p>
+                </section>
+
+                <!-- PostgreSQL -->
+                <section class="card shadow-sm mb-4">
+                    <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                        <i class="bi bi-server" style="color:#336791"></i>
+                        <span class="fw-medium">PostgreSQL</span>
+                        <span class="ms-2" th:class="${health.postgresReachable} ? 'live-dot' : 'live-dot-off'"></span>
+                        <span class="badge ms-auto" th:classappend="${health.postgresReachable} ? 'badge-soft-success' : 'badge-soft-danger'" th:text="${health.postgresReachable} ? 'Reachable' : 'Unreachable'">Unreachable</span>
+                        <span class="badge badge-soft-secondary ms-2" th:if="${!health.postgresEnabled}">disabled</span>
+                    </div>
+                    <div class="card-body" th:if="${health.postgresReachable}">
+                        <div class="row g-3">
+                            <div class="col-sm-6 col-lg-6">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Version</div>
+                                    <div class="health-metric-value" th:text="${health.postgresVersion} ?: '—'">-</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-lg-6">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Status</div>
+                                    <div class="health-metric-value text-success">Connected</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body text-center py-4" th:if="${!health.postgresReachable and health.postgresEnabled}">
+                        <p class="text-body-secondary mb-0">PostgreSQL could not be reached. Check that it is running and <code>POSTGRES_ENABLED=true</code> is set.</p>
+                    </div>
+                    <div class="card-body text-center py-4" th:if="${!health.postgresEnabled}">
+                        <p class="text-body-secondary mb-0">PostgreSQL is disabled. Set <code>POSTGRES_ENABLED=true</code> to enable.</p>
                     </div>
                 </section>
             </main>

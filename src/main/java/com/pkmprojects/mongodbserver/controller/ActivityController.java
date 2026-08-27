@@ -40,13 +40,14 @@ public class ActivityController {
     @GetMapping("/activity")
     public String activity(@RequestParam(name = "page", defaultValue = "1") int page,
                            @RequestParam(name = "eventType", required = false) String eventType,
+                           @RequestParam(name = "engineType", required = false) String engineType,
                            @RequestParam(name = "dbName", required = false) String dbName,
                            @RequestParam(name = "userName", required = false) String userName,
                            @RequestParam(name = "performedBy", required = false) String performedBy,
                            Model model) {
         int safePage = Math.max(page, 1);
 
-        Query query = buildFilterQuery(eventType, dbName, userName, performedBy);
+        Query query = buildFilterQuery(eventType, engineType, dbName, userName, performedBy);
         long total = mongoTemplate.count(query, AuditEvent.class);
         int totalPages = Math.max((int) Math.ceil((double) total / PAGE_SIZE), 1);
         int safePageIndex = Math.min(safePage - 1, totalPages - 1);
@@ -61,6 +62,7 @@ public class ActivityController {
         model.addAttribute("hasPrev", safePageIndex > 0);
         model.addAttribute("hasNext", safePageIndex < totalPages - 1);
         model.addAttribute("eventType", eventType != null ? eventType : "");
+        model.addAttribute("engineType", engineType != null ? engineType : "");
         model.addAttribute("dbName", dbName != null ? dbName : "");
         model.addAttribute("userName", userName != null ? userName : "");
         model.addAttribute("performedBy", performedBy != null ? performedBy : "");
@@ -71,10 +73,13 @@ public class ActivityController {
      * Builds a MongoDB query from optional filter parameters. Text fields use
      * case-insensitive "contains" matching with regex-escaped input.
      */
-    private Query buildFilterQuery(String eventType, String dbName, String userName, String performedBy) {
+    private Query buildFilterQuery(String eventType, String engineType, String dbName, String userName, String performedBy) {
         List<Criteria> criteria = new ArrayList<>();
         if (eventType != null && !eventType.isBlank()) {
             criteria.add(Criteria.where("eventType").is(eventType.trim()));
+        }
+        if (engineType != null && !engineType.isBlank()) {
+            criteria.add(Criteria.where("engineType").is(engineType.trim()));
         }
         if (dbName != null && !dbName.isBlank()) {
             criteria.add(Criteria.where("dbName").regex(containsPattern(dbName.trim()), "i"));

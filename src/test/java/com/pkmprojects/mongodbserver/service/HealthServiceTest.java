@@ -33,7 +33,7 @@ class HealthServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new HealthService(mongoDatabaseRepository);
+        service = new HealthService(mongoDatabaseRepository, null, false);
     }
 
     @Test

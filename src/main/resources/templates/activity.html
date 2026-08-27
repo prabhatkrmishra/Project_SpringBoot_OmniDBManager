@@ -30,7 +30,7 @@
                     </div>
                     <div class="card-body">
                         <form class="row g-2 align-items-end" method="get" th:action="@{/activity}">
-                            <div class="col-sm-6 col-md-3">
+                            <div class="col-sm-6 col-md-2">
                                 <label class="form-label" for="filterEventType">Action</label>
                                 <select class="form-select form-select-sm" id="filterEventType" name="eventType">
                                     <option value="">All actions</option>
@@ -46,7 +46,15 @@
                                     <option value="IMPORT" th:selected="${eventType == 'IMPORT'}">Import</option>
                                 </select>
                             </div>
-                            <div class="col-sm-6 col-md-3">
+                            <div class="col-sm-6 col-md-2">
+                                <label class="form-label" for="filterEngineType">Engine</label>
+                                <select class="form-select form-select-sm" id="filterEngineType" name="engineType">
+                                    <option value="">All engines</option>
+                                    <option value="MONGO" th:selected="${engineType == 'MONGO'}">MongoDB</option>
+                                    <option value="POSTGRES" th:selected="${engineType == 'POSTGRES'}">PostgreSQL</option>
+                                </select>
+                            </div>
+                            <div class="col-sm-6 col-md-2">
                                 <label class="form-label" for="filterDbName">Database</label>
                                 <input class="form-control form-control-sm" id="filterDbName" name="dbName"
                                        placeholder="e.g. myapp" type="text" th:value="${dbName}">
@@ -85,6 +93,7 @@
                                 <thead>
                                     <tr>
                                         <th>Action</th>
+                                        <th>Engine</th>
                                         <th>Database</th>
                                         <th>User</th>
                                         <th>By</th>
@@ -98,6 +107,7 @@
                                         : (${event.eventType == 'PROVISION'} ? 'badge badge-soft-success' : 'badge badge-soft-info')"
                                           th:text="${#strings.replace(event.eventType, '_', ' ')}">PROVISION</span>
                                         </td>
+                                        <td><span class="badge badge-soft-secondary" th:text="${event.engineType} ?: '—'">MONGO</span></td>
                                         <td th:text="${event.dbName}">myapp</td>
                                         <td th:text="${event.userName} ?: '—'">appuser</td>
                                         <td th:text="${event.performedBy}">admin</td>
@@ -110,13 +120,13 @@
                     <div class="card-footer bg-transparent d-flex justify-content-between align-items-center"
                          th:if="${!#lists.isEmpty(events)}">
                         <a class="btn btn-sm btn-outline-secondary"
-                           th:href="@{/activity(page=${page - 1}, eventType=${eventType}, dbName=${dbName}, userName=${userName}, performedBy=${performedBy})}"
+                           th:href="@{/activity(page=${page - 1}, eventType=${eventType}, engineType=${engineType}, dbName=${dbName}, userName=${userName}, performedBy=${performedBy})}"
                            th:if="${hasPrev}">
                             <i class="bi bi-chevron-left"></i> Previous
                         </a>
                         <span class="text-body-secondary small" th:text="'Page ' + ${page} + ' of ' + ${totalPages}">Page 1 of 1</span>
                         <a class="btn btn-sm btn-outline-secondary"
-                           th:href="@{/activity(page=${page + 1}, eventType=${eventType}, dbName=${dbName}, userName=${userName}, performedBy=${performedBy})}"
+                           th:href="@{/activity(page=${page + 1}, eventType=${eventType}, engineType=${engineType}, dbName=${dbName}, userName=${userName}, performedBy=${performedBy})}"
                            th:if="${hasNext}">
                             Next <i class="bi bi-chevron-right"></i>
                         </a>
