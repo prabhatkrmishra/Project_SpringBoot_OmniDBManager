@@ -50,6 +50,36 @@
                     </div>
                 </div>
 
+                <section class="card shadow-sm mb-4" th:if="${canWrite}">
+                    <div class="card-header bg-transparent">
+                        <h3 class="h6 mb-0"><i class="bi bi-plus-circle text-primary"></i> Insert row</h3>
+                    </div>
+                    <div class="card-body">
+                        <form class="row g-2 align-items-end" method="post"
+                              th:action="@{/postgres/databases/{name}/tables/{tname}/rows(name=${tablePage.dbName}, tname=${tablePage.tableName})}">
+                            <div class="col-sm-6 col-md-4" th:each="col : ${tablePage.columns}">
+                                <label class="form-label small mb-1" th:text="${col}">col</label>
+                                <input class="form-control form-control-sm" th:name="${col}" th:placeholder="${col}" type="text">
+                            </div>
+                            <div class="col-12" th:if="${#lists.isEmpty(tablePage.columns)}">
+                                <p class="text-body-secondary small mb-0">This table has no columns yet — insert will create an empty row. Add columns via the first insert by typing a new column name below.</p>
+                            </div>
+                            <div class="col-sm-6 col-md-4">
+                                <label class="form-label small mb-1">New column (optional)</label>
+                                <input class="form-control form-control-sm" name="__new_col" placeholder="new column name" type="text">
+                            </div>
+                            <div class="col-sm-6 col-md-4">
+                                <label class="form-label small mb-1">Value for new column</label>
+                                <input class="form-control form-control-sm" name="__new_val" placeholder="value" type="text">
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-plus-lg"></i> Insert</button>
+                            </div>
+                        </form>
+                        <p class="text-body-secondary small mb-0 mt-2">Leave blank for NULL. A new column name creates a TEXT column automatically.</p>
+                    </div>
+                </section>
+
                 <div class="card" th:if="${#lists.isEmpty(tablePage.rows)}">
                     <div class="empty-state">
                         <span class="empty-state-icon"><i class="bi bi-inbox"></i></span>
@@ -64,6 +94,7 @@
                             <thead>
                                 <tr>
                                     <th th:each="col : ${tablePage.columns}" th:text="${col}">col</th>
+                                    <th th:if="${canWrite}" class="text-end">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -71,6 +102,14 @@
                                     <td th:each="col : ${tablePage.columns}">
                                         <span th:if="${row.get(col) == null}" class="text-body-secondary fst-italic">NULL</span>
                                         <span th:if="${row.get(col) != null}" th:text="${row.get(col)}">value</span>
+                                    </td>
+                                    <td th:if="${canWrite}" class="text-end text-nowrap">
+                                        <form class="d-inline" method="post"
+                                              th:action="@{/postgres/databases/{name}/tables/{tname}/rows/delete(name=${tablePage.dbName}, tname=${tablePage.tableName})}"
+                                              th:attr="data-confirm='Delete this row? This cannot be undone.'">
+                                            <input type="hidden" name="ctid" th:value="${row.get('__pg_ctid')}">
+                                            <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+                                        </form>
                                     </td>
                                 </tr>
                             </tbody>

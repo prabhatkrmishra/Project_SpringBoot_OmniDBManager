@@ -54,6 +54,11 @@ public class AuditEvent {
      * Event type: documents were bulk-imported into a collection.
      */
     public static final String IMPORT = "IMPORT";
+    public static final String TABLE_CREATED = "TABLE_CREATED";
+    public static final String TABLE_DROPPED = "TABLE_DROPPED";
+    public static final String TABLE_TRUNCATED = "TABLE_TRUNCATED";
+    public static final String ROW_INSERTED = "ROW_INSERTED";
+    public static final String ROW_DELETED = "ROW_DELETED";
 
     /**
      * Every event type, in display order. Used by the activity filter and the
@@ -62,7 +67,8 @@ public class AuditEvent {
     public static final List<String> ALL_TYPES = List.of(
             PROVISION, RESET_PASSWORD, DELETE, REVOKE_USER,
             WEBHOOK_CREATED, WEBHOOK_UPDATED, WEBHOOK_DELETED,
-            BACKUP_CREATED, BACKUP_RESTORED, IMPORT);
+            BACKUP_CREATED, BACKUP_RESTORED, IMPORT,
+            TABLE_CREATED, TABLE_DROPPED, TABLE_TRUNCATED, ROW_INSERTED, ROW_DELETED);
 
     @Id
     private String id;

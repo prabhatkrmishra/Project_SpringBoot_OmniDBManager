@@ -38,12 +38,17 @@ public class ProvisionRateLimitFilter extends OncePerRequestFilter {
                 || path.matches(".*/(mongo|postgres)/databases/[^/]+/users/[^/]+/delete")
                 || path.matches(".*/databases/[^/]+/delete")
                 || path.matches(".*/databases/[^/]+/users/[^/]+/delete")
-                || path.matches(".*/databases/[^/]+/collections/[^/]+/delete");
+                || path.matches(".*/databases/[^/]+/collections/[^/]+/delete")
+                || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/delete")
+                || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/rows/delete");
         boolean isBackupRestore = path.matches(".*/(mongo|postgres)/databases/[^/]+/(backup|restore)")
                 || path.matches(".*/databases/[^/]+/(backup|restore)");
         boolean isCollectionCreate = path.matches(".*/databases/[^/]+/collections");
         boolean isImport = path.matches(".*/databases/[^/]+/collections/[^/]+/import");
-        return !(isProvision || isReset || isDelete || isBackupRestore || isCollectionCreate || isImport);
+        boolean isPgTableWrite = path.matches(".*/postgres/databases/[^/]+/tables")
+                || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/truncate")
+                || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/rows");
+        return !(isProvision || isReset || isDelete || isBackupRestore || isCollectionCreate || isImport || isPgTableWrite);
     }
 
     @Override

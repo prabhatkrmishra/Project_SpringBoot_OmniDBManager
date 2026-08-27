@@ -44,6 +44,11 @@
                                     <option value="BACKUP_CREATED" th:selected="${eventType == 'BACKUP_CREATED'}">Backup</option>
                                     <option value="BACKUP_RESTORED" th:selected="${eventType == 'BACKUP_RESTORED'}">Restore</option>
                                     <option value="IMPORT" th:selected="${eventType == 'IMPORT'}">Import</option>
+                                    <option value="TABLE_CREATED" th:selected="${eventType == 'TABLE_CREATED'}">Table created</option>
+                                    <option value="TABLE_DROPPED" th:selected="${eventType == 'TABLE_DROPPED'}">Table dropped</option>
+                                    <option value="TABLE_TRUNCATED" th:selected="${eventType == 'TABLE_TRUNCATED'}">Table truncated</option>
+                                    <option value="ROW_INSERTED" th:selected="${eventType == 'ROW_INSERTED'}">Row inserted</option>
+                                    <option value="ROW_DELETED" th:selected="${eventType == 'ROW_DELETED'}">Row deleted</option>
                                 </select>
                             </div>
                             <div class="col-sm-6 col-md-2">

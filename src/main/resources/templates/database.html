@@ -226,6 +226,23 @@
                     </div>
                 </section>
 
+                <section class="card shadow-sm mb-4" th:if="${canWrite and database.engineType != null and database.engineType.name() == 'POSTGRES'}">
+                    <div class="card-body">
+                        <h3 class="h6 mb-2"><i class="bi bi-table text-primary"></i> Create table</h3>
+                        <form class="d-flex gap-2 flex-wrap" method="post"
+                              th:action="@{/postgres/databases/{name}/tables(name=${database.dbName})}">
+                            <input aria-label="Table name" class="form-control collection-name-input" maxlength="63"
+                                   name="tableName" placeholder="table name" required type="text">
+                            <input aria-label="Columns" class="form-control" name="columns"
+                                   placeholder="columns comma-separated (optional, TEXT)" type="text">
+                            <button class="btn btn-primary btn-sm" type="submit">
+                                <i class="bi bi-plus-lg"></i> Create
+                            </button>
+                        </form>
+                        <p class="text-body-secondary small mb-0 mt-2">Columns are created as TEXT; new columns are added automatically when inserting rows.</p>
+                    </div>
+                </section>
+
                 <section class="card shadow-sm mb-4" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES'}">
                     <div class="card-header bg-transparent">
                         <h3 class="h6 mb-0"><i class="bi bi-table text-primary"></i> Tables</h3>
@@ -259,6 +276,20 @@
                                                th:href="@{/postgres/databases/{name}/tables/{tname}/export(name=${database.dbName}, tname=${table.name})}">
                                                 <i class="bi bi-download"></i> Export
                                             </a>
+                                            <form class="d-inline" method="post"
+                                                  th:action="@{/postgres/databases/{name}/tables/{tname}/truncate(name=${database.dbName}, tname=${table.name})}"
+                                                  th:attr="data-confirm='Truncate table ' + ${table.name} + '? All rows will be deleted.'">
+                                                <button class="btn btn-sm btn-outline-warning" th:if="${canWrite}" type="submit">
+                                                    <i class="bi bi-eraser"></i> Truncate
+                                                </button>
+                                            </form>
+                                            <form class="d-inline" method="post"
+                                                  th:action="@{/postgres/databases/{name}/tables/{tname}/delete(name=${database.dbName}, tname=${table.name})}"
+                                                  th:attr="data-confirm='Drop table ' + ${table.name} + '? This cannot be undone.'">
+                                                <button class="btn btn-sm btn-outline-danger" th:if="${canWrite}" type="submit">
+                                                    <i class="bi bi-trash"></i> Drop
+                                                </button>
+                                            </form>
                                         </td>
                                     </tr>
                                 </tbody>

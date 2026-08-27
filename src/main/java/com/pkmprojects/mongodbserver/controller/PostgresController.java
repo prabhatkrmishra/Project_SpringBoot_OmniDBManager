@@ -104,6 +104,98 @@ public class PostgresController {
         return "database";
     }
 
+    @PostMapping("/databases/{dbName}/tables")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String createTable(@PathVariable String dbName,
+                              @RequestParam("tableName") String tableName,
+                              @RequestParam(value = "columns", required = false) String columns,
+                              RedirectAttributes redirectAttributes) {
+        var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        try {
+            java.util.List<String> cols = columns == null || columns.isBlank() ? java.util.List.of()
+                    : java.util.Arrays.stream(columns.split(",")).map(String::trim).filter(s -> !s.isBlank()).toList();
+            svc.createTable(dbName, tableName.trim(), cols);
+            redirectAttributes.addFlashAttribute("flashSuccess", "Table '" + tableName.trim() + "' created");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+        }
+        return "redirect:/postgres/databases/" + dbName;
+    }
+
+    @PostMapping("/databases/{dbName}/tables/{tableName}/delete")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String dropTable(@PathVariable String dbName, @PathVariable String tableName, RedirectAttributes redirectAttributes) {
+        var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        try {
+            svc.dropTable(dbName, tableName);
+            redirectAttributes.addFlashAttribute("flashSuccess", "Table '" + tableName + "' dropped");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+        }
+        return "redirect:/postgres/databases/" + dbName;
+    }
+
+    @PostMapping("/databases/{dbName}/tables/{tableName}/truncate")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String truncateTable(@PathVariable String dbName, @PathVariable String tableName, RedirectAttributes redirectAttributes) {
+        var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        try {
+            svc.truncateTable(dbName, tableName);
+            redirectAttributes.addFlashAttribute("flashSuccess", "Table '" + tableName + "' truncated");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+        }
+        return "redirect:/postgres/databases/" + dbName;
+    }
+
+    @PostMapping("/databases/{dbName}/tables/{tableName}/rows")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String insertRow(@PathVariable String dbName, @PathVariable String tableName,
+                            @RequestParam java.util.Map<String, String> allParams,
+                            RedirectAttributes redirectAttributes) {
+        var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        try {
+            String newCol = allParams.get("__new_col");
+            String newVal = allParams.get("__new_val");
+            java.util.Map<String, Object> values = new java.util.LinkedHashMap<>();
+            for (var e : allParams.entrySet()) {
+                String k = e.getKey();
+                if (k.equals("_csrf") || k.equals("ctid") || k.equals("__ctid") || k.equals("__pg_ctid") || k.equals("__new_col") || k.equals("__new_val")) continue;
+                String v = e.getValue();
+                if (v != null && !v.isBlank()) values.put(k, v);
+                else if (v != null) values.put(k, null);
+            }
+            if (newCol != null && !newCol.isBlank()) {
+                String nc = newCol.trim();
+                Object nv = (newVal != null && !newVal.isBlank()) ? newVal : null;
+                values.put(nc, nv);
+            }
+            if (values.isEmpty()) throw new com.pkmprojects.mongodbserver.error.NameNotAllowedException("Enter at least one column value");
+            boolean hasValue = values.values().stream().anyMatch(v -> v != null);
+            if (!hasValue) throw new com.pkmprojects.mongodbserver.error.NameNotAllowedException("Enter at least one non-empty value");
+            svc.insertRow(dbName, tableName, values);
+            redirectAttributes.addFlashAttribute("flashSuccess", "Row inserted into '" + tableName + "'");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+        }
+        return "redirect:/postgres/databases/" + dbName + "/tables/" + tableName;
+    }
+
+    @PostMapping("/databases/{dbName}/tables/{tableName}/rows/delete")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String deleteRow(@PathVariable String dbName, @PathVariable String tableName,
+                            @RequestParam("ctid") String ctid,
+                            RedirectAttributes redirectAttributes) {
+        var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        try {
+            svc.deleteRow(dbName, tableName, ctid);
+            redirectAttributes.addFlashAttribute("flashSuccess", "Row deleted from '" + tableName + "'");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+        }
+        return "redirect:/postgres/databases/" + dbName + "/tables/" + tableName;
+    }
+
     @GetMapping("/databases/{dbName}/tables/{tableName}")
     public String tableRows(@PathVariable String dbName, @PathVariable String tableName,
                             @RequestParam(name = "page", defaultValue = "1") int page, Model model) {

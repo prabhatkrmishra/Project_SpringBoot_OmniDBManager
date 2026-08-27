@@ -2,19 +2,29 @@ package com.pkmprojects.mongodbserver.service;
 
 import com.pkmprojects.mongodbserver.dto.TableInfo;
 import com.pkmprojects.mongodbserver.dto.TableRowPage;
+import com.pkmprojects.mongodbserver.error.DatabaseAlreadyExistsException;
 import com.pkmprojects.mongodbserver.error.DatabaseNotFoundException;
+import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.error.ProvisioningException;
+import com.pkmprojects.mongodbserver.model.AuditEvent;
+import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
+import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
+import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import com.pkmprojects.mongodbserver.util.Json;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 
@@ -31,11 +41,28 @@ public class PostgresExplorationService {
 
     private final PostgresDatabaseRepository postgresRepository;
     private final DatabaseNameValidator nameValidator;
+    private final AuditLogRepository auditLogRepository;
+    private final ApplicationEventPublisher publisher;
+    private final DatabaseLockRegistry locks;
+    private final Clock clock;
 
     public PostgresExplorationService(@Autowired(required = false) PostgresDatabaseRepository postgresRepository,
-                                      DatabaseNameValidator nameValidator) {
+                                      DatabaseNameValidator nameValidator,
+                                      @Autowired(required = false) AuditLogRepository auditLogRepository,
+                                      @Autowired(required = false) ApplicationEventPublisher publisher,
+                                      DatabaseLockRegistry locks,
+                                      Clock clock) {
         this.postgresRepository = postgresRepository;
         this.nameValidator = nameValidator;
+        this.auditLogRepository = auditLogRepository;
+        this.publisher = publisher;
+        this.locks = locks;
+        this.clock = clock;
+    }
+
+    public PostgresExplorationService(PostgresDatabaseRepository postgresRepository,
+                                      DatabaseNameValidator nameValidator) {
+        this(postgresRepository, nameValidator, null, null, new DatabaseLockRegistry(), Clock.systemUTC());
     }
 
     public List<TableInfo> listTables(String dbName) {
@@ -89,7 +116,7 @@ public class PostgresExplorationService {
 
         List<Map<String, Object>> rows;
         try {
-            rows = postgresRepository.listRows(dbName, tableName, DEFAULT_PAGE_SIZE, offset);
+            rows = postgresRepository.listRowsWithCtid(dbName, tableName, DEFAULT_PAGE_SIZE, offset);
         } catch (Exception e) {
             log.warn("Could not read rows for {}.{}", dbName, tableName, e);
             throw new ProvisioningException("Could not read rows for table '" + tableName + "'", e);
@@ -97,6 +124,124 @@ public class PostgresExplorationService {
 
         return new TableRowPage(dbName, tableName, safePage, DEFAULT_PAGE_SIZE, totalCount, totalPages,
                 columns, rows, safePage > 1, safePage < totalPages);
+    }
+
+    public void createTable(String dbName, String tableName, List<String> columns) {
+        nameValidator.validatePostgresDatabaseName(dbName);
+        validateTableName(tableName);
+        List<String> effective = columns == null ? List.of()
+                : columns.stream().map(String::trim).filter(s -> !s.isBlank()).map(s -> s.toLowerCase(java.util.Locale.ROOT)).distinct().toList();
+        for (String col : effective) {
+            validateTableName(col);
+            if ("__pg_ctid".equals(col) || "__ctid".equals(col) || "ctid".equals(col)
+                    || "__new_col".equals(col) || "__new_val".equals(col) || "_csrf".equals(col)) {
+                throw new NameNotAllowedException("Column name '" + col + "' is reserved");
+            }
+        }
+        locks.withLock(DatabaseEngineType.POSTGRES.name() + ":" + dbName, () -> {
+            requireDatabase(dbName);
+            if (postgresRepository.tableExists(dbName, tableName)) {
+                throw new DatabaseAlreadyExistsException("Table '" + tableName + "' already exists");
+            }
+            try {
+                postgresRepository.createTable(dbName, tableName, effective);
+            } catch (Exception e) {
+                log.error("Failed to create table {}.{}", dbName, tableName, e);
+                throw new ProvisioningException("Could not create table '" + tableName + "'", e);
+            }
+            audit(AuditEvent.TABLE_CREATED, dbName, tableName);
+            log.info("Created table {}.{}", dbName, tableName);
+        });
+    }
+
+    public void dropTable(String dbName, String tableName) {
+        nameValidator.validatePostgresDatabaseName(dbName);
+        validateTableName(tableName);
+        locks.withLock(DatabaseEngineType.POSTGRES.name() + ":" + dbName, () -> {
+            requireDatabase(dbName);
+            requireTable(dbName, tableName);
+            try {
+                postgresRepository.dropTable(dbName, tableName);
+            } catch (Exception e) {
+                log.error("Failed to drop table {}.{}", dbName, tableName, e);
+                throw new ProvisioningException("Could not drop table '" + tableName + "'", e);
+            }
+            audit(AuditEvent.TABLE_DROPPED, dbName, tableName);
+            log.info("Dropped table {}.{}", dbName, tableName);
+        });
+    }
+
+    public void truncateTable(String dbName, String tableName) {
+        nameValidator.validatePostgresDatabaseName(dbName);
+        validateTableName(tableName);
+        locks.withLock(DatabaseEngineType.POSTGRES.name() + ":" + dbName, () -> {
+            requireDatabase(dbName);
+            requireTable(dbName, tableName);
+            try {
+                postgresRepository.truncateTable(dbName, tableName);
+            } catch (Exception e) {
+                log.error("Failed to truncate table {}.{}", dbName, tableName, e);
+                throw new ProvisioningException("Could not truncate table '" + tableName + "'", e);
+            }
+            audit(AuditEvent.TABLE_TRUNCATED, dbName, tableName);
+            log.info("Truncated table {}.{}", dbName, tableName);
+        });
+    }
+
+    public void insertRow(String dbName, String tableName, Map<String, Object> values) {
+        nameValidator.validatePostgresDatabaseName(dbName);
+        validateTableName(tableName);
+        if (values == null || values.isEmpty()) throw new NameNotAllowedException("Row must have at least one column");
+        Map<String, Object> normalized = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : values.entrySet()) {
+            String col = e.getKey().trim().toLowerCase(java.util.Locale.ROOT);
+            if ("__pg_ctid".equals(col) || "__ctid".equals(col) || "ctid".equals(col)
+                    || "__new_col".equals(col) || "__new_val".equals(col) || "_csrf".equals(col)) {
+                throw new NameNotAllowedException("Column name '" + col + "' is reserved");
+            }
+            validateTableName(col);
+            Object v = e.getValue();
+            if (v instanceof String s && s.isBlank()) v = null;
+            normalized.put(col, v);
+        }
+        locks.withLock(DatabaseEngineType.POSTGRES.name() + ":" + dbName, () -> {
+            requireDatabase(dbName);
+            requireTable(dbName, tableName);
+            try {
+                List<String> existing = postgresRepository.getTableColumns(dbName, tableName);
+                java.util.Set<String> existingSet = new java.util.HashSet<>(existing);
+                for (String col : normalized.keySet()) {
+                    if (!existingSet.contains(col)) {
+                        postgresRepository.executeInDatabase(dbName,
+                                "ALTER TABLE public." + PostgresDatabaseRepository.quoteIdentifier(tableName)
+                                        + " ADD COLUMN " + PostgresDatabaseRepository.quoteIdentifier(col) + " TEXT");
+                    }
+                }
+                postgresRepository.insertRow(dbName, tableName, normalized);
+            } catch (Exception e) {
+                if (e instanceof ProvisioningException) throw (ProvisioningException) e;
+                log.error("Failed to insert row into {}.{}", dbName, tableName, e);
+                throw new ProvisioningException("Could not insert row into '" + tableName + "'", e);
+            }
+            audit(AuditEvent.ROW_INSERTED, dbName, tableName);
+        });
+    }
+
+    public void deleteRow(String dbName, String tableName, String ctid) {
+        nameValidator.validatePostgresDatabaseName(dbName);
+        validateTableName(tableName);
+        if (ctid == null || ctid.isBlank()) throw new NameNotAllowedException("Row identifier is required");
+        locks.withLock(DatabaseEngineType.POSTGRES.name() + ":" + dbName, () -> {
+            requireDatabase(dbName);
+            requireTable(dbName, tableName);
+            try {
+                postgresRepository.deleteRowByCtid(dbName, tableName, ctid);
+            } catch (Exception e) {
+                log.error("Failed to delete row from {}.{}", dbName, tableName, e);
+                throw new ProvisioningException("Could not delete row from '" + tableName + "'", e);
+            }
+            audit(AuditEvent.ROW_DELETED, dbName, tableName);
+        });
     }
 
     public void ensureTableExists(String dbName, String tableName) {
@@ -197,5 +342,18 @@ public class PostgresExplorationService {
 
     private void validateTableName(String tableName) {
         nameValidator.validateTableName(tableName);
+    }
+
+    private void audit(String eventType, String dbName, String tableName) {
+        if (auditLogRepository == null || publisher == null || clock == null) return;
+        String user = currentUser();
+        AuditEvent e = new AuditEvent(eventType, dbName, DatabaseEngineType.POSTGRES, tableName, user, clock.instant());
+        try { auditLogRepository.save(e); } catch (Exception ex) { log.warn("Could not save audit {}", eventType, ex); }
+        try { publisher.publishEvent(new AuditEventRecorded(e)); } catch (Exception ex) { log.warn("Could not publish audit {}", eventType, ex); }
+    }
+
+    private String currentUser() {
+        Authentication a = SecurityContextHolder.getContext().getAuthentication();
+        return a != null && a.getName() != null ? a.getName() : "unknown";
     }
 }

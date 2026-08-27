@@ -45,8 +45,36 @@ public class PostgresDatabaseRepository {
         jdbcFor(dbName).execute(sql);
     }
 
+    public void createTable(String dbName, String tableName, List<String> columns) {
+        String cols = columns.stream()
+                .map(c -> quoteIdentifier(c) + " TEXT")
+                .collect(java.util.stream.Collectors.joining(", "));
+        String sql = cols.isEmpty()
+                ? "CREATE TABLE public." + quoteIdentifier(tableName) + " (id TEXT)"
+                : "CREATE TABLE public." + quoteIdentifier(tableName) + " (" + cols + ")";
+        jdbcFor(dbName).execute(sql);
+    }
+
+    public void dropTable(String dbName, String tableName) {
+        jdbcFor(dbName).execute("DROP TABLE IF EXISTS public." + quoteIdentifier(tableName) + " CASCADE");
+    }
+
     public void truncateTable(String dbName, String tableName) {
         jdbcFor(dbName).execute("TRUNCATE TABLE public." + quoteIdentifier(tableName) + " CASCADE");
+    }
+
+    public void deleteRowByCtid(String dbName, String tableName, String ctid) {
+        jdbcFor(dbName).update("DELETE FROM public." + quoteIdentifier(tableName) + " WHERE ctid = ?::tid", ctid);
+    }
+
+    public void insertRow(String dbName, String tableName, Map<String, Object> values) {
+        if (values == null || values.isEmpty()) return;
+        List<String> cols = new java.util.ArrayList<>(values.keySet());
+        String colList = cols.stream().map(PostgresDatabaseRepository::quoteIdentifier).collect(java.util.stream.Collectors.joining(", "));
+        String placeholders = cols.stream().map(c -> "?").collect(java.util.stream.Collectors.joining(", "));
+        String sql = "INSERT INTO public." + quoteIdentifier(tableName) + " (" + colList + ") VALUES (" + placeholders + ")";
+        Object[] args = cols.stream().map(values::get).toArray();
+        jdbcFor(dbName).update(sql, args);
     }
 
     public void insertRows(String dbName, String tableName, List<String> columns, List<Map<String, Object>> rows) {
@@ -230,6 +258,12 @@ public class PostgresDatabaseRepository {
     public List<Map<String, Object>> listRows(String dbName, String tableName, int limit, int offset) {
         JdbcTemplate target = jdbcFor(dbName);
         String sql = "SELECT * FROM public." + quoteIdentifier(tableName) + " LIMIT ? OFFSET ?";
+        return target.queryForList(sql, limit, offset);
+    }
+
+    public List<Map<String, Object>> listRowsWithCtid(String dbName, String tableName, int limit, int offset) {
+        JdbcTemplate target = jdbcFor(dbName);
+        String sql = "SELECT *, ctid::text AS __pg_ctid FROM public." + quoteIdentifier(tableName) + " LIMIT ? OFFSET ?";
         return target.queryForList(sql, limit, offset);
     }
 
