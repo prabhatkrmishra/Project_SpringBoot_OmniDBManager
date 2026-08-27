@@ -32,5 +32,7 @@ public interface ManagedDatabaseRepository extends MongoRepository<ManagedDataba
 
     List<ManagedDatabase> findAllByEngineType(DatabaseEngineType engineType);
 
+    long countByEngineType(DatabaseEngineType engineType);
+
     List<ManagedDatabase> findByDbNameOrderByEngineType(String dbName);
 }

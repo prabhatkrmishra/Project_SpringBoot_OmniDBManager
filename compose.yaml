@@ -51,12 +51,23 @@ services:
     ports:
       - "127.0.0.1:9813:5432"
     # Enterprise hardening: scram-sha-256 is PG18 default; explicit command keeps it
-    # pinned even if image defaults change. For TLS, add:
-    # command: ["postgres", "-c", "password_encryption=scram-sha-256", "-c", "ssl=on",
-    #           "-c", "ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem",
-    #           "-c", "ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key"]
-    # and mount certs + set pg_hba.conf hostssl all all 0.0.0.0/0 scram-sha-256.
-    # Issued connection strings then use POSTGRES_PUBLIC_SSLMODE=verify-full with CA.
+    # pinned even if image defaults change.
+    # TLS (verify-full with CA) — uncomment and provide certs:
+    #   volumes:
+    #     - postgres-data:/var/lib/postgresql
+    #     - ./certs/server.crt:/var/lib/postgresql/server.crt:ro
+    #     - ./certs/server.key:/var/lib/postgresql/server.key:ro
+    #     - ./certs/ca.crt:/var/lib/postgresql/ca.crt:ro
+    #   command: ["postgres",
+    #     "-c", "password_encryption=scram-sha-256",
+    #     "-c", "ssl=on",
+    #     "-c", "ssl_cert_file=/var/lib/postgresql/server.crt",
+    #     "-c", "ssl_key_file=/var/lib/postgresql/server.key",
+    #     "-c", "ssl_ca_file=/var/lib/postgresql/ca.crt"]
+    #   # pg_hba.conf: hostssl all all 0.0.0.0/0 scram-sha-256
+    #   # .env: POSTGRES_PUBLIC_SSLMODE=verify-full
+    #   #       POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=verify-full&sslrootcert=./certs/ca.crt
+    #   # Issued connection strings then carry sslmode=verify-full.
     command: ["postgres", "-c", "password_encryption=scram-sha-256"]
     environment:
       POSTGRES_USER: ${POSTGRES_ROOT_USER:-root}
@@ -64,6 +75,10 @@ services:
       PGDATA: /var/lib/postgresql/18/docker
     volumes:
       - postgres-data:/var/lib/postgresql
+      # For verify-full, also mount certs (see commented example above):
+      # - ./certs/server.crt:/var/lib/postgresql/server.crt:ro
+      # - ./certs/server.key:/var/lib/postgresql/server.key:ro
+      # - ./certs/ca.crt:/var/lib/postgresql/ca.crt:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
       interval: 10s

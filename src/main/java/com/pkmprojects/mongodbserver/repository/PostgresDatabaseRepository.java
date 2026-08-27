@@ -163,6 +163,12 @@ public class PostgresDatabaseRepository {
     public void grantPrivileges(String dbName, String userName) {
         jdbcTemplate.execute("GRANT CONNECT ON DATABASE " + quoteIdentifier(dbName) + " TO " + quoteIdentifier(userName));
         JdbcTemplate target = jdbcFor(dbName);
+        // Hardening: revoke public create on this DB's public schema (PG15+ already does, but explicit for older templates)
+        try {
+            target.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC");
+        } catch (Exception ignored) {
+            // Idempotent — may already be revoked or insufficient privilege in some setups
+        }
         target.execute("GRANT USAGE, CREATE ON SCHEMA public TO " + quoteIdentifier(userName));
         target.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO " + quoteIdentifier(userName));
         target.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO " + quoteIdentifier(userName));
