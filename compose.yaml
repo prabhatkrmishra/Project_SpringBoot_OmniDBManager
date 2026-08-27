@@ -50,6 +50,14 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9813:5432"
+    # Enterprise hardening: scram-sha-256 is PG18 default; explicit command keeps it
+    # pinned even if image defaults change. For TLS, add:
+    # command: ["postgres", "-c", "password_encryption=scram-sha-256", "-c", "ssl=on",
+    #           "-c", "ssl_cert_file=/etc/ssl/certs/ssl-cert-snakeoil.pem",
+    #           "-c", "ssl_key_file=/etc/ssl/private/ssl-cert-snakeoil.key"]
+    # and mount certs + set pg_hba.conf hostssl all all 0.0.0.0/0 scram-sha-256.
+    # Issued connection strings then use POSTGRES_PUBLIC_SSLMODE=verify-full with CA.
+    command: ["postgres", "-c", "password_encryption=scram-sha-256"]
     environment:
       POSTGRES_USER: ${POSTGRES_ROOT_USER:-root}
       POSTGRES_PASSWORD: ${POSTGRES_ROOT_PASSWORD:-root}

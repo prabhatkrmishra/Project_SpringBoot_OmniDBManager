@@ -48,13 +48,11 @@
                             </a>
                             <div class="d-flex gap-2" th:if="${canWrite}">
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:if="${database.engineType == null or database.engineType.name() != 'POSTGRES'}"
-                                   th:href="@{/databases/{name}/backup(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/backup(name=${database.dbName})} : @{/databases/{name}/backup(name=${database.dbName})}">
                                     <i class="bi bi-download"></i> Backup
                                 </a>
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:if="${database.engineType == null or database.engineType.name() != 'POSTGRES'}"
-                                   th:href="@{/databases/{name}/restore(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/restore(name=${database.dbName})} : @{/databases/{name}/restore(name=${database.dbName})}">
                                     <i class="bi bi-upload"></i> Restore
                                 </a>
                                 <a class="btn btn-sm btn-outline-info"

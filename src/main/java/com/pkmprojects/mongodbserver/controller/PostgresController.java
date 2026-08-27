@@ -3,7 +3,9 @@ package com.pkmprojects.mongodbserver.controller;
 import com.pkmprojects.mongodbserver.dto.CreateDatabaseForm;
 import com.pkmprojects.mongodbserver.dto.DatabaseInfo;
 import com.pkmprojects.mongodbserver.dto.ResetPasswordForm;
+import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
+import com.pkmprojects.mongodbserver.service.PostgresBackupService;
 import com.pkmprojects.mongodbserver.service.PostgresExplorationService;
 import com.pkmprojects.mongodbserver.service.PostgresStatisticsService;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
@@ -22,25 +24,39 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
+import java.io.IOException;
+import java.time.Clock;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.Optional;
 
 @Controller
 @RequestMapping("/postgres")
 public class PostgresController {
 
+    private static final DateTimeFormatter FILENAME_TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
+
     private final ProvisioningService provisioningService;
     private final Optional<PostgresExplorationService> explorationService;
     private final Optional<PostgresStatisticsService> statisticsService;
+    private final Optional<PostgresBackupService> backupService;
+    private final Clock clock;
 
     public PostgresController(ProvisioningService provisioningService,
                               @Autowired(required = false) PostgresExplorationService explorationService,
-                              @Autowired(required = false) PostgresStatisticsService statisticsService) {
+                              @Autowired(required = false) PostgresStatisticsService statisticsService,
+                              @Autowired(required = false) PostgresBackupService backupService,
+                              Clock clock) {
         this.provisioningService = provisioningService;
         this.explorationService = Optional.ofNullable(explorationService);
         this.statisticsService = Optional.ofNullable(statisticsService);
+        this.backupService = Optional.ofNullable(backupService);
+        this.clock = clock;
     }
 
     @GetMapping
@@ -176,5 +192,60 @@ public class PostgresController {
         provisioningService.revokeUser(DatabaseEngineType.POSTGRES, dbName, userName);
         redirectAttributes.addFlashAttribute("flashSuccess", "User '" + userName + "' revoked from database '" + dbName + "'");
         return "redirect:/postgres/databases/" + dbName + "/users";
+    }
+
+    @GetMapping("/databases/{dbName}/backup")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<StreamingResponseBody> downloadBackup(@PathVariable String dbName) {
+        var svc = backupService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        svc.requireDatabaseExists(dbName);
+        String filename = "backup-" + dbName + "-" + FILENAME_TIMESTAMP.format(clock.instant()) + ".json.gz";
+        StreamingResponseBody body = out -> svc.writeBackup(dbName, out);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(body);
+    }
+
+    @GetMapping("/databases/{dbName}/restore")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String restoreForm(@PathVariable String dbName, Model model) {
+        var svc = backupService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+        model.addAttribute("database", svc.describeDatabase(dbName));
+        model.addAttribute("engine", DatabaseEngineType.POSTGRES);
+        return "restore";
+    }
+
+    @PostMapping(value = "/databases/{dbName}/restore", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PreAuthorize("hasRole('ADMIN')")
+    public String restore(@PathVariable String dbName,
+                          @RequestParam(value = "file", required = false) MultipartFile file,
+                          @RequestParam(value = "confirm", required = false, defaultValue = "false") boolean confirm,
+                          RedirectAttributes redirectAttributes) {
+        if (file == null || file.isEmpty()) {
+            redirectAttributes.addFlashAttribute("flashError", "Choose a backup file to restore");
+            return "redirect:/postgres/databases/" + dbName + "/restore";
+        }
+        if (!confirm) {
+            redirectAttributes.addFlashAttribute("flashError", "Check the confirmation box to replace the database's current data");
+            return "redirect:/postgres/databases/" + dbName + "/restore";
+        }
+        byte[] content;
+        try {
+            content = file.getBytes();
+        } catch (IOException e) {
+            redirectAttributes.addFlashAttribute("flashError", "Could not read the uploaded backup file");
+            return "redirect:/postgres/databases/" + dbName + "/restore";
+        }
+        try {
+            var svc = backupService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
+            var result = svc.restore(dbName, content, true);
+            redirectAttributes.addFlashAttribute("flashSuccess",
+                    "Restored " + result.documentsRestored() + " rows across " + result.collectionsRestored() + " tables into '" + dbName + "'");
+            return "redirect:/postgres/databases/" + dbName;
+        } catch (NameNotAllowedException e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+            return "redirect:/postgres/databases/" + dbName + "/restore";
+        }
     }
 }

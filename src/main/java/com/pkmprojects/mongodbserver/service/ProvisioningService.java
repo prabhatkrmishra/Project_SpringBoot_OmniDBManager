@@ -55,6 +55,7 @@ public class ProvisioningService {
     private final MongoDatabaseEngine mongoEngine;
     private final Optional<PostgresDatabaseEngine> postgresEngine;
     private final Optional<PostgresDatabaseRepository> postgresRepository;
+    private final EncryptionService encryptionService;
 
     public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
                                ManagedDatabaseRepository managedDatabaseRepository,
@@ -67,7 +68,8 @@ public class ProvisioningService {
                                DatabaseLockRegistry databaseLocks,
                                MongoDatabaseEngine mongoEngine,
                                @Autowired(required = false) PostgresDatabaseEngine postgresEngine,
-                               @Autowired(required = false) PostgresDatabaseRepository postgresRepository) {
+                               @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
+                               @Autowired(required = false) EncryptionService encryptionService) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.managedDatabaseRepository = managedDatabaseRepository;
         this.auditLogRepository = auditLogRepository;
@@ -80,6 +82,36 @@ public class ProvisioningService {
         this.mongoEngine = mongoEngine;
         this.postgresEngine = Optional.ofNullable(postgresEngine);
         this.postgresRepository = Optional.ofNullable(postgresRepository);
+        this.encryptionService = encryptionService;
+    }
+
+    // Legacy 12-arg constructor for tests without EncryptionService
+    public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
+                               ManagedDatabaseRepository managedDatabaseRepository,
+                               AuditLogRepository auditLogRepository,
+                               DatabaseNameValidator nameValidator,
+                               PasswordGenerator passwordGenerator,
+                               java.time.Clock clock,
+                               Environment environment,
+                               ApplicationEventPublisher applicationEventPublisher,
+                               DatabaseLockRegistry databaseLocks,
+                               MongoDatabaseEngine mongoEngine,
+                               PostgresDatabaseEngine postgresEngine,
+                               PostgresDatabaseRepository postgresRepository) {
+        this(mongoDatabaseRepository, managedDatabaseRepository, auditLogRepository, nameValidator,
+                passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
+                mongoEngine, postgresEngine, postgresRepository, null);
+    }
+
+    private String encryptPassword(String password) {
+        if (encryptionService == null) return password;
+        return encryptionService.encrypt(password);
+    }
+
+    private String decryptPassword(String stored) {
+        if (stored == null) return null;
+        if (encryptionService == null) return stored;
+        return encryptionService.decrypt(stored);
     }
 
     private DatabaseEngine engineFor(DatabaseEngineType type) {
@@ -156,7 +188,7 @@ public class ProvisioningService {
                     ? List.of("CONNECT:" + dbName)
                     : List.of("readWrite:" + dbName);
             ManagedDatabase metadata = new ManagedDatabase(dbName, engineType, userName, roles, now, now, null);
-            metadata.setStoredPassword(password);
+            metadata.setStoredPassword(encryptPassword(password));
             managedDatabaseRepository.save(metadata);
             audit(AuditEvent.PROVISION, dbName, engineType, userName, now);
             log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, userName);
@@ -199,7 +231,7 @@ public class ProvisioningService {
                 throw new ProvisioningException("Could not reset password for database '" + dbName + "'", e);
             }
 
-            metadata.setStoredPassword(password);
+            metadata.setStoredPassword(encryptPassword(password));
             metadata.setLastPasswordResetAt(clock.instant());
             managedDatabaseRepository.save(metadata);
             audit(AuditEvent.RESET_PASSWORD, dbName, engineType, metadata.getUserName(), metadata.getLastPasswordResetAt());
@@ -407,7 +439,8 @@ public class ProvisioningService {
         ManagedDatabase md = metadata.orElse(null);
         String connectionString = null;
         if (md != null && md.getStoredPassword() != null) {
-            connectionString = engineFor(engineType).buildConnectionString(md.getUserName(), md.getStoredPassword(), dbName);
+            String plain = decryptPassword(md.getStoredPassword());
+            connectionString = engineFor(engineType).buildConnectionString(md.getUserName(), plain, dbName);
         }
         long size = 0L;
         try { size = engineFor(engineType).getDatabaseSizes().getOrDefault(dbName, 0L); } catch (Exception ignored) {}

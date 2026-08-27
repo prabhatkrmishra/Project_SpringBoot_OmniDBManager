@@ -37,8 +37,34 @@ public class PostgresDatabaseRepository {
         this.password = password;
     }
 
-    static String quoteIdentifier(String identifier) {
+    public static String quoteIdentifier(String identifier) {
         return "\"" + identifier.replace("\"", "\"\"") + "\"";
+    }
+
+    public void executeInDatabase(String dbName, String sql) {
+        jdbcFor(dbName).execute(sql);
+    }
+
+    public void truncateTable(String dbName, String tableName) {
+        jdbcFor(dbName).execute("TRUNCATE TABLE public." + quoteIdentifier(tableName));
+    }
+
+    public void insertRows(String dbName, String tableName, List<String> columns, List<Map<String, Object>> rows) {
+        if (rows == null || rows.isEmpty() || columns == null || columns.isEmpty()) return;
+        JdbcTemplate target = jdbcFor(dbName);
+        String colList = columns.stream().map(PostgresDatabaseRepository::quoteIdentifier).collect(java.util.stream.Collectors.joining(", "));
+        String placeholders = columns.stream().map(c -> "?").collect(java.util.stream.Collectors.joining(", "));
+        String sql = "INSERT INTO public." + quoteIdentifier(tableName) + " (" + colList + ") VALUES (" + placeholders + ")";
+        List<Object[]> batch = new java.util.ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Object[] args = new Object[columns.size()];
+            for (int i = 0; i < columns.size(); i++) {
+                Object v = row.get(columns.get(i));
+                args[i] = v == null ? null : v.toString();
+            }
+            batch.add(args);
+        }
+        target.batchUpdate(sql, batch);
     }
 
     private JdbcTemplate jdbcFor(String dbName) {

@@ -20,4 +20,13 @@ public class RateLimitConfig {
         registration.setOrder(SecurityFilterProperties.DEFAULT_FILTER_ORDER - 10);
         return registration;
     }
+
+    @Bean
+    FilterRegistrationBean<ProvisionRateLimitFilter> provisionRateLimitFilter(LoginRateLimiter rateLimiter,
+                                                                              ProvisionRateLimitProperties properties) {
+        FilterRegistrationBean<ProvisionRateLimitFilter> registration =
+                new FilterRegistrationBean<>(new ProvisionRateLimitFilter(rateLimiter, properties));
+        registration.setOrder(SecurityFilterProperties.DEFAULT_FILTER_ORDER - 9);
+        return registration;
+    }
 }

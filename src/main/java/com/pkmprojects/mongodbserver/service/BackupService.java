@@ -326,7 +326,7 @@ public class BackupService {
     }
 
     private void audit(String eventType, String dbName, Instant performedAt) {
-        AuditEvent event = new AuditEvent(eventType, dbName, null, currentUsername(), performedAt);
+        AuditEvent event = new AuditEvent(eventType, dbName, com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO, null, currentUsername(), performedAt);
         auditLogRepository.save(event);
         applicationEventPublisher.publishEvent(new AuditEventRecorded(event));
     }

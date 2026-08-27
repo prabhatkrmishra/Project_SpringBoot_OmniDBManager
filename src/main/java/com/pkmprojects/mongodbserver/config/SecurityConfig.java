@@ -38,6 +38,7 @@ public class SecurityConfig {
                         .requestMatchers("/databases/*/reset", "/databases/*/delete",
                                 "/databases/*/backup", "/databases/*/restore",
                                 "/databases/*/collections/*/import").hasRole("ADMIN")
+                        .requestMatchers("/postgres/databases/*/backup", "/postgres/databases/*/restore").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/databases", "/databases/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/mongo/databases/**", "/postgres/databases/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/mongo/**", "/postgres/**").authenticated()

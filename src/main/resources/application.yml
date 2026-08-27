@@ -76,10 +76,17 @@ app:
     public-sslmode: ${POSTGRES_PUBLIC_SSLMODE:require}
   adminer:
     base-url: ${ADMINER_BASE_URL:http://127.0.0.1:9815}
+  encryption:
+    key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)
   login-rate-limit:
     max-attempts: 5
     window: 15m
     # Honor X-Forwarded-For only when a trusted reverse proxy is in front of the
     # app (enable behind Cloudflare Tunnel; keep false when reachable directly).
+    trust-x-forwarded-for: ${RATE_LIMIT_TRUST_XFF:false}
+  # Per-engine rate limit on provision/reset/delete (attempts per IP+engine per window)
+  provision-rate-limit:
+    max-attempts: 5
+    window: 1m
     trust-x-forwarded-for: ${RATE_LIMIT_TRUST_XFF:false}
