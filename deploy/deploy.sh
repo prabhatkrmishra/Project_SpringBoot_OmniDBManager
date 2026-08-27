@@ -2,11 +2,11 @@
 set -euo pipefail
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-REPO="prabhatkrmishra/Project_SpringBoot_MongoDBServer"
-DEPLOY_DIR="$HOME/mongodbserver"
-JAR_NAME="mongodbserver-*.jar"
+REPO="prabhatkrmishra/Project_SpringBoot_OmniDBManager"
+DEPLOY_DIR="$HOME/omnidb"
+JAR_NAME="omnidb-manager-*.jar"
 VERSION_FILE="$DEPLOY_DIR/.current_version"
-TMUX_SESSION="mongodbserver"
+TMUX_SESSION="omnidb"
 SPRING_PROFILE="${SPRING_PROFILE:-}"
 # Memory-tuned JVM defaults for small VPS (measured ~205MB RSS vs ~360MB with
 # the previous -Xms256m -Xmx512m on JDK 25): small heap, SerialGC (lowest

@@ -1,69 +1,73 @@
-# MongoDB Server Manager
+# OmniDB Manager
 
-A self-hosted, Atlas-style MongoDB provisioning service. Sign in with an admin
-account, create databases with dedicated per-database users, hand the
-connection string to your external applications, and later reset
-the password or delete the database (drop DB + drop user) — all from a small
-Spring MVC web UI.
+**Enterprise dual-engine database control plane — MongoDB + PostgreSQL 18.**
 
-> If you like this project, give it a [⭐ on GitHub](https://github.com/prabhatkrmishra/Project_SpringBoot_MongoDBServer) — it keeps me going!
+A self-hosted, Atlas-style provisioning service. Sign in as admin, provision isolated databases with dedicated per-database users on either engine, hand the connection string to your apps, and later rotate passwords, manage tables/rows, back up/restore, or delete — all from a single Spring MVC web UI.
+
+> If you like this project, give it a [⭐ on GitHub](https://github.com/prabhatkrmishra/Project_SpringBoot_OmniDBManager) — it keeps me going!
+
+## Why OmniDB Manager?
+
+Most teams run MongoDB *and* PostgreSQL. OmniDB Manager unifies them under one control plane with strict isolation:
+
+- **Isolated engines** — every database is `engine:dbName` (`MONGO:myapp` vs `POSTGRES:myapp`). Same name can exist in both engines without collision. Compound unique `(engineType, dbName)` + `DatabaseLockRegistry` key `engine:dbName`.
+- **Prefix routes** — `/mongo/*` and `/postgres/*` with a mandatory engine chooser. No ambiguous default engine.
+- **Least-privilege by default** — Mongo `readWrite` scoped to one DB; Postgres `CONNECT` + `USAGE,CREATE ON SCHEMA public` + `ALTER DEFAULT PRIVILEGES`, with `REVOKE CREATE ON SCHEMA public FROM PUBLIC` hardening.
+- **Not a proxy** — the app is the control plane only. Apps connect directly to MongoDB/PostgreSQL via the issued connection string.
 
 ## Features
 
-- **Spring Security form login** — every page requires authentication; only the
-  admin (credentials from `.env`) can create, reset, or delete databases.
-- **Brute-force protection** — login is rate-limited per IP + username
-  (5 attempts / 15 min, configurable via `app.login-rate-limit.*`); excess
-  attempts get HTTP 429 with a `Retry-After` header.
-- **Atlas-style provisioning** — each database gets a dedicated MongoDB user
-  with `readWrite` scoped to exactly that database.
-- **Connection strings on demand** — the connection string (with password) is
-  shown after creation/reset and re-derived from stored provisioning metadata,
-  so it stays viewable on the database detail page at any time. That means the
-  per-database password is stored (plaintext) in the `mongodb_admin` metadata
-  database — protect that database like you protect `.env`.
-- **Password rotation** — reset a database user's password; the old password
-  stops working immediately.
-- **Deletion** — drops the database and its dedicated user.
-- **Explorer** — browse databases, collections, and paginated documents.
-- **Export** — download any collection page as a JSON file.
-- **Audit trail** — every provision/reset/delete is recorded; view the last 10 on
-  the dashboard or the full paginated history at `/activity`.
-- **MongoDB + mongo-express** — all run via Docker Compose.
-- **mongo-express web UI** — [mongo-express](https://github.com/mongo-express/mongo-express)
-  is bundled in the stack, but only reachable through the app at `/mongo-express`
-  (sidebar link), behind the same login; its container is loopback-bound with no
-  public port.
-- **Atlas profile** — point `MONGODB_URI` at any MongoDB deployment.
+- **Dual-engine provisioning** — `POST /mongo/databases` + `POST /postgres/databases` via `DatabaseEngine` abstraction (`MongoDatabaseEngine` / `PostgresDatabaseEngine`).
+- **Engine-aware validation** — `DatabaseNameValidator`: Mongo `[A-Za-z0-9_-]+` max 64; Postgres `^[a-z_][a-z0-9_]*$` max 63, lowercased, system DBs blocked (`admin/local/config/mongodb_admin` vs `postgres/template0/template1`).
+- **Connection strings on demand** — shown after create/reset and re-derived from stored metadata. Mongo `mongodb://user:pass@host/db?authSource=db`; Postgres `postgresql://user:pass@host:5432/db?sslmode=require&application_name=omnidb` (or `verify-full` with CA).
+- **Password rotation & deletion** — reset instantly invalidates old password; delete drops DB + role/user + metadata.
+- **Native Postgres table/row CRUD** — create/drop/truncate tables, insert/delete rows (via `ctid::text AS __pg_ctid` + `DELETE ... WHERE ctid = ?::tid`), add columns on-the-fly (`ALTER TABLE ... ADD COLUMN TEXT`). No Adminer required.
+- **Explorer** — browse databases → collections/tables → paginated documents/rows (50/page) + JSON export.
+- **Statistics & monitor** — `dbStats`/`collStats` (Mongo) + `pg_total_relation_size`/`pg_stat_user_tables` (Postgres), live SSE monitor with per-engine filter `?engine=mongo|postgres`.
+- **Backup & restore** — Mongo gzip'd canonical Extended JSON (`formatVersion:1`); Postgres JDBC gzip'd JSON dump. Streaming download, replace-semantics restore with pre-validation.
+- **Encryption at rest** — `AES-256-GCM` (`ENC:v1:`) for stored per-database passwords. Key from `APP_ENCRYPTION_KEY` (base64 32B or 64 hex); plaintext fallback when blank (dev only).
+- **Hardening** — per-engine rate limit (`IP:engine`, 5/min, `trustXFF=false`), TLS (`sslmode=require` / `verify-full` + `application_name`), `scram-sha-256`, `PGDATA=/var/lib/postgresql/18/docker`, audit trail (`PROVISION/RESET_PASSWORD/DELETE/TABLE_CREATED/DROPPED/TRUNCATED/ROW_INSERTED/ROW_DELETED/BACKUP_CREATED/RESTORED/IMPORT`), Micrometer `provisioned.databases{engine}` gauge, `postgres` HealthIndicator.
+- **Brute-force protection** — login rate limit per IP+username (5/15m, 429 + `Retry-After`).
+- **Bundled UIs (optional)** — mongo-express at `/mongo-express` and Adminer at `/adminer`, both loopback-bound and behind app auth.
+
+## Stack
+
+- **Java 25**, **Spring Boot 4.1.0** (`spring-boot-starter-webmvc`, `data-mongodb`, `jdbc`, `security`, `validation`, `actuator`, `micrometer`)
+- **MongoDB 8** + **PostgreSQL 18.6-alpine** + **Adminer 6.0.1-standalone**
+- **PostgreSQL driver 42.7.5**, **HikariCP** (via `spring-boot-starter-jdbc`)
+- **Thymeleaf** + **Bootstrap 5.3.8** + **Bootstrap Icons 1.13.1**
+- **Docker Compose** for local stack; **Testcontainers** for integration tests
 
 ## Prerequisites
 
 - JDK 25
 - Docker Desktop (or any Docker daemon) with Docker Compose
-- No global Maven needed — the project ships the Maven wrapper (`mvnw`).
+- No global Maven needed — ships `mvnw` wrapper
 
 ## Quick start (local)
 
-1. Create the environment file (once):
+1. Create env file (once):
 
    ```bash
    cp .env.example .env
    ```
 
-   Edit `.env`: `APP_ADMIN_USERNAME` / `APP_ADMIN_PASSWORD` are the web app
-   login; `MONGODB_ROOT_USERNAME` / `MONGODB_ROOT_PASSWORD` are the MongoDB root
-   credentials used by the app to provision databases; `MONGO_EXPRESS_*` protect
-   the mongo-express UI.
+   Edit `.env`:
+   - `APP_ADMIN_USERNAME` / `APP_ADMIN_PASSWORD` — web UI login
+   - `MONGODB_ROOT_USERNAME` / `MONGODB_ROOT_PASSWORD` — Mongo root for provisioning
+   - `POSTGRES_ROOT_USER` / `POSTGRES_ROOT_PASSWORD` — Postgres superuser for DDL
+   - `MONGO_EXPRESS_*` — mongo-express basic auth
+   - `APP_ENCRYPTION_KEY` — `openssl rand -base64 32` (or `openssl rand -hex 32`)
 
-2. Start MongoDB and mongo-express:
+2. Start backing services:
 
    ```bash
    docker compose up -d
    ```
 
    - App: http://localhost:9811
-   - mongo-express: no direct URL — sign in to the app and open **Mongo Express**
-     from the sidebar (`/mongo-express`); its basic auth uses `MONGO_EXPRESS_*`.
+   - mongo-express: no direct URL — open **Mongo Express** from sidebar (`/mongo-express`)
+   - Adminer: http://localhost:9815 (or via app proxy, loopback-bound)
 
 3. Run the app:
 
@@ -71,109 +75,109 @@ Spring MVC web UI.
    ./mvnw spring-boot:run
    ```
 
-4. Sign in at http://localhost:9811/login with `APP_ADMIN_USERNAME` /
-   `APP_ADMIN_PASSWORD`, then **Provision a database**. Copy the shown
-   connection string into your application's configuration — it stays viewable
-   on the database detail page if you need it again. External
-   applications use that connection string to read/write only that database.
+4. Sign in at http://localhost:9811/login, pick an engine (**MongoDB** or **PostgreSQL**), then **Provision a database**. Copy the connection string — it stays viewable on the database detail page.
+
+### Enable PostgreSQL
+
+Postgres is opt-in:
+
+```bash
+# .env
+POSTGRES_ENABLED=true
+POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres
+# optional public host for issued strings
+POSTGRES_PUBLIC_HOST=postgres.example.com
+POSTGRES_PUBLIC_TLS=false
+POSTGRES_PUBLIC_SSLMODE=require
+```
+
+Restart the app. Dashboard now shows two engine tables; provision via **PostgreSQL → New Database**.
 
 ### Run from the compiled jar (no repo needed)
 
-The jar is only the web layer — it **connects to** MongoDB, it does not start
-it. Running `java -jar` on a fresh server with nothing else up will boot the app
-but every page fails: provisioning errors without MongoDB.
+The jar is the web layer only — it connects to MongoDB/PostgreSQL, it does not start them.
 
-1. Build the jar once (from the repo):
+1. Build once (from repo):
 
    ```bash
    ./mvnw clean package
    ```
 
-2. Copy `target/mongodbserver-0.0.1-SNAPSHOT.jar`, `.env`, and `compose.yaml` to
-   the server.
+2. Copy `target/omnidb-manager-*.jar` (or `mongodbserver-*.jar` for older tags), `.env`, and `compose.yaml` to the server.
 
-3. Start the backing services:
+3. Start backing services:
 
    ```bash
    docker compose up -d
    ```
 
-4. Run the app:
+4. Run:
 
    ```bash
-   java -jar mongodbserver-0.0.1-SNAPSHOT.jar
+   java -jar omnidb-manager-*.jar
    ```
 
-The jar connects to: MongoDB at `spring.data.mongodb.uri` (default
-`mongodb://<root>:<pass>@127.0.0.1:9812/?authSource=admin` from `.env`) and the
-bundled mongo-express at `127.0.0.1:9814` (only needed for the `/mongo-express`
-sidebar UI; without it that page returns 502). mongo-express hosts are not
-configurable via `.env` yet — fixed at `127.0.0.1` in `application.yml`.
+The jar connects to MongoDB at `spring.mongodb.uri` (default `mongodb://<root>:<pass>@127.0.0.1:9812/?authSource=admin`) and Postgres at `app.postgres.uri` (default `jdbc:postgresql://127.0.0.1:9813/postgres`). Without those services every provision fails.
 
 ### Memory footprint
 
-The auto-deploy script (`deploy/deploy.sh`) starts the jar with memory-tuned
-JVM options, measured at roughly **205 MB RSS** on JDK 25 (vs ~360 MB with a
-plain `-Xms256m -Xmx512m`):
+`deploy/deploy.sh` starts the jar with tuned JVM flags, measured at **~205 MB RSS** on JDK 25 (vs ~360 MB with plain `-Xms256m -Xmx512m`):
 
 ```bash
 java -Xms64m -Xmx256m -XX:+UseSerialGC -XX:+UseCompactObjectHeaders \
      -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=96m -Xss512k \
-     -jar mongodbserver-*.jar
+     -jar omnidb-manager-*.jar
 ```
 
-- `-XX:+UseSerialGC` has the lowest native overhead for small heaps.
-- `-XX:+UseCompactObjectHeaders` (JDK 25+) trims every object on the heap.
-- The caps bound metaspace, JIT code cache and thread stacks.
+- `-XX:+UseSerialGC` — lowest overhead for small heaps
+- `-XX:+UseCompactObjectHeaders` (JDK 25+) — trims every object
+- Caps bound metaspace, code cache and thread stacks
 
-Override by exporting `JAVA_OPTS` before running `deploy.sh`. Notes for
-**1 GB-RAM servers**, where mongod shares the budget with the JVM:
+Override via `JAVA_OPTS` before `deploy.sh`. For **1 GB-RAM servers**:
 
-- `compose.yaml` already pins the guardrails: WiredTiger cache at 256 MB,
-  `--maxIncomingConnections 500` (each connection costs mongod ~0.5–1 MB of
-  RAM), a 64k nofile ulimit, and a 650 MB container memory cap. Raise them
-  together if you move to a bigger box.
-- Consider removing the `mongo-express` service entirely — it is optional
-  (the app works without it; `/mongo-express` just returns 502).
-- Restores of very large backup files need heap headroom: with `-Xmx256m`
-  keep uploaded backups well under the 256 MB multipart limit, or raise
-  `-Xmx` while tuning the rest of the stack down.
+- `compose.yaml` pins guardrails: WiredTiger cache 256 MB, `--maxConns 500`, 64k nofile ulimit, 650 MB container cap. Raise together on bigger boxes.
+- Remove `mongo-express`/`adminer` if unused — app works without them (`/mongo-express` → 502).
+- Large restores need heap headroom: keep uploads well under 256 MB with `-Xmx256m`, or raise `-Xmx`.
 
 ### Verifying the deployment
 
-Three ops scripts live in `deploy/` — run them on the server (they need
-bash, docker and the `.env` next to them):
-
 ```bash
-bash deploy/verify-memory-config.sh          # config in effect vs expected profile (small|medium)
-bash deploy/load-test-mongo.sh 15 4          # data-plane ops/sec probe (throwaway db, auto-dropped)
+bash deploy/verify-memory-config.sh          # config vs expected profile (small|medium)
+bash deploy/load-test-mongo.sh 15 4          # data-plane ops/sec (throwaway db, auto-dropped)
 bash deploy/load-test-app.sh                 # admin UI throughput + latency percentiles
 ```
 
-`verify-memory-config.sh` fails loudly when reality drifts from the expected
-profile (e.g. after a resize where the compose guardrails were not updated).
+`verify-memory-config.sh` fails loudly when reality drifts from the expected profile.
 
 ### Reverse proxy (nginx)
 
-The app binds loopback-only; put nginx in front for HTTPS. A ready template
-lives at `deploy/nginx.conf.example` — the three app-specific bits it handles:
-256 MB `client_max_body_size` (restore uploads), buffering disabled for the
-SSE `/monitor/stream`, and `X-Forwarded-For` passthrough. After TLS is up,
-set `RATE_LIMIT_TRUST_XFF=true` in `.env` so the login rate limiter keys on
-real client IPs instead of nginx's.
+App binds loopback-only; put nginx in front for HTTPS. Template at `deploy/nginx.conf.example` handles:
 
-The same template also shows how to expose **MongoDB itself** to tenant apps
-through nginx's stream (TCP) module with TLS termination — including a
-per-IP connection limit. With that in place, set in `.env`:
+- 256 MB `client_max_body_size` (restore uploads)
+- Buffering off + long `proxy_read_timeout` for SSE `/monitor/stream`
+- `X-Forwarded-For` passthrough — set `RATE_LIMIT_TRUST_XFF=true` in `.env` so rate limiters key on real IPs
+
+Same template shows exposing **MongoDB** via nginx `stream` (TCP) with TLS termination + per-IP `limit_conn`. Then:
 
 ```bash
-MONGODB_PUBLIC_HOST=your.domain.com   # host used in issued connection strings
-MONGODB_PUBLIC_TLS=true               # issued strings carry &tls=true
+MONGODB_PUBLIC_HOST=your.domain.com
+MONGODB_PUBLIC_TLS=true
 ```
 
-## Using the provisioned database from your application
+For Postgres TLS (enterprise):
 
-Example (Node.js):
+```bash
+POSTGRES_PUBLIC_HOST=postgres.example.com
+POSTGRES_PUBLIC_TLS=true
+POSTGRES_PUBLIC_SSLMODE=verify-full
+POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=verify-full&sslrootcert=./certs/ca.crt
+```
+
+Mount certs in `compose.yaml` (see commented `postgres` service) and set `pg_hba.conf: hostssl all all 0.0.0.0/0 scram-sha-256`. Issued strings then carry `sslmode=verify-full`.
+
+## Using the provisioned database
+
+### MongoDB (Node.js)
 
 ```js
 const { MongoClient } = require("mongodb");
@@ -181,59 +185,110 @@ const client = new MongoClient("mongodb://myapp_user:MyStrongPass@127.0.0.1:9812
 await client.connect();
 ```
 
-The user can only read/write its own database; the password can be rotated by
-the admin at any time.
+User has `readWrite` on `myapp` only; password rotation is instant.
 
-### Your application connects **directly** to MongoDB
+### PostgreSQL (Node.js `pg` / any libpq client)
 
-This app is only the **control plane**: it provisions databases, issues
-per-database credentials, and rotates/deletes them. It is **not** a proxy and
-never sits in the data path.
+```
+postgresql://myapp_user:MyStrongPass@127.0.0.1:9813/myapp?sslmode=require&application_name=omnidb
+```
 
-- The connection string points straight at MongoDB (`127.0.0.1:9812` locally,
-  or your Atlas host when the `atlas` profile is active), so your application
-  talks to MongoDB directly over the Mongo wire protocol.
-- The provisioned user authenticates against its own database (explicit
-  `?authSource=<db>`), so the string works as-is in every driver — no extra
-  configuration, no calls back to this app.
-- After provisioning, this app is not involved in your application's traffic.
-  It is needed again only when an admin resets a password or deletes a database.
+JDBC alternative:
 
-## Atlas (or any external MongoDB)
+```
+jdbc:postgresql://127.0.0.1:9813/myapp?sslmode=require&ApplicationName=omnidb
+```
 
-Set `MONGODB_URI` in `.env` to a deployment URI with root privileges, e.g.:
+With `verify-full`:
+
+```
+postgresql://myapp_user:MyStrongPass@postgres.example.com:5432/myapp?sslmode=verify-full&sslrootcert=/path/to/ca.crt&application_name=omnidb
+```
+
+### Direct connection — not a proxy
+
+OmniDB Manager is the **control plane** only: it provisions DBs, issues per-DB credentials, and rotates/deletes them. It never sits in the data path. Connection strings point straight at MongoDB/PostgreSQL, so apps talk directly over the native wire protocol. After provisioning, the manager is needed only for admin operations.
+
+## Atlas / external MongoDB
+
+Set `MONGODB_URI` in `.env` to a deployment URI with root privileges:
 
 ```
 MONGODB_URI=mongodb+srv://root:root@cluster0.xxxxx.mongodb.net/?authSource=admin
 ```
 
-Then run with the `atlas` profile:
+Run with `atlas` profile:
 
 ```bash
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=atlas
+# or jar:
+java -jar omnidb-manager-*.jar --spring.profiles.active=atlas
 ```
 
-Or, from the jar:
+Issued connection strings derive from the active `spring.mongodb.uri` host.
 
-```bash
-java -jar mongodbserver-0.0.1-SNAPSHOT.jar --spring.profiles.active=atlas
+## Configuration reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `APP_ADMIN_USERNAME` / `APP_ADMIN_PASSWORD` | `admin` | Web UI admin login |
+| `MONGODB_ROOT_USERNAME` / `MONGODB_ROOT_PASSWORD` | `root` | Mongo root for provisioning |
+| `MONGODB_URI` | `mongodb://<root>:<pass>@127.0.0.1:9812/?authSource=admin&maxPoolSize=10` | Override for Atlas/external |
+| `MONGODB_PUBLIC_HOST` | *(derived)* | Host in issued Mongo strings (domain behind proxy) |
+| `MONGODB_PUBLIC_TLS` | `false` | Append `&tls=true` to Mongo strings |
+| `POSTGRES_ENABLED` | `false` | Enable PostgreSQL engine |
+| `POSTGRES_ROOT_USER` / `POSTGRES_ROOT_PASSWORD` | `root` | Postgres superuser for DDL |
+| `POSTGRES_URI` | `jdbc:postgresql://127.0.0.1:9813/postgres` | JDBC URL for admin DataSource |
+| `POSTGRES_PUBLIC_HOST` | *(derived)* | Host in issued Postgres strings |
+| `POSTGRES_PUBLIC_TLS` / `POSTGRES_PUBLIC_SSLMODE` | `false` / `require` | TLS for Postgres strings (`require` or `verify-full`) |
+| `ADMINER_BASE_URL` | `http://127.0.0.1:9815` | Adminer base URL |
+| `MONGO_EXPRESS_BASE_URL` | `http://127.0.0.1:9814/mongo-express` | mongo-express base URL |
+| `APP_ENCRYPTION_KEY` | *(empty = plaintext)* | Base64 32B or 64 hex for AES-256-GCM (`ENC:v1:`) |
+| `SERVER_ADDRESS` | `127.0.0.1` | Bind address (`0.0.0.0` to expose) |
+| `RATE_LIMIT_TRUST_XFF` | `false` | Honor `X-Forwarded-For` for rate limiters (behind trusted proxy) |
+| `app.login-rate-limit.*` | `5 / 15m` | Login brute-force window |
+| `app.provision-rate-limit.*` | `5 / 1m` | Per-engine provision/reset/delete window (`IP:engine`) |
+
+`application.yml` also sets `management.endpoints.web.exposure=health,info,metrics` and `show-components:always`.
+
+## Architecture
+
+```
+Controller  →  Service  →  Repository (Mongo Java driver / JdbcTemplate)
+     │            │
+     └──── Thymeleaf views (server-rendered, th:text only)
 ```
 
-Connection strings shown in the UI are derived from the active
-`spring.mongodb.uri` host, so external apps connect to the same deployment.
+- `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit).
+- `DatabaseEngine` — `MongoDatabaseEngine` (wraps `MongoDatabaseRepository`) + `PostgresDatabaseEngine` (wraps `PostgresDatabaseRepository` via `JdbcTemplate`, no `@Transactional` — `CREATE/DROP DATABASE` cannot run in a transaction).
+- `PostgresDatabaseRepository` — `CREATE DATABASE "db" OWNER "user" TEMPLATE template0`, `CREATE ROLE ... WITH LOGIN PASSWORD`, `pg_terminate_backend`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `quoteIdentifier`, `executeInDatabase`, `listTables`/`listRowsWithCtid` (`ctid::text AS __pg_ctid`).
+- `ExplorationService` / `PostgresExplorationService` — read-only browsing, bounded pagination (50/page), JSON export.
+- `PostgresBackupService` / `BackupService` — gzip'd JSON dumps, streaming, replace-semantics restore.
+- `ManagedDatabaseRepository` — Spring Data metadata in `mongodb_admin` (stores encrypted per-DB password, `id=engine:dbName`, `countByEngineType`).
+- `SecurityConfig` — form login, CSRF on, `hasRole(ADMIN)` for `/postgres/databases/**` and writes.
+- `ProvisionRateLimitFilter` (`IP:engine`, order `-9`) + `LoginRateLimitFilter` — in-process fixed-window.
+- `PostgresHealthIndicator` (`postgres` component) + `ProvisionedDatabaseMetrics` (`provisioned.databases{engine}`).
+- `EncryptionService` / `EncryptionProperties` — AES-256-GCM `ENC:v1:`.
+- `MongoExpressProxyFilter` / Adminer proxy — reverse-proxy bundled UIs behind app auth.
+
+Naming is validated per-engine; system databases are protected.
+
+## PostgreSQL specifics
+
+- **DDL** — `CREATE/DROP DATABASE` runs outside transactions (auto-commit `JdbcTemplate`). `CREATE DATABASE "db" OWNER "user" TEMPLATE template0 ENCODING 'UTF8'`; `CREATE ROLE "user" WITH LOGIN PASSWORD '...'` (`scram-sha-256`); `GRANT CONNECT` + schema grants.
+- **Table/row CRUD** — `CREATE TABLE ... (col TEXT)`, `DROP TABLE IF EXISTS ... CASCADE`, `TRUNCATE ... CASCADE`, `INSERT` dynamic, `SELECT *, ctid::text AS __pg_ctid LIMIT ? OFFSET ?`, `DELETE ... WHERE ctid = ?::tid`. Columns lowercased, `distinct()`, reserved names blocked (`__pg_ctid/__ctid/ctid/__new_col/__new_val/_csrf`).
+- **Connection strings** — built from `app.postgres.public-host` or parsed `spring.datasource` host, `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb` (or `verify-full`).
 
 ## Releases & deployment
 
-**Releasing** (`.github/workflows/release.yml`): tag a release and push it —
-GitHub builds the jar, sets the version from the tag, generates a changelog
-from commits since the previous tag, and attaches the jar to a GitHub Release:
+**Releasing** (`.github/workflows/release.yml`): tag and push — GitHub builds the jar, versions from tag, generates changelog, attaches jar to Release:
 
 ```bash
 git tag v1.0.0
 git push origin v1.0.0
 ```
 
-(Or trigger the **Release** workflow manually with a tag input.)
+Or trigger **Release** workflow manually with a tag input.
 
 **Auto-deploy** (`deploy/deploy.sh`): on the VPS, run once:
 
@@ -241,94 +296,62 @@ git push origin v1.0.0
 bash deploy/setup-cron.sh
 ```
 
-A cron job then checks the latest GitHub Release every 5 minutes, downloads the
-new jar, stops the old process (tmux session `mongodbserver`) and starts the
-new one. Logs: `~/mongodbserver/deploy.log`.
+Cron checks latest Release every 5 minutes, downloads new jar, stops old tmux session (`omnidb`) and starts new one. Logs: `~/omnidb/deploy.log`.
 
-## Architecture
-
-```
-Controller  →  Service  →  Repository (MongoDB Java driver / Spring Data)
-     │            │
-     └──── Thymeleaf views (server-rendered, th:text only)
-```
-
-- `ProvisioningService` — lifecycle: provision / reset / delete / list.
-- `ExplorationService` — read-only browsing with bounded pagination (50/page)
-  and JSON export.
-- `MongoDatabaseRepository` — driver gateway for user + database administration.
-- `ManagedDatabaseRepository` — Spring Data metadata in the `mongodb_admin`
-  database (stores the per-database user's password so connection strings can
-  be re-derived).
-- `SecurityConfig` — form login, CSRF on, `@PreAuthorize` + route matchers for
-  admin-only writes.
-- `LoginRateLimitFilter` — in-process fixed-window brute-force protection on
-  the login form, running ahead of the security chain.
-- `MongoExpressProxyFilter` — reverse-proxies the bundled mongo-express UI at
-  `/mongo-express` behind the app's authentication.
-- `MongoIndexInitializer` — creates the audit-trail index on startup.
-- `AdminCredentialsGuard` — refuses to start with default `admin`/`admin`
-  credentials under the `atlas` profile.
-
-Naming is validated and restricted to URL-safe characters; system databases
-(`admin`, `local`, `config`, `mongodb_admin`) are protected.
+CI: `.github/workflows/maven.yml` — `mvn -B clean package -DargLine=-Xmx1024m` on JDK 25 (Temurin).
 
 ## Tests
 
 ```bash
 ./mvnw test
+# or full package (what CI runs):
+./mvnw -B clean package -DargLine=-Xmx1024m
 ```
 
-- Unit tests for the validator, password generator, both services, and the
-  login rate-limiter (filter + in-memory counter).
-- `@WebMvcTest` slices for the controllers (auth, CSRF, validation, error
-  handling).
-- Testcontainers-backed tests (real MongoDB with auth) for the driver
-  repository and the full provision/reset/delete lifecycle, including a login
-  rate-limit burst check. These are skipped automatically when Docker is
-  unavailable.
+- Unit tests for validators, password generator, services, rate limiters, encryption, backup/restore.
+- `@WebMvcTest` slices for controllers (auth, CSRF, validation, error handling).
+- Testcontainers-backed tests (real MongoDB/PostgreSQL with auth) for driver repos and full provision/reset/delete lifecycle, including concurrency and rate-limit bursts. Skipped automatically when Docker is unavailable (`Tests run:266 Failures:0 Errors:0 Skipped:26` without Docker).
 
 ## Project layout
 
 ```
-compose.yaml                      # MongoDB + mongo-express (mongo-express loopback-bound)
+compose.yaml                      # MongoDB + mongo-express + PostgreSQL 18.6 + Adminer (all loopback-bound)
 .env / .env.example               # credentials (gitignored)
 src/main/java/com/pkmprojects/mongodbserver
-  config/                         # Security, rate limiting, mongo-express proxy, properties, Clock
-  controller/                     # Login, Dashboard, Database, Collection, Activity
-  dto/                            # Form + view objects (CreateDatabaseForm, DatabaseInfo, ...)
+  MongodbserverApplication.java   # @SpringBootApplication (excludes DataSourceAutoConfiguration when PG disabled)
+  config/                         # Security, rate limiting, PostgresConfig, EncryptionProperties, HealthIndicator, metrics
+  controller/                     # Login, Dashboard, Database, Collection, Postgres, Activity, Backup, Monitor
+  dto/                            # Form + view objects (CreateDatabaseForm, DatabaseInfo, TableInfo, TableRowPage, ...)
   error/                          # Domain exceptions + global handler
-  model/                          # AuditEvent, ManagedDatabase (stores the per-db user password)
-  repository/                     # Driver gateway + Spring Data metadata repos
+  model/                          # AuditEvent, ManagedDatabase (id=engine:dbName, encrypted password), DatabaseEngineType
+  repository/                     # MongoDatabaseRepository, PostgresDatabaseRepository, ManagedDatabaseRepository, AuditLogRepository
   security/                       # Password generator
-  service/                        # Provisioning, Exploration, name validation
+  service/                        # Provisioning, Exploration, PostgresExploration, Backup, Statistics, Monitor, Encryption, DatabaseNameValidator
+  util/                           # Json helpers
 src/main/resources
-  application.yml                 # local defaults (spring.mongodb.*, rate-limit, proxy)
-  application-atlas.yml           # MONGODB_URI-driven profile
-  static/
-    css/site.css                  # UI styling
-    js/app.js                     # copy-to-clipboard, confirm, toggle-password helpers
-    favicon.ico
-  templates/                      # Thymeleaf views (login, index, database, collections,
-    fragments/                    #   activity, reset-password, delete-confirm, error)
+  application.yml                 # defaults (spring.mongodb.*, app.postgres.*, rate-limit, management)
+  static/css/site.css             # UI styling
+  static/js/app.js                # copy-to-clipboard, confirm, toggle-password helpers
+  templates/                      # Thymeleaf views (login, index, database, table-rows, collections, activity, ...)
+    fragments/
+deploy/                           # deploy.sh, setup-cron.sh, verify-memory-config.sh, load-test-*.sh, nginx.conf.example
 ```
 
 ## Third-party libraries & credits
 
-This project is built on the shoulders of the following open-source software:
-
 | Library | Used for | License |
-| --- | --- | --- |
-| [Spring Boot](https://spring.io/projects/spring-boot) 4.1 / Spring Framework 7 | Web, security, data, validation starters | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
-| [Spring Security](https://spring.io/projects/spring-security) | Form login, CSRF, method security, rate-limit filter ordering | Apache-2.0 |
+|---|---|---|
+| [Spring Boot](https://spring.io/projects/spring-boot) 4.1 / Spring Framework 7 | Web, security, data, validation, JDBC, actuator | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) |
+| [Spring Security](https://spring.io/projects/spring-security) | Form login, CSRF, method security, filter ordering | Apache-2.0 |
 | [Spring Data MongoDB](https://spring.io/projects/spring-data-mongodb) | Repository metadata + driver gateway | Apache-2.0 |
 | [MongoDB Java Driver](https://www.mongodb.com/docs/drivers/java/) | Direct database/user administration | Apache-2.0 |
+| [PostgreSQL JDBC](https://jdbc.postgresql.org/) 42.7.5 | PostgreSQL administration via JDBC | BSD-2-Clause |
 | [Thymeleaf](https://www.thymeleaf.org/) + `thymeleaf-extras-springsecurity6` | Server-rendered views | Apache-2.0 |
 | [springboot4-dotenv](https://github.com/paulschwarz/spring-dotenv) | `.env` loading | MIT |
 | [Bootstrap](https://getbootstrap.com/) 5.3.8 (WebJar) | UI styling | MIT |
 | [Bootstrap Icons](https://icons.getbootstrap.com/) 1.13.1 (WebJar) | UI icons | MIT |
-| [Testcontainers](https://testcontainers.com/) | Integration tests against real MongoDB | MIT |
-| [MongoDB](https://www.mongodb.com/) / [mongo-express](https://github.com/mongo-express/mongo-express) (Docker images) | Local dev stack | SSPL / MIT (respectively) |
+| [Testcontainers](https://testcontainers.com/) | Integration tests (MongoDB + PostgreSQL) | MIT |
+| [MongoDB](https://www.mongodb.com/) / [mongo-express](https://github.com/mongo-express/mongo-express) / [PostgreSQL](https://www.postgresql.org/) / [Adminer](https://www.adminer.org/) (Docker images) | Local dev stack | SSPL / MIT / PostgreSQL / Apache-2.0 |
 
 ## License
 

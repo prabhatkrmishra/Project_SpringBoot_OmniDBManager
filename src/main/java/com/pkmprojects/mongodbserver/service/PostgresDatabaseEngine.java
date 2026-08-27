@@ -105,9 +105,9 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         String sslmode = publicTls ? publicSslmode : "disable";
         // Only add sslmode when TLS is enabled or explicitly require; keep disable explicit for clarity
         if (publicTls) {
-            return base + "?sslmode=" + sslmode + "&application_name=mongodbserver";
+            return base + "?sslmode=" + sslmode + "&application_name=omnidb";
         }
-        return base + "?application_name=mongodbserver";
+        return base + "?application_name=omnidb";
     }
 
     String resolveHost() {

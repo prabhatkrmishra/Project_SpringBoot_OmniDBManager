@@ -1,15 +1,15 @@
-# Nginx reverse-proxy template for MongoDBServer.
+# Nginx reverse-proxy template for OmniDB Manager.
 #
 # Setup on the VPS:
 #   sudo apt install nginx certbot python3-certbot-nginx
-#   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/mongodbserver
-#   sudo nano /etc/nginx/sites-available/mongodbserver   # set your domain
-#   sudo ln -s /etc/nginx/sites-available/mongodbserver /etc/nginx/sites-enabled/
+#   sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/omnidb
+#   sudo nano /etc/nginx/sites-available/omnidb   # set your domain
+#   sudo ln -s /etc/nginx/sites-available/omnidb /etc/nginx/sites-enabled/
 #   sudo rm -f /etc/nginx/sites-enabled/default
 #   sudo nginx -t && sudo systemctl reload nginx
 #   sudo certbot --nginx -d your.domain.com              # adds TLS + redirects
 #
-# Then in ~/mongodbserver/.env set:
+# Then in ~/omnidb/.env set:
 #   RATE_LIMIT_TRUST_XFF=true        # rate limiter keys on the real client IP
 # and restart the jar. Keep SERVER_ADDRESS unset (loopback) - nginx is the
 # only public entry point.
@@ -75,7 +75,7 @@ server {
 #   #       include /etc/nginx/streams-enabled/*.conf;
 #   #   }
 #
-# Then save this as /etc/nginx/streams-enabled/mongodbserver.conf:
+# Then save this as /etc/nginx/streams-enabled/omnidb.conf:
 #
 # limit_conn_zone $binary_remote_addr zone=mongo_conn_per_ip:10m;
 #
@@ -96,7 +96,7 @@ server {
 #   sudo nginx -t && sudo systemctl reload nginx
 #   sudo ufw allow 27017/tcp
 #
-# Finally set in ~/mongodbserver/.env so ISSUED connection strings are correct:
+# Finally set in ~/omnidb/.env so ISSUED connection strings are correct:
 #   MONGODB_PUBLIC_HOST=your.domain.com
 #   MONGODB_PUBLIC_TLS=true
 # and restart the jar. New strings then read:

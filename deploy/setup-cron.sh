@@ -10,11 +10,11 @@ DEPLOY_SCRIPT="$SCRIPT_DIR/deploy.sh"
 chmod +x "$DEPLOY_SCRIPT"
 
 # Add cron entry (idempotent — removes old entry first)
-CRON_LINE="*/5 * * * * $DEPLOY_SCRIPT >> $HOME/mongodbserver/deploy.log 2>&1"
+CRON_LINE="*/5 * * * * $DEPLOY_SCRIPT >> $HOME/omnidb/deploy.log 2>&1"
 ( crontab -l 2>/dev/null | grep -v "deploy.sh" ; echo "$CRON_LINE" ) | crontab -
 
 echo "Cron job installed. It will run every 5 minutes."
-echo "Logs: ~/mongodbserver/deploy.log"
+echo "Logs: ~/omnidb/deploy.log"
 echo ""
 echo "To verify: crontab -l"
 echo "To remove:  crontab -l | grep -v deploy.sh | crontab -"

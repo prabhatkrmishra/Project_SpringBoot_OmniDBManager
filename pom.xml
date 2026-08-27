@@ -9,11 +9,11 @@
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.pkmprojects</groupId>
-    <artifactId>mongodbserver</artifactId>
+    <artifactId>omnidb-manager</artifactId>
     <version>1.5.0-SNAPSHOT</version>
-    <name/>
-    <description/>
-    <url/>
+    <name>OmniDB Manager</name>
+    <description>Enterprise dual-engine database control plane — MongoDB + PostgreSQL provisioning, isolation and lifecycle management</description>
+    <url>https://github.com/prabhatkrmishra/Project_SpringBoot_OmniDBManager</url>
     <licenses>
         <license>
             <name>Apache License, Version 2.0</name>

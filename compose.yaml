@@ -1,7 +1,7 @@
 services:
   mongo:
     image: mongo:8
-    container_name: mongodbserver-mongo
+    container_name: omnidb-mongo
     restart: unless-stopped
     ports:
       - "127.0.0.1:9812:27017"
@@ -31,7 +31,7 @@ services:
 
   mongo-express:
     image: mongo-express:latest
-    container_name: mongodbserver-mongo-express
+    container_name: omnidb-mongo-express
     restart: unless-stopped
     ports:
       # Loopback only: the UI is reachable through the admin app proxy at /mongo-express
@@ -46,7 +46,7 @@ services:
 
   postgres:
     image: postgres:18.6-alpine
-    container_name: mongodbserver-postgres
+    container_name: omnidb-postgres
     restart: unless-stopped
     ports:
       - "127.0.0.1:9813:5432"
@@ -88,7 +88,7 @@ services:
 
   adminer:
     image: adminer:6.0.1-standalone
-    container_name: mongodbserver-adminer
+    container_name: omnidb-adminer
     restart: unless-stopped
     ports:
       - "127.0.0.1:9815:8080"

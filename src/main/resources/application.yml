@@ -1,6 +1,6 @@
 spring:
   application:
-    name: mongodb-server
+    name: omnidb-manager
 
   mongodb:
     # Local MongoDB (Docker Compose). The app connects as the Mongo root/admin user

@@ -12,8 +12,8 @@
 # Exit codes: 0 = all checks passed, 1 = one or more failed.
 set -uo pipefail
 
-CONTAINER="${CONTAINER:-mongodbserver-mongo}"
-ENV_FILE="${ENV_FILE:-$HOME/mongodbserver/.env}"
+CONTAINER="${CONTAINER:-omnidb-mongo}"
+ENV_FILE="${ENV_FILE:-$HOME/omnidb/.env}"
 [ -f "$ENV_FILE" ] || ENV_FILE="./.env"
 
 PASS=0
@@ -40,7 +40,7 @@ fi
 
 # ─── JVM app ────────────────────────────────────────────────────────────────
 echo "--- JVM app ---"
-JAVA_PID=$(pgrep -f 'java .*mongodbserver-.*\.jar' | head -1 || true)
+JAVA_PID=$(pgrep -f 'java .*omnidb-manager-.*\.jar' | head -1 || true)
 if [ -n "${JAVA_PID:-}" ]; then
   ARGS=$(tr '\0' ' ' </proc/"$JAVA_PID"/cmdline)
   XMX=$(echo "$ARGS" | grep -o '\-Xmx[0-9]*[mgk]' | head -1)
@@ -57,7 +57,7 @@ if [ -n "${JAVA_PID:-}" ]; then
     bad "compact object headers not enabled"
   fi
 else
-  bad "no running mongodbserver jar process found"
+  bad "no running omnidb-manager jar process found"
 fi
 
 # ─── Mongo container ────────────────────────────────────────────────────────

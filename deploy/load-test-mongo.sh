@@ -12,9 +12,9 @@ set -uo pipefail
 
 DURATION="${1:-15}"
 WORKERS="${2:-4}"
-CONTAINER="${CONTAINER:-mongodbserver-mongo}"
+CONTAINER="${CONTAINER:-omnidb-mongo}"
 DB="loadtest_tmp"
-ENV_FILE="${ENV_FILE:-$HOME/mongodbserver/.env}"
+ENV_FILE="${ENV_FILE:-$HOME/omnidb/.env}"
 [ -f "$ENV_FILE" ] || ENV_FILE="./.env"
 # shellcheck disable=SC1090
 source <(grep -E '^(MONGODB_ROOT_USERNAME|MONGODB_ROOT_PASSWORD)=' "$ENV_FILE")
