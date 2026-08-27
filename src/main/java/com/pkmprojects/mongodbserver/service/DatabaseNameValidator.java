@@ -2,6 +2,7 @@ package com.pkmprojects.mongodbserver.service;
 
 import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import java.util.Locale;
@@ -12,6 +13,7 @@ import java.util.Set;
  * Mongo: [A-Za-z0-9_-]+ max 64. Postgres: ^[a-z_][a-z0-9_]*$ max 63, lowercased.
  */
 @Component
+@Primary
 public class DatabaseNameValidator {
 
     static final Set<String> SYSTEM_DATABASES = Set.of("admin", "local", "config", "mongodb_admin");
