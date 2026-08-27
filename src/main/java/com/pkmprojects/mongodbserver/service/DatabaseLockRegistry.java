@@ -46,4 +46,12 @@ public class DatabaseLockRegistry {
             return action.get();
         }
     }
+
+    public void withLock(com.pkmprojects.mongodbserver.model.DatabaseEngineType engine, String dbName, Runnable action) {
+        withLock(engine.name() + ":" + dbName, action);
+    }
+
+    public <T> T withLock(com.pkmprojects.mongodbserver.model.DatabaseEngineType engine, String dbName, Supplier<T> action) {
+        return withLock(engine.name() + ":" + dbName, action);
+    }
 }

@@ -1,5 +1,7 @@
 package com.pkmprojects.mongodbserver.dto;
 
+import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
+
 import java.io.Serial;
 import java.io.Serializable;
 import java.time.Instant;
@@ -17,6 +19,7 @@ import java.util.List;
  */
 public record DatabaseInfo(
         String dbName,
+        DatabaseEngineType engineType,
         String userName,
         List<String> roles,
         Long collectionsCount,
@@ -34,7 +37,7 @@ public record DatabaseInfo(
      * @return a copy of this view model with the show-once connection string set
      */
     public DatabaseInfo withConnectionString(String connectionString) {
-        return new DatabaseInfo(dbName, userName, roles, collectionsCount, createdAt, updatedAt,
+        return new DatabaseInfo(dbName, engineType, userName, roles, collectionsCount, createdAt, updatedAt,
                 lastPasswordResetAt, provisioned, connectionString, sizeBytes);
     }
 }

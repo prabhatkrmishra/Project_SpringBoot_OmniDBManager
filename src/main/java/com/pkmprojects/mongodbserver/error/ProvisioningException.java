@@ -10,4 +10,8 @@ public class ProvisioningException extends RuntimeException {
     public ProvisioningException(String message, Throwable cause) {
         super(message, cause);
     }
+
+    public ProvisioningException(String message) {
+        super(message);
+    }
 }

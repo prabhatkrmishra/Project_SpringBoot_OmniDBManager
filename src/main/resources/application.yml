@@ -68,6 +68,14 @@ app:
     base-url: ${MONGO_EXPRESS_BASE_URL:http://127.0.0.1:9814/mongo-express}
     username: ${MONGO_EXPRESS_USERNAME:admin}
     password: ${MONGO_EXPRESS_PASSWORD:admin}
+  postgres:
+    enabled: ${POSTGRES_ENABLED:false}
+    uri: ${POSTGRES_URI:jdbc:postgresql://127.0.0.1:9813/postgres}
+    public-host: ${POSTGRES_PUBLIC_HOST:}
+    public-tls: ${POSTGRES_PUBLIC_TLS:false}
+    public-sslmode: ${POSTGRES_PUBLIC_SSLMODE:require}
+  adminer:
+    base-url: ${ADMINER_BASE_URL:http://127.0.0.1:9815}
   # Brute-force protection on the login form (attempts per IP+username per window)
   login-rate-limit:
     max-attempts: 5

@@ -1117,13 +1117,22 @@ a {
         display: none;
     }
 
-    .sidebar-footer form {
+        .sidebar-footer form {
         width: auto;
     }
 
     .sidebar-footer .btn {
         width: auto !important;
     }
+
+    .sidebar-back { margin: 0.5rem 0.85rem; }
+    .engine-header { padding: 0.75rem 0.85rem 0.25rem; display:flex; align-items:center; gap:0.6rem; color:#fff; font-weight:700; }
+    .engine-header i { font-size:1.2rem; }
+    .provision-card { border-left: 4px solid var(--bs-primary); transition: transform .15s; }
+    .provision-card:hover { transform: translateY(-2px); }
+    .provision-card-pg { border-left-color: #336791; }
+    .engine-badge-mongo { background: rgb(0 104 74 / 0.12); color:#00684a; font-size:0.65rem; }
+    .engine-badge-pg { background: rgb(51 103 145 / 0.12); color:#336791; font-size:0.65rem; }
 
     .auth-main {
         padding: 2rem 1.5rem 1.5rem;

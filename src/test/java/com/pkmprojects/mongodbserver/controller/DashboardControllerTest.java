@@ -4,6 +4,7 @@ import com.pkmprojects.mongodbserver.config.AdminProperties;
 import com.pkmprojects.mongodbserver.config.SecurityConfig;
 import com.pkmprojects.mongodbserver.dto.DatabaseInfo;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
+import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
 import org.junit.jupiter.api.Test;
@@ -69,9 +70,9 @@ class DashboardControllerTest {
 
     @Test
     void dashboardListsDatabasesAndActivity() throws Exception {
-        when(provisioningService.listDatabases()).thenReturn(List.of(
-                new DatabaseInfo("myapp", "appuser", List.of("readWrite:myapp"), 2L, NOW, NOW, null, true, null, 0L),
-                new DatabaseInfo("external", null, List.of(), 0L, null, null, null, false, null, 0L)));
+        when(provisioningService.listDatabases(DatabaseEngineType.MONGO)).thenReturn(List.of(
+                new DatabaseInfo("myapp", DatabaseEngineType.MONGO, "appuser", List.of("readWrite:myapp"), 2L, NOW, NOW, null, true, null, 0L)));
+        when(provisioningService.listDatabases(DatabaseEngineType.POSTGRES)).thenReturn(List.of());
         when(auditLogRepository.findTop10ByOrderByPerformedAtDesc()).thenReturn(List.of(
                 new AuditEvent(AuditEvent.PROVISION, "myapp", "appuser", "admin", NOW)));
 
@@ -80,19 +81,18 @@ class DashboardControllerTest {
                 .andExpect(view().name("index"))
                 .andExpect(model().attributeExists("databases", "recentActivity"))
                 .andExpect(content().string(containsString("myapp")))
-                .andExpect(content().string(containsString("external")))
-                .andExpect(content().string(containsString("Storage Size")))
                 .andExpect(content().string(containsString("Recent activity")));
     }
 
     @Test
     void dashboardShowsNewDatabaseLink() throws Exception {
-        when(provisioningService.listDatabases()).thenReturn(List.of());
+        when(provisioningService.listDatabases(DatabaseEngineType.MONGO)).thenReturn(List.of());
+        when(provisioningService.listDatabases(DatabaseEngineType.POSTGRES)).thenReturn(List.of());
         when(auditLogRepository.findTop10ByOrderByPerformedAtDesc()).thenReturn(List.of());
 
         mockMvc.perform(get("/").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("/databases/new")));
+                .andExpect(content().string(containsString("/provision")));
     }
 
     @TestConfiguration(proxyBeanMethods = false)

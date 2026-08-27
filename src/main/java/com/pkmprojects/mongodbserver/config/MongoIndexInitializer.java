@@ -39,6 +39,17 @@ public class MongoIndexInitializer implements ApplicationRunner {
                     .getCollection("admin_activity")
                     .createIndex(new Document("performedAt", -1));
             log.info("Ensured index on {}.admin_activity(performedAt)", metadataDatabase);
+            mongoClient.getDatabase(metadataDatabase)
+                    .getCollection("provisioned_databases")
+                    .createIndex(new Document("engineType", 1).append("dbName", 1),
+                            new com.mongodb.client.model.IndexOptions().unique(true));
+            log.info("Ensured unique index on {}.provisioned_databases(engineType, dbName)", metadataDatabase);
+            mongoClient.getDatabase(metadataDatabase)
+                    .getCollection("provisioned_databases")
+                    .createIndex(new Document("engineType", 1));
+            mongoClient.getDatabase(metadataDatabase)
+                    .getCollection("admin_activity")
+                    .createIndex(new Document("engineType", 1));
         } catch (MongoException e) {
             // MongoDB unreachable (or index creation refused): log and continue so
             // the login page and read endpoints still come up during a Mongo outage;

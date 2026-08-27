@@ -2,56 +2,37 @@ package com.pkmprojects.mongodbserver.service;
 
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
-import org.bson.Document;
 import com.pkmprojects.mongodbserver.dto.CreateDatabaseForm;
 import com.pkmprojects.mongodbserver.dto.DatabaseInfo;
 import com.pkmprojects.mongodbserver.dto.DatabaseUser;
 import com.pkmprojects.mongodbserver.dto.ResetPasswordForm;
 import com.pkmprojects.mongodbserver.error.DatabaseAlreadyExistsException;
 import com.pkmprojects.mongodbserver.error.DatabaseNotFoundException;
+import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
+import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
+import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
+import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.core.env.Environment;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Clock;
-import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- * Orchestrates the Atlas-style provisioning lifecycle:
- * create a database with a dedicated db-scoped user, rotate its password,
- * and delete the database together with its user.
- *
- * <p>The database user's password is persisted in provisioning metadata so the
- * connection string can be reconstructed and shown on the database detail page
- * at any time. Every lifecycle action is recorded in the {@code admin_activity}
- * audit trail.</p>
- *
- * <p><strong>Concurrency contract:</strong> all lifecycle operations for the
- * same database name are serialized per name (see {@link DatabaseLockRegistry}).
- * Without this, concurrent {@link #provision(CreateDatabaseForm)} and
- * {@link #delete(String)} calls interleave into inconsistent states (orphaned
- * metadata, a database whose user was already dropped) and concurrent
- * {@code createUser} commands against a brand-new database can lose the user
- * insert entirely while still reporting success - MongoDB does not serialize
- * user creation on a not-yet-existing database. Different database names are
- * never blocked by each other.</p>
- */
 @Service
 public class ProvisioningService {
 
@@ -65,22 +46,28 @@ public class ProvisioningService {
     private final MongoDatabaseRepository mongoDatabaseRepository;
     private final ManagedDatabaseRepository managedDatabaseRepository;
     private final AuditLogRepository auditLogRepository;
-    private final MongoNameValidator nameValidator;
+    private final DatabaseNameValidator nameValidator;
     private final PasswordGenerator passwordGenerator;
-    private final Clock clock;
+    private final java.time.Clock clock;
     private final Environment environment;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final DatabaseLockRegistry databaseLocks;
+    private final MongoDatabaseEngine mongoEngine;
+    private final Optional<PostgresDatabaseEngine> postgresEngine;
+    private final Optional<PostgresDatabaseRepository> postgresRepository;
 
     public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
                                ManagedDatabaseRepository managedDatabaseRepository,
                                AuditLogRepository auditLogRepository,
-                               MongoNameValidator nameValidator,
+                               DatabaseNameValidator nameValidator,
                                PasswordGenerator passwordGenerator,
-                               Clock clock,
+                               java.time.Clock clock,
                                Environment environment,
                                ApplicationEventPublisher applicationEventPublisher,
-                               DatabaseLockRegistry databaseLocks) {
+                               DatabaseLockRegistry databaseLocks,
+                               MongoDatabaseEngine mongoEngine,
+                               @Autowired(required = false) PostgresDatabaseEngine postgresEngine,
+                               @Autowired(required = false) PostgresDatabaseRepository postgresRepository) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.managedDatabaseRepository = managedDatabaseRepository;
         this.auditLogRepository = auditLogRepository;
@@ -90,101 +77,120 @@ public class ProvisioningService {
         this.environment = environment;
         this.applicationEventPublisher = applicationEventPublisher;
         this.databaseLocks = databaseLocks;
+        this.mongoEngine = mongoEngine;
+        this.postgresEngine = Optional.ofNullable(postgresEngine);
+        this.postgresRepository = Optional.ofNullable(postgresRepository);
     }
 
-    /**
-     * Percent-encodes a URI userinfo component (unreserved characters kept as-is).
-     */
-    private static String uriEncode(String value) {
-        StringBuilder encoded = new StringBuilder(value.length());
-        for (byte b : value.getBytes(StandardCharsets.UTF_8)) {
-            if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
-                    || b == '-' || b == '.' || b == '_' || b == '~') {
-                encoded.append((char) b);
-            } else {
-                encoded.append('%').append(Character.toUpperCase(Character.forDigit((b >> 4) & 0xF, 16)))
-                        .append(Character.toUpperCase(Character.forDigit(b & 0xF, 16)));
-            }
+    private DatabaseEngine engineFor(DatabaseEngineType type) {
+        if (type == DatabaseEngineType.POSTGRES) {
+            return postgresEngine.orElseThrow(() -> new ProvisioningException("Postgres is not enabled"));
         }
-        return encoded.toString();
+        return mongoEngine;
     }
 
-    /**
-     * Creates a database and a Mongo user with readWrite rights scoped to it.
-     * The returned {@link DatabaseInfo} carries the connection string (with password)
-     * for the "show once" flash message.
-     */
+    private String lockKey(DatabaseEngineType engine, String dbName) {
+        return engine.name() + ":" + dbName;
+    }
+
     public DatabaseInfo provision(CreateDatabaseForm form) {
+        DatabaseEngineType engineType = form.engineType() != null ? form.engineType() : DatabaseEngineType.MONGO;
         String dbName = form.dbName().trim();
         String userName = form.userName().trim();
         String requestedPassword = form.password() == null ? "" : form.password().trim();
-        nameValidator.validateDatabaseName(dbName);
-        nameValidator.validateUserName(userName);
+        if (engineType == DatabaseEngineType.POSTGRES) {
+            nameValidator.validatePostgresDatabaseName(dbName);
+            nameValidator.validatePostgresUserName(userName);
+        } else {
+            nameValidator.validateMongoDatabaseName(dbName);
+            nameValidator.validateUserName(userName);
+        }
         nameValidator.validatePassword(requestedPassword);
 
-        return databaseLocks.withLock(dbName, () -> {
-            if (managedDatabaseRepository.existsByDbName(dbName) || mongoDatabaseRepository.databaseExists(dbName)) {
-                throw new DatabaseAlreadyExistsException("Database '" + dbName + "' already exists");
+        return databaseLocks.withLock(lockKey(engineType, dbName), () -> {
+            if (managedDatabaseRepository.existsByEngineTypeAndDbName(engineType, dbName)
+                    || engineFor(engineType).databaseExists(dbName)) {
+                throw new DatabaseAlreadyExistsException("Database '" + dbName + "' already exists in " + engineType);
             }
 
             String password = requestedPassword.isBlank()
                     ? passwordGenerator.generate(GENERATED_PASSWORD_LENGTH)
                     : requestedPassword;
 
+            DatabaseEngine engine = engineFor(engineType);
             try {
-                mongoDatabaseRepository.createUser(dbName, userName, password);
-                mongoDatabaseRepository.createDatabase(dbName);
+                if (engineType == DatabaseEngineType.POSTGRES) {
+                    engine.createUser(dbName, userName, password);
+                    try {
+                        engine.createDatabase(dbName, userName);
+                        engine.grantPrivileges(dbName, userName);
+                    } catch (Exception dbEx) {
+                        try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Cleanup role after DB create failure", ce); }
+                        throw dbEx;
+                    }
+                } else {
+                    engine.createUser(dbName, userName, password);
+                    engine.createDatabase(dbName, userName);
+                }
             } catch (MongoException e) {
-                if (e instanceof MongoCommandException commandException
-                        && commandException.getErrorCode() == MONGO_CODE_USER_ALREADY_EXISTS) {
-                    // lost a concurrent provision race - the duplicate user already exists
+                if (e instanceof MongoCommandException ce && ce.getErrorCode() == MONGO_CODE_USER_ALREADY_EXISTS) {
                     throw new DatabaseAlreadyExistsException("Database user '" + userName + "' already exists");
                 }
-                // Best-effort cleanup of a partially created user so a retry is not blocked.
-                // Widened to MongoException: a timeout/connection failure after the user was
-                // created would otherwise leak an orphaned user.
-                try {
-                    mongoDatabaseRepository.dropUser(dbName, userName);
-                } catch (MongoException cleanupFailure) {
-                    log.warn("Could not clean up partially created user '{}' after failed provisioning", userName,
-                            cleanupFailure);
+                try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created user '{}'", userName, ce); }
+                log.error("Failed to provision database '{}' (user '{}')", dbName, userName, e);
+                throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
+            } catch (Exception e) {
+                if (engineType == DatabaseEngineType.POSTGRES) {
+                    try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created PG role '{}'", userName, ce); }
                 }
                 log.error("Failed to provision database '{}' (user '{}')", dbName, userName, e);
                 throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
             }
 
-            Instant now = clock.instant();
-            ManagedDatabase metadata = new ManagedDatabase(dbName, userName, List.of("readWrite:" + dbName), now, now, null);
+            java.time.Instant now = clock.instant();
+            List<String> roles = engineType == DatabaseEngineType.POSTGRES
+                    ? List.of("CONNECT:" + dbName)
+                    : List.of("readWrite:" + dbName);
+            ManagedDatabase metadata = new ManagedDatabase(dbName, engineType, userName, roles, now, now, null);
             metadata.setStoredPassword(password);
             managedDatabaseRepository.save(metadata);
-            audit(AuditEvent.PROVISION, dbName, userName, now);
-            log.info("Provisioned database '{}' with user '{}'", dbName, userName);
+            audit(AuditEvent.PROVISION, dbName, engineType, userName, now);
+            log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, userName);
 
-            return toInfo(dbName, metadata, collectionCount(dbName), null, 0L)
-                    .withConnectionString(buildConnectionString(userName, password, dbName));
+            return toInfo(dbName, metadata, collectionCount(dbName, engineType), null, 0L)
+                    .withConnectionString(engine.buildConnectionString(userName, password, dbName));
         });
     }
 
-    /**
-     * Rotates the provisioned user's password. Returns the new connection string
-     * (shown once).
-     */
     public DatabaseInfo resetPassword(String dbName, ResetPasswordForm form) {
-        nameValidator.validateDatabaseName(dbName);
+        // Legacy: lookup engine from metadata
+        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName)
+                .orElseGet(() -> managedDatabaseRepository.findAll().stream()
+                        .filter(m -> m.getDbName().equals(dbName)).findFirst().orElse(null));
+        if (md == null) throw new DatabaseNotFoundException("Database '" + dbName + "' is not provisioned");
+        return resetPassword(md.getEngineType(), dbName, form);
+    }
+
+    public DatabaseInfo resetPassword(DatabaseEngineType engineType, String dbName, ResetPasswordForm form) {
+        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else nameValidator.validateDatabaseName(dbName);
         String requestedPassword = form.password() == null ? "" : form.password().trim();
         nameValidator.validatePassword(requestedPassword);
 
-        return databaseLocks.withLock(dbName, () -> {
-            ManagedDatabase metadata = managedDatabaseRepository.findByDbName(dbName)
-                    .orElseThrow(() -> new DatabaseNotFoundException("Database '" + dbName + "' is not provisioned"));
+        return databaseLocks.withLock(lockKey(engineType, dbName), () -> {
+            ManagedDatabase metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName)
+                    .orElseThrow(() -> new DatabaseNotFoundException("Database '" + dbName + "' is not provisioned in " + engineType));
 
             String password = requestedPassword.isBlank()
                     ? passwordGenerator.generate(GENERATED_PASSWORD_LENGTH)
                     : requestedPassword;
 
             try {
-                mongoDatabaseRepository.updateUserPassword(dbName, metadata.getUserName(), password);
+                engineFor(engineType).updateUserPassword(dbName, metadata.getUserName(), password);
             } catch (MongoCommandException e) {
+                log.error("Failed to reset password for user '{}' on database '{}'", metadata.getUserName(), dbName, e);
+                throw new ProvisioningException("Could not reset password for database '" + dbName + "'", e);
+            } catch (Exception e) {
                 log.error("Failed to reset password for user '{}' on database '{}'", metadata.getUserName(), dbName, e);
                 throw new ProvisioningException("Could not reset password for database '" + dbName + "'", e);
             }
@@ -192,246 +198,232 @@ public class ProvisioningService {
             metadata.setStoredPassword(password);
             metadata.setLastPasswordResetAt(clock.instant());
             managedDatabaseRepository.save(metadata);
-            audit(AuditEvent.RESET_PASSWORD, dbName, metadata.getUserName(), metadata.getLastPasswordResetAt());
-            log.info("Reset password for user '{}' on database '{}'", metadata.getUserName(), dbName);
+            audit(AuditEvent.RESET_PASSWORD, dbName, engineType, metadata.getUserName(), metadata.getLastPasswordResetAt());
+            log.info("Reset password for user '{}' on database '{}' ({})", metadata.getUserName(), dbName, engineType);
 
-            return toInfo(dbName, metadata, collectionCount(dbName), null, 0L)
-                    .withConnectionString(buildConnectionString(metadata.getUserName(), password, dbName));
+            return toInfo(dbName, metadata, collectionCount(dbName, engineType), null, 0L)
+                    .withConnectionString(engineFor(engineType).buildConnectionString(metadata.getUserName(), password, dbName));
         });
     }
 
-    /**
-     * Drops the database and (if provisioned) its user and metadata. Tolerates a
-     * database whose namespace or user is already gone (e.g. an earlier partial
-     * failure), so delete is always retryable.
-     */
     public void delete(String dbName) {
-        nameValidator.validateDatabaseName(dbName);
-        databaseLocks.withLock(dbName, () -> {
-            Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByDbName(dbName);
-
-            try {
-                mongoDatabaseRepository.dropDatabase(dbName);
-            } catch (MongoCommandException e) {
-                if (!isMongoCode(e, MONGO_CODE_NAMESPACE_NOT_FOUND)) {
-                    log.error("Failed to drop database '{}'", dbName, e);
-                    throw new ProvisioningException("Could not drop database '" + dbName + "'", e);
-                }
+        // Legacy: try to find engine, delete all matching
+        List<ManagedDatabase> metas = managedDatabaseRepository.findByDbNameOrderByEngineType(dbName);
+        if (!metas.isEmpty()) {
+            for (ManagedDatabase m : metas) {
+                delete(m.getEngineType(), dbName);
             }
+            return;
+        }
+        // Not provisioned: try Mongo then Postgres
+        if (mongoEngine.databaseExists(dbName)) {
+            delete(DatabaseEngineType.MONGO, dbName);
+        } else if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) {
+            delete(DatabaseEngineType.POSTGRES, dbName);
+        } else {
+            // Still try Mongo delete for idempotency
+            delete(DatabaseEngineType.MONGO, dbName);
+        }
+    }
 
-            metadata.ifPresent(m -> {
-                try {
-                    mongoDatabaseRepository.dropUser(dbName, m.getUserName());
-                } catch (MongoCommandException e) {
-                    if (!isMongoCode(e, MONGO_CODE_USER_NOT_FOUND)) {
-                        log.error("Failed to drop user '{}' for database '{}'", m.getUserName(), dbName, e);
-                        throw new ProvisioningException("Could not drop user for database '" + dbName + "'", e);
+    public void delete(DatabaseEngineType engineType, String dbName) {
+        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else nameValidator.validateDatabaseName(dbName);
+        databaseLocks.withLock(lockKey(engineType, dbName), () -> {
+            Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName);
+            DatabaseEngine engine = engineFor(engineType);
+
+            if (engineType == DatabaseEngineType.MONGO) {
+                try { engine.dropDatabase(dbName); } catch (MongoCommandException e) {
+                    if (!isMongoCode(e, MONGO_CODE_NAMESPACE_NOT_FOUND)) {
+                        log.error("Failed to drop database '{}'", dbName, e);
+                        throw new ProvisioningException("Could not drop database '" + dbName + "'", e);
                     }
                 }
-            });
-
-            metadata.ifPresent(m -> managedDatabaseRepository.deleteByDbName(dbName));
-            audit(AuditEvent.DELETE, dbName, metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
-            log.info("Deleted database '{}'", dbName);
+                metadata.ifPresent(m -> {
+                    try { engine.dropUser(dbName, m.getUserName()); } catch (MongoCommandException e) {
+                        if (!isMongoCode(e, MONGO_CODE_USER_NOT_FOUND)) {
+                            log.error("Failed to drop user '{}' for database '{}'", m.getUserName(), dbName, e);
+                            throw new ProvisioningException("Could not drop user for database '" + dbName + "'", e);
+                        }
+                    }
+                });
+                metadata.ifPresent(m -> managedDatabaseRepository.deleteByEngineTypeAndDbName(engineType, dbName));
+            } else {
+                try { engine.dropDatabase(dbName); } catch (Exception e) {
+                    log.warn("Failed to drop PG database '{}': {}", dbName, e.getMessage());
+                }
+                metadata.ifPresent(m -> {
+                    try { engine.dropUser(dbName, m.getUserName()); } catch (Exception e) {
+                        log.warn("Failed to drop PG role '{}': {}", m.getUserName(), e.getMessage());
+                    }
+                });
+                metadata.ifPresent(m -> managedDatabaseRepository.deleteByEngineTypeAndDbName(engineType, dbName));
+            }
+            audit(AuditEvent.DELETE, dbName, engineType, metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
+            log.info("Deleted {} database '{}'", engineType, dbName);
         });
     }
 
-    /**
-     * Creates a collection inside an existing database. The database must already
-     * exist - MongoDB would otherwise create it implicitly, which is not what an
-     * admin expects when a typo sneaks into the database name.
-     */
     public void createCollection(String dbName, String collectionName) {
         nameValidator.validateDatabaseName(dbName);
         nameValidator.validateCollectionName(collectionName);
-        databaseLocks.withLock(dbName, () -> {
-            requireDatabase(dbName);
+        databaseLocks.withLock(lockKey(DatabaseEngineType.MONGO, dbName), () -> {
+            requireDatabase(dbName, DatabaseEngineType.MONGO);
             if (mongoDatabaseRepository.collectionExists(dbName, collectionName)) {
                 throw new DatabaseAlreadyExistsException("Collection '" + collectionName + "' already exists");
             }
-            try {
-                mongoDatabaseRepository.createCollection(dbName, collectionName);
-            } catch (MongoCommandException e) {
+            try { mongoDatabaseRepository.createCollection(dbName, collectionName); } catch (MongoCommandException e) {
                 log.error("Failed to create collection {}.{}", dbName, collectionName, e);
                 throw new ProvisioningException("Could not create collection '" + collectionName + "'", e);
             }
         });
     }
 
-    /**
-     * Drops a collection inside an existing database. Throws
-     * {@link DatabaseNotFoundException} when the collection (or database) is
-     * already gone, so the action is retryable.
-     */
     public void dropCollection(String dbName, String collectionName) {
         nameValidator.validateDatabaseName(dbName);
         nameValidator.validateCollectionName(collectionName);
-        databaseLocks.withLock(dbName, () -> {
-            requireDatabase(dbName);
+        databaseLocks.withLock(lockKey(DatabaseEngineType.MONGO, dbName), () -> {
+            requireDatabase(dbName, DatabaseEngineType.MONGO);
             if (!mongoDatabaseRepository.collectionExists(dbName, collectionName)) {
                 throw new DatabaseNotFoundException("Collection '" + collectionName + "' does not exist");
             }
-            try {
-                mongoDatabaseRepository.dropCollection(dbName, collectionName);
-            } catch (MongoCommandException e) {
-                if (isMongoCode(e, MONGO_CODE_NAMESPACE_NOT_FOUND)) {
-                    throw new DatabaseNotFoundException("Collection '" + collectionName + "' does not exist");
-                }
+            try { mongoDatabaseRepository.dropCollection(dbName, collectionName); } catch (MongoCommandException e) {
+                if (isMongoCode(e, MONGO_CODE_NAMESPACE_NOT_FOUND)) throw new DatabaseNotFoundException("Collection '" + collectionName + "' does not exist");
                 log.error("Failed to drop collection {}.{}", dbName, collectionName, e);
                 throw new ProvisioningException("Could not drop collection '" + collectionName + "'", e);
             }
         });
     }
 
-    /**
-     * Lists all users defined in {@code dbName} (excluding system users).
-     *
-     * @throws DatabaseNotFoundException when the database does not exist
-     */
     public List<DatabaseUser> listUsers(String dbName) {
-        nameValidator.validateDatabaseName(dbName);
-        requireDatabase(dbName);
+        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
+        DatabaseEngineType engine = md != null ? md.getEngineType() : DatabaseEngineType.MONGO;
+        return listUsers(engine, dbName);
+    }
+
+    public List<DatabaseUser> listUsers(DatabaseEngineType engineType, String dbName) {
+        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else nameValidator.validateDatabaseName(dbName);
+        requireDatabase(dbName, engineType);
+        if (engineType == DatabaseEngineType.POSTGRES) {
+            return engineFor(engineType).getUsers(dbName).stream()
+                    .map(u -> new DatabaseUser(u, List.of("CONNECT:" + dbName), dbName))
+                    .toList();
+        }
         return mongoDatabaseRepository.getUsers(dbName).stream()
-                .map(doc -> new DatabaseUser(
-                        doc.getString("user"),
-                        roleNamesOf(doc),
-                        doc.getString("db")))
+                .map(doc -> new DatabaseUser(doc.getString("user"), roleNamesOf(doc), doc.getString("db")))
                 .toList();
     }
 
     private static List<String> roleNamesOf(Document doc) {
         List<Document> roles = doc.getList("roles", Document.class);
-        if (roles == null) {
-            return List.of();
-        }
-        return roles.stream()
-                .map(role -> (role.getString("role") == null ? "" : role.getString("role"))
-                        + ":" + (role.getString("db") == null ? "" : role.getString("db")))
-                .toList();
+        if (roles == null) return List.of();
+        return roles.stream().map(role -> (role.getString("role") == null ? "" : role.getString("role")) + ":" + (role.getString("db") == null ? "" : role.getString("db"))).toList();
     }
 
-    /**
-     * Revokes a user's access to a database by dropping the user. Refuses to
-     * drop the last remaining user to prevent locking out the database entirely.
-     *
-     * @throws DatabaseNotFoundException when the database does not exist
-     * @throws DatabaseAlreadyExistsException when trying to drop the last user
-     */
     public void revokeUser(String dbName, String userName) {
-        nameValidator.validateDatabaseName(dbName);
-        nameValidator.validateUserName(userName);
-        databaseLocks.withLock(dbName, () -> {
-            requireDatabase(dbName);
-            List<Document> users = mongoDatabaseRepository.getUsers(dbName);
-            if (users.size() <= 1) {
-                throw new DatabaseAlreadyExistsException(
-                        "Cannot revoke the last user of database '" + dbName + "'. Delete the database instead.");
-            }
-            try {
-                mongoDatabaseRepository.dropUser(dbName, userName);
-            } catch (MongoCommandException e) {
-                if (isMongoCode(e, MONGO_CODE_USER_NOT_FOUND)) {
-                    throw new DatabaseNotFoundException("User '" + userName + "' does not exist in database '" + dbName + "'");
+        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
+        DatabaseEngineType engine = md != null ? md.getEngineType() : DatabaseEngineType.MONGO;
+        revokeUser(engine, dbName, userName);
+    }
+
+    public void revokeUser(DatabaseEngineType engineType, String dbName, String userName) {
+        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresUserName(userName);
+        else nameValidator.validateUserName(userName);
+        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else nameValidator.validateDatabaseName(dbName);
+        databaseLocks.withLock(lockKey(engineType, dbName), () -> {
+            requireDatabase(dbName, engineType);
+            if (engineType == DatabaseEngineType.POSTGRES) {
+                try { engineFor(engineType).dropUser(dbName, userName); } catch (Exception e) {
+                    throw new ProvisioningException("Could not revoke user '" + userName + "'", e);
                 }
+                audit(AuditEvent.REVOKE_USER, dbName, engineType, userName, clock.instant());
+                log.info("Revoked PG user '{}' from database '{}'", userName, dbName);
+                return;
+            }
+            List<Document> users = mongoDatabaseRepository.getUsers(dbName);
+            if (users.size() <= 1) throw new DatabaseAlreadyExistsException("Cannot revoke the last user of database '" + dbName + "'. Delete the database instead.");
+            try { mongoDatabaseRepository.dropUser(dbName, userName); } catch (MongoCommandException e) {
+                if (isMongoCode(e, MONGO_CODE_USER_NOT_FOUND)) throw new DatabaseNotFoundException("User '" + userName + "' does not exist in database '" + dbName + "'");
                 log.error("Failed to revoke user '{}' from database '{}'", userName, dbName, e);
                 throw new ProvisioningException("Could not revoke user '" + userName + "'", e);
             }
-            audit(AuditEvent.REVOKE_USER, dbName, userName, clock.instant());
+            audit(AuditEvent.REVOKE_USER, dbName, engineType, userName, clock.instant());
             log.info("Revoked user '{}' from database '{}'", userName, dbName);
         });
     }
 
-    /**
-     * All user-manageable databases (system and metadata DBs excluded), sorted by name.
-     */
     public List<DatabaseInfo> listDatabases() {
-        Map<String, ManagedDatabase> byName = managedDatabaseRepository.findAll().stream()
+        // Legacy: Mongo only for backward compat
+        return listDatabases(DatabaseEngineType.MONGO);
+    }
+
+    public List<DatabaseInfo> listDatabases(DatabaseEngineType engineType) {
+        Map<String, ManagedDatabase> byName = managedDatabaseRepository.findAllByEngineType(engineType).stream()
                 .collect(Collectors.toMap(ManagedDatabase::getDbName, Function.identity(), (a, b) -> a, LinkedHashMap::new));
-
-        Map<String, Long> sizes = readDatabaseSizes();
-
-        List<String> dbNames;
-        try {
-            dbNames = mongoDatabaseRepository.listDatabaseNames();
-        } catch (MongoException e) {
-            log.error("Could not list databases on the MongoDB server", e);
-            throw new ProvisioningException("Could not list databases on the MongoDB server", e);
+        Map<String, Long> sizes;
+        try { sizes = engineFor(engineType).getDatabaseSizes(); } catch (Exception e) {
+            log.error("Could not read database sizes from {}", engineType, e);
+            throw new ProvisioningException("Could not read database sizes", e);
         }
-
+        List<String> dbNames;
+        try { dbNames = engineFor(engineType).listDatabaseNames(); } catch (MongoException e) {
+            log.error("Could not list databases on {}", engineType, e);
+            throw new ProvisioningException("Could not list databases on " + engineType, e);
+        } catch (Exception e) {
+            log.error("Could not list databases on {}", engineType, e);
+            throw new ProvisioningException("Could not list databases on " + engineType, e);
+        }
+        Set<String> systemDbs = engineType == DatabaseEngineType.POSTGRES
+                ? DatabaseNameValidator.POSTGRES_SYSTEM_DATABASES
+                : DatabaseNameValidator.SYSTEM_DATABASES;
         return dbNames.stream()
-                .filter(dbName -> !MongoNameValidator.SYSTEM_DATABASES.contains(dbName.toLowerCase(Locale.ROOT)))
-                .map(dbName -> toInfo(dbName, byName.get(dbName), collectionCount(dbName), null,
-                        sizes.getOrDefault(dbName, 0L)))
+                .filter(dbName -> !systemDbs.contains(dbName.toLowerCase(Locale.ROOT)))
+                .map(dbName -> toInfo(dbName, byName.get(dbName), collectionCount(dbName, engineType), null, sizes.getOrDefault(dbName, 0L)))
                 .sorted(Comparator.comparing(DatabaseInfo::dbName))
                 .toList();
     }
 
-    /**
-     * Returns the details of one database (whether provisioned or not).
-     *
-     * @throws DatabaseNotFoundException when the database does not exist on the server
-     */
     public DatabaseInfo getDatabase(String dbName) {
-        nameValidator.validateDatabaseName(dbName);
-        if (!mongoDatabaseRepository.databaseExists(dbName)) {
-            throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
-        }
-        Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByDbName(dbName);
+        // Try Mongo first, then Postgres
+        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
+        if (md != null) return getDatabase(md.getEngineType(), dbName);
+        if (mongoEngine.databaseExists(dbName)) return getDatabase(DatabaseEngineType.MONGO, dbName);
+        if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.POSTGRES, dbName);
+        throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
+    }
+
+    public DatabaseInfo getDatabase(DatabaseEngineType engineType, String dbName) {
+        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else nameValidator.validateDatabaseName(dbName);
+        if (!engineFor(engineType).databaseExists(dbName)) throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist in " + engineType);
+        Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName);
         ManagedDatabase md = metadata.orElse(null);
-        // Rebuild the connection string from the stored password so the detail
-        // page always shows it without relying on the one-time flash message.
         String connectionString = null;
         if (md != null && md.getStoredPassword() != null) {
-            connectionString = buildConnectionString(md.getUserName(), md.getStoredPassword(), dbName);
+            connectionString = engineFor(engineType).buildConnectionString(md.getUserName(), md.getStoredPassword(), dbName);
         }
-        long size = readDatabaseSizes().getOrDefault(dbName, 0L);
-        return toInfo(dbName, md, collectionCount(dbName), connectionString, size);
+        long size = 0L;
+        try { size = engineFor(engineType).getDatabaseSizes().getOrDefault(dbName, 0L); } catch (Exception ignored) {}
+        return toInfo(dbName, md, collectionCount(dbName, engineType), connectionString, size);
     }
 
-    /**
-     * Host portion for connection strings: the explicit
-     * {@code app.mongo-public-host} (e.g. {@code mongo.pkmprojects.online:9812})
-     * when set, otherwise derived from the active {@code spring.mongodb.uri}
-     * (e.g. Atlas cluster) or 127.0.0.1:9812.
-     */
-    String resolveConnectionHost() {
-        String publicHost = environment.getProperty("app.mongo-public-host", "");
-        if (publicHost != null && !publicHost.isBlank()) {
-            return publicHost;
-        }
-        String uri = environment.getProperty("spring.mongodb.uri", "");
-        if (uri.isBlank()) {
-            return "127.0.0.1:9812";
-        }
-        int at = uri.lastIndexOf('@');
-        if (at < 0) {
-            return "127.0.0.1:9812";
-        }
-        String rest = uri.substring(at + 1);
-        int slash = rest.indexOf('/');
-        return slash < 0 ? rest : rest.substring(0, slash);
+    String resolveConnectionHost() { return mongoEngine.resolveConnectionHost(); }
+
+    private void requireDatabase(String dbName, DatabaseEngineType engineType) {
+        if (!engineFor(engineType).databaseExists(dbName)) throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist in " + engineType);
     }
 
-    /**
-     * Whether issued connection strings carry {@code tls=true} - set when
-     * clients reach MongoDB through a TLS-terminating TCP proxy (e.g. nginx
-     * stream) or mongod itself serves TLS.
-     */
-    private boolean resolveConnectionTls() {
-        Boolean tls = environment.getProperty("app.mongo-public-tls", Boolean.class, false);
-        return Boolean.TRUE.equals(tls);
-    }
-
-    private void requireDatabase(String dbName) {
-        if (!mongoDatabaseRepository.databaseExists(dbName)) {
-            throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
-        }
-    }
-
-    private void audit(String eventType, String dbName, String userName, Instant performedAt) {
-        AuditEvent event = new AuditEvent(eventType, dbName, userName, currentUsername(), performedAt);
+    private void audit(String eventType, String dbName, DatabaseEngineType engineType, String userName, java.time.Instant performedAt) {
+        AuditEvent event = new AuditEvent(eventType, dbName, engineType, userName, currentUsername(), performedAt);
         auditLogRepository.save(event);
         applicationEventPublisher.publishEvent(new AuditEventRecorded(event));
+    }
+
+    private void audit(String eventType, String dbName, String userName, java.time.Instant performedAt) {
+        audit(eventType, dbName, DatabaseEngineType.MONGO, userName, performedAt);
     }
 
     private String currentUsername() {
@@ -439,61 +431,27 @@ public class ProvisioningService {
         return authentication != null && authentication.getName() != null ? authentication.getName() : "unknown";
     }
 
-    private String buildConnectionString(String userName, String password, String dbName) {
-        // RFC 3986: '@', '/', '?', '#', '%' and friends inside credentials must be
-        // percent-encoded or the generated URI is not dialable. Generated passwords
-        // deliberately contain '@', '#', '%', so this is not a corner case.
-        //
-        // The provisioned user lives in <db>.system.users, so the URI path names the
-        // database and the explicit authSource keeps authentication unambiguous for
-        // every driver. Consumers connect directly to MongoDB with this string - the
-        // app is only the credential-issuing control plane, never a data-plane proxy.
-        return "mongodb://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + resolveConnectionHost() + "/" + dbName
-                + "?authSource=" + dbName + (resolveConnectionTls() ? "&tls=true" : "");
-    }
-
-    /**
-     * @return the number of collections in {@code dbName}, or {@code null} when
-     *         the count cannot be read (rendered as "unknown", never 0)
-     */
-    private Long collectionCount(String dbName) {
-        try {
-            return (long) mongoDatabaseRepository.listCollectionNames(dbName).size();
-        } catch (MongoException e) {
-            // A collection listing failing for one database (e.g. the server is
-            // briefly unreachable) must not fail the whole dashboard page with a
-            // 500 - degrade to "unknown" for that row and say so in the log.
+    private Long collectionCount(String dbName, DatabaseEngineType engineType) {
+        if (engineType == DatabaseEngineType.POSTGRES) return null;
+        try { return (long) mongoDatabaseRepository.listCollectionNames(dbName).size(); } catch (MongoException e) {
             log.warn("Could not count collections of {}; leaving count blank", dbName, e);
             return null;
         }
     }
 
-    /**
-     * Reads database sizes, translating a driver failure (timeout, unreachable
-     * server) into a {@link ProvisioningException} instead of letting a raw
-     * {@link MongoException} escape to the error handler as an opaque 500.
-     */
+    private Long collectionCount(String dbName) { return collectionCount(dbName, DatabaseEngineType.MONGO); }
+
     private Map<String, Long> readDatabaseSizes() {
-        try {
-            return mongoDatabaseRepository.getDatabaseSizes();
-        } catch (MongoException e) {
+        try { return mongoDatabaseRepository.getDatabaseSizes(); } catch (MongoException e) {
             log.error("Could not read database sizes from the MongoDB server", e);
             throw new ProvisioningException("Could not read database sizes", e);
         }
     }
 
-    private DatabaseInfo toInfo(String dbName, ManagedDatabase metadata, Long collectionsCount,
-                                String connectionString, long sizeBytes) {
-        if (metadata == null) {
-            return new DatabaseInfo(dbName, null, List.of(), collectionsCount, null, null, null, false,
-                    connectionString, sizeBytes);
-        }
-        return new DatabaseInfo(dbName, metadata.getUserName(), metadata.getRoles(),
-                collectionsCount, metadata.getCreatedAt(), metadata.getUpdatedAt(),
-                metadata.getLastPasswordResetAt(), true, connectionString, sizeBytes);
+    private DatabaseInfo toInfo(String dbName, ManagedDatabase metadata, Long collectionsCount, String connectionString, long sizeBytes) {
+        if (metadata == null) return new DatabaseInfo(dbName, null, null, List.of(), collectionsCount, null, null, null, false, connectionString, sizeBytes);
+        return new DatabaseInfo(dbName, metadata.getEngineType(), metadata.getUserName(), metadata.getRoles(), collectionsCount, metadata.getCreatedAt(), metadata.getUpdatedAt(), metadata.getLastPasswordResetAt(), true, connectionString, sizeBytes);
     }
 
-    private boolean isMongoCode(MongoCommandException e, int code) {
-        return e.getErrorCode() == code;
-    }
+    private boolean isMongoCode(MongoCommandException e, int code) { return e.getErrorCode() == code; }
 }

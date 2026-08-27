@@ -34,15 +34,16 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.authorizeHttpRequests(auth -> auth
                         .requestMatchers("/login", "/css/**", "/js/**", "/webjars/**", "/error", "/favicon.ico").permitAll()
+                        .requestMatchers("/adminer/**", "/mongo-express/**").hasRole("ADMIN")
                         .requestMatchers("/databases/*/reset", "/databases/*/delete",
                                 "/databases/*/backup", "/databases/*/restore",
                                 "/databases/*/collections/*/import").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/databases", "/databases/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/mongo/databases/**", "/postgres/databases/**").hasRole("ADMIN")
                         .requestMatchers("/webhooks", "/webhooks/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
-                // The proxied mongo-express UI has its own CSRF protection and form
-                // logins; Spring's token would otherwise reject its POSTs.
-                .csrf(csrf -> csrf.ignoringRequestMatchers("/mongo-express/**"))
+                // The proxied UIs have their own CSRF protection; Spring's token would otherwise reject their POSTs.
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/mongo-express/**", "/adminer/**"))
                 .formLogin(form -> form
                         .loginPage("/login")
                         .defaultSuccessUrl("/", true)

@@ -57,7 +57,7 @@ class DatabaseControllerTest {
     private StatisticsService statisticsService;
 
     private DatabaseInfo databaseInfo() {
-        return new DatabaseInfo("myapp", "appuser", List.of("readWrite:myapp"), 1L, NOW, NOW, null, true, null, 0L);
+        return new DatabaseInfo("myapp", com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO, "appuser", List.of("readWrite:myapp"), 1L, NOW, NOW, null, true, null, 0L);
     }
 
     // ── Provision form ──────────────────────────────────────────────────
@@ -66,9 +66,9 @@ class DatabaseControllerTest {
     void provisionFormRendersForAdmin() throws Exception {
         mockMvc.perform(get("/databases/new").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
-                .andExpect(view().name("provision"))
+                .andExpect(view().name("provision-mongo"))
                 .andExpect(model().attributeExists("form"))
-                .andExpect(content().string(containsString("Provision a database")));
+                .andExpect(content().string(containsString("Provision MongoDB")));
     }
 
     @Test

@@ -7,10 +7,11 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * Metadata about a provisioned database: which Mongo user owns it, when it was
+ * Metadata about a provisioned database: which engine/user owns it, when it was
  * created, and when its password was last reset. Stored in the {@code mongodb_admin}
- * database. The stored password allows the connection string to be reconstructed
- * and shown on the database detail page at any time.
+ * database. Composite identity is {@code engineType + ":" + dbName} so the same
+ * name can exist in both engines. Existing docs without {@code engineType} are
+ * treated as {@code MONGO} for backward compatibility.
  */
 @Document(collection = "provisioned_databases")
 public class ManagedDatabase {
@@ -19,6 +20,8 @@ public class ManagedDatabase {
     private String id;
 
     private String dbName;
+
+    private DatabaseEngineType engineType;
 
     private String userName;
 
@@ -39,22 +42,32 @@ public class ManagedDatabase {
     /**
      * Creates provisioned metadata for a database.
      *
-     * @param dbName              database name (also used as the document id)
-     * @param userName            dedicated Mongo user name
-     * @param roles               readWrite roles granted to the user
+     * @param dbName              database name
+     * @param engineType          owning engine
+     * @param userName            dedicated user name
+     * @param roles               roles granted to the user
      * @param createdAt           provisioning time
      * @param updatedAt           last update time
      * @param lastPasswordResetAt last password rotation, or {@code null} if never
      */
-    public ManagedDatabase(String dbName, String userName, List<String> roles,
+    public ManagedDatabase(String dbName, DatabaseEngineType engineType, String userName, List<String> roles,
                            Instant createdAt, Instant updatedAt, Instant lastPasswordResetAt) {
-        this.id = dbName;
+        this.id = engineType.name() + ":" + dbName;
         this.dbName = dbName;
+        this.engineType = engineType;
         this.userName = userName;
         this.roles = List.copyOf(roles);
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.lastPasswordResetAt = lastPasswordResetAt;
+    }
+
+    /**
+     * Legacy constructor for Mongo-only call sites — defaults to MONGO.
+     */
+    public ManagedDatabase(String dbName, String userName, List<String> roles,
+                           Instant createdAt, Instant updatedAt, Instant lastPasswordResetAt) {
+        this(dbName, DatabaseEngineType.MONGO, userName, roles, createdAt, updatedAt, lastPasswordResetAt);
     }
 
     public String getId() {
@@ -63,6 +76,14 @@ public class ManagedDatabase {
 
     public String getDbName() {
         return dbName;
+    }
+
+    public DatabaseEngineType getEngineType() {
+        return engineType != null ? engineType : DatabaseEngineType.MONGO;
+    }
+
+    public void setEngineType(DatabaseEngineType engineType) {
+        this.engineType = engineType;
     }
 
     public String getUserName() {

@@ -3,7 +3,7 @@
 <head th:fragment="head(title)">
     <meta charset="UTF-8">
     <meta content="width=device-width, initial-scale=1" name="viewport">
-    <title th:text="${title} + ' · MongoDB Manager'">MongoDB Manager</title>
+    <title th:text="${title} + ' · DB Manager'">DB Manager</title>
     <link href="https://fonts.googleapis.com" rel="preconnect">
     <link crossorigin href="https://fonts.gstatic.com" rel="preconnect">
     <link rel="stylesheet" th:href="@{/webjars/bootstrap/5.3.8/css/bootstrap.min.css}">
@@ -18,33 +18,81 @@
     <aside class="sidebar" th:fragment="nav(page)">
         <div class="sidebar-brand">
             <span class="sidebar-brand-icon"><i class="bi bi-database-gear"></i></span>
-            <span class="sidebar-brand-text">MongoDB Manager</span>
+            <span class="sidebar-brand-text">DB Manager</span>
         </div>
 
         <nav class="sidebar-nav">
-            <div class="sidebar-section-label">Main</div>
-            <a class="sidebar-link" th:classappend="${page == 'dashboard'} ? 'active'"
-               th:href="@{/}">
-                <i class="bi bi-speedometer2"></i> Dashboard
-            </a>
-            <a class="sidebar-link" th:classappend="${page == 'activity'} ? 'active'"
-               th:href="@{/activity}">
-                <i class="bi bi-clock-history"></i> Activity
-            </a>
-            <a class="sidebar-link" th:classappend="${page == 'health'} ? 'active'"
-               th:href="@{/health}">
-                <i class="bi bi-heart-pulse"></i> Health
-            </a>
-            <a class="sidebar-link" th:classappend="${page == 'monitor'} ? 'active'"
-               th:href="@{/monitor}">
-                <i class="bi bi-graph-up-arrow"></i> Monitor
-            </a>
-            <a class="sidebar-link" th:href="@{/mongo-express}">
-                <i class="bi bi-box-arrow-up-right"></i> Mongo Express
-            </a>
+            <!-- Back button in engine context -->
+            <div class="sidebar-back" th:if="${engine != null}">
+                <a class="btn btn-sm btn-outline-light w-100" th:href="@{/}" onclick="if(history.length>1){history.back();return false}">
+                    <i class="bi bi-arrow-left"></i> Back to Dashboard
+                </a>
+            </div>
 
-            <div class="sidebar-section-label mt-4">Quick Actions</div>
-            <a class="sidebar-link sidebar-link-accent" th:href="@{/databases/new}" th:if="${canWrite}">
+            <!-- Engine header -->
+            <div class="engine-header" th:if="${engine != null}">
+                <i th:class="${engine.name() == 'POSTGRES'} ? 'bi bi-server' : 'bi bi-database'"></i>
+                <span th:text="${engine.name() == 'POSTGRES'} ? 'PostgreSQL' : 'MongoDB'">MongoDB</span>
+            </div>
+
+            <!-- Root nav -->
+            <div th:if="${engine == null}">
+                <div class="sidebar-section-label">Main</div>
+                <a class="sidebar-link" th:classappend="${page == 'dashboard'} ? 'active'" th:href="@{/}">
+                    <i class="bi bi-speedometer2"></i> Dashboard
+                </a>
+                <a class="sidebar-link" th:classappend="${page == 'activity'} ? 'active'" th:href="@{/activity}">
+                    <i class="bi bi-clock-history"></i> Activity
+                </a>
+                <a class="sidebar-link" th:classappend="${page == 'health'} ? 'active'" th:href="@{/health}">
+                    <i class="bi bi-heart-pulse"></i> Health
+                </a>
+                <a class="sidebar-link" th:classappend="${page == 'monitor'} ? 'active'" th:href="@{/monitor}">
+                    <i class="bi bi-graph-up-arrow"></i> Monitor
+                </a>
+
+                <div class="sidebar-section-label mt-3">Provision</div>
+                <a class="sidebar-link" th:classappend="${page == 'provision'} ? 'active'" th:href="@{/provision}">
+                    <i class="bi bi-plus-circle"></i> Provision
+                </a>
+                <div class="d-flex gap-2 px-1 mt-1">
+                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/mongo}" th:if="${canWrite}">MongoDB</a>
+                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/postgres}" th:if="${canWrite}">PostgreSQL</a>
+                </div>
+
+                <div class="sidebar-section-label mt-3">Databases</div>
+                <a class="sidebar-link" th:href="@{/mongo}"><i class="bi bi-database"></i> MongoDB</a>
+                <a class="sidebar-link" th:href="@{/postgres}"><i class="bi bi-server"></i> PostgreSQL</a>
+
+                <div class="sidebar-section-label mt-3">Explorers</div>
+                <a class="sidebar-link" th:href="@{/mongo-express}"><i class="bi bi-box-arrow-up-right"></i> Mongo Express</a>
+                <a class="sidebar-link" th:href="@{/adminer}"><i class="bi bi-box-arrow-up-right"></i> Adminer</a>
+            </div>
+
+            <!-- Engine-scoped nav -->
+            <div th:if="${engine != null}">
+                <div class="sidebar-section-label">Navigation</div>
+                <a class="sidebar-link" th:classappend="${page == 'engine-home'} ? 'active'"
+                   th:href="${engine.name() == 'POSTGRES'} ? @{/postgres} : @{/mongo}">
+                    <i class="bi bi-collection"></i> Databases
+                </a>
+                <a class="sidebar-link" th:href="@{/provision/mongo}" th:if="${engine.name() == 'MONGO' and canWrite}">
+                    <i class="bi bi-plus-circle"></i> New Mongo DB
+                </a>
+                <a class="sidebar-link" th:href="@{/provision/postgres}" th:if="${engine.name() == 'POSTGRES' and canWrite}">
+                    <i class="bi bi-plus-circle"></i> New Postgres DB
+                </a>
+                <div class="sidebar-section-label mt-3">Explorer</div>
+                <a class="sidebar-link" th:href="@{/mongo-express}" th:if="${engine.name() == 'MONGO'}">
+                    <i class="bi bi-box-arrow-up-right"></i> Mongo Express
+                </a>
+                <a class="sidebar-link" th:href="@{/adminer}" th:if="${engine.name() == 'POSTGRES'}">
+                    <i class="bi bi-box-arrow-up-right"></i> Adminer
+                </a>
+            </div>
+
+            <div class="sidebar-section-label mt-4" th:if="${engine == null}">Quick Actions</div>
+            <a class="sidebar-link sidebar-link-accent" th:href="@{/provision}" th:if="${engine == null and canWrite}">
                 <i class="bi bi-plus-circle"></i> New database
             </a>
             <a class="sidebar-link" th:classappend="${page == 'webhooks'} ? 'active'" th:href="@{/webhooks}" th:if="${canWrite}">

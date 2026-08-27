@@ -33,8 +33,9 @@
                 <section class="card shadow-sm mb-4">
                     <div class="card-header bg-transparent d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <h2 class="h5 mb-0">
-                            <i class="bi bi-database text-primary me-1"></i>
+                            <i th:class="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'bi bi-server me-1' : 'bi bi-database text-primary me-1'"></i>
                             <span th:text="${database.dbName}">database</span>
+                            <span class="badge ms-2" th:classappend="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'engine-badge-pg' : 'engine-badge-mongo'" th:if="${database.engineType != null}" th:text="${database.engineType}">MONGO</span>
                             <span class="badge badge-soft-success ms-2"
                                   th:if="${database.provisioned}">provisioned</span>
                             <span class="badge badge-soft-secondary ms-2"
@@ -42,29 +43,29 @@
                         </h2>
                         <div class="d-flex gap-2">
                             <a class="btn btn-sm btn-outline-info"
-                               th:href="@{/databases/{name}/stats(name=${database.dbName})}">
+                               th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/stats(name=${database.dbName})} : @{/databases/{name}/stats(name=${database.dbName})}">
                                 <i class="bi bi-bar-chart-line"></i> Statistics
                             </a>
                             <div class="d-flex gap-2" th:if="${canWrite}">
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:href="@{/databases/{name}/backup(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/backup(name=${database.dbName})} : @{/databases/{name}/backup(name=${database.dbName})}">
                                     <i class="bi bi-download"></i> Backup
                                 </a>
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:href="@{/databases/{name}/restore(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/restore(name=${database.dbName})} : @{/databases/{name}/restore(name=${database.dbName})}">
                                     <i class="bi bi-upload"></i> Restore
                                 </a>
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:href="@{/databases/{name}/users(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/users(name=${database.dbName})} : @{/databases/{name}/users(name=${database.dbName})}">
                                     <i class="bi bi-people"></i> Users
                                 </a>
                                 <a class="btn btn-sm btn-outline-secondary"
-                                   th:href="@{/databases/{name}/reset(name=${database.dbName})}"
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/reset(name=${database.dbName})} : @{/databases/{name}/reset(name=${database.dbName})}"
                                    th:if="${database.provisioned}">
                                     <i class="bi bi-key"></i> Reset password
                                 </a>
                                 <a class="btn btn-sm btn-outline-danger"
-                                   th:href="@{/databases/{name}/delete(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/delete(name=${database.dbName})} : @{/databases/{name}/delete(name=${database.dbName})}">
                                     <i class="bi bi-trash"></i> Delete database
                                 </a>
                             </div>
@@ -73,6 +74,10 @@
                     <div class="card-body">
                         <dl class="info-grid mb-0">
                             <div>
+                                <dt>Engine</dt>
+                                <dd th:text="${database.engineType} ?: '—'">MONGO</dd>
+                            </div>
+                            <div>
                                 <dt>Database user</dt>
                                 <dd th:text="${database.userName} ?: '—'">user</dd>
                             </div>
@@ -80,9 +85,13 @@
                                 <dt>Roles</dt>
                                 <dd th:text="${#strings.listJoin(database.roles, ', ')} ?: '—'">readWrite:db</dd>
                             </div>
-                            <div>
+                            <div th:if="${database.engineType == null or database.engineType.name() == 'MONGO'}">
                                 <dt>Collections</dt>
                                 <dd th:text="${database.collectionsCount} ?: '—'">0</dd>
+                            </div>
+                            <div th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES'}">
+                                <dt>Tables</dt>
+                                <dd class="text-body-secondary">Available in Phase 3</dd>
                             </div>
                             <div>
                                 <dt>Storage size</dt>
@@ -119,9 +128,9 @@
                     </div>
                     <div class="card-body">
                         <p class="text-body-secondary small mb-3">Copy this connection string into your application's
-                            MongoDB driver configuration.</p>
+                            <span th:text="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'PostgreSQL' : 'MongoDB'">MongoDB</span> driver configuration.</p>
                         <div class="mb-3">
-                            <label class="form-label fw-medium">MongoDB URI</label>
+                            <label class="form-label fw-medium" th:text="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'PostgreSQL URI' : 'MongoDB URI'">MongoDB URI</label>
                             <div class="input-group">
                                 <input class="form-control form-control-sm font-monospace bg-body-secondary" readonly
                                        th:value="${database.connectionString}" type="text">

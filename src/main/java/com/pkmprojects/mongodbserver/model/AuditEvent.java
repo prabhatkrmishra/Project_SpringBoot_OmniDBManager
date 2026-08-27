@@ -71,6 +71,8 @@ public class AuditEvent {
 
     private String dbName;
 
+    private DatabaseEngineType engineType;
+
     private String userName;
 
     private String performedBy;
@@ -92,8 +94,13 @@ public class AuditEvent {
      * @param performedAt action timestamp
      */
     public AuditEvent(String eventType, String dbName, String userName, String performedBy, Instant performedAt) {
+        this(eventType, dbName, null, userName, performedBy, performedAt);
+    }
+
+    public AuditEvent(String eventType, String dbName, DatabaseEngineType engineType, String userName, String performedBy, Instant performedAt) {
         this.eventType = eventType;
         this.dbName = dbName;
+        this.engineType = engineType;
         this.userName = userName;
         this.performedBy = performedBy;
         this.performedAt = performedAt;
@@ -109,6 +116,10 @@ public class AuditEvent {
 
     public String getDbName() {
         return dbName;
+    }
+
+    public DatabaseEngineType getEngineType() {
+        return engineType;
     }
 
     public String getUserName() {

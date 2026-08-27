@@ -6,33 +6,27 @@
         <aside th:replace="~{fragments/nav :: nav('dashboard')}"></aside>
 
         <div class="main">
-            <!-- Flash messages -->
             <div th:replace="~{fragments/nav :: flash}"></div>
 
             <main class="container-xxl py-4">
-                <!-- Page header -->
                 <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                     <div>
                         <h1 class="mb-1">Dashboard</h1>
-                        <p class="mb-0 text-body-secondary">Provision and manage MongoDB databases with dedicated
-                            users.</p>
+                        <p class="mb-0 text-body-secondary">Provision and manage MongoDB and PostgreSQL databases.</p>
                     </div>
-                    <a class="btn btn-primary" th:href="@{/databases/new}" th:if="${canWrite}">
+                    <a class="btn btn-primary" th:href="@{/provision}" th:if="${canWrite}">
                         <i class="bi bi-plus-circle me-1"></i> New database
                     </a>
                 </div>
 
-                <!-- Stats cards -->
                 <div class="row g-3 mb-4">
                     <div class="col-sm-6 col-xl-3">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
-                                <div class="stat-icon stat-icon-violet">
-                                    <i class="bi bi-database"></i>
-                                </div>
+                                <div class="stat-icon stat-icon-violet"><i class="bi bi-database"></i></div>
                                 <div>
-                                    <div class="stat-value" th:text="${#lists.size(databases)}">0</div>
-                                    <div class="stat-label">Databases</div>
+                                    <div class="stat-value" th:text="${mongoCount}">0</div>
+                                    <div class="stat-label">MongoDB</div>
                                 </div>
                             </div>
                         </div>
@@ -40,9 +34,18 @@
                     <div class="col-sm-6 col-xl-3">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
-                                <div class="stat-icon stat-icon-cyan">
-                                    <i class="bi bi-check2-circle"></i>
+                                <div class="stat-icon" style="background: rgb(51 103 145 / 0.12); color:#336791"><i class="bi bi-server"></i></div>
+                                <div>
+                                    <div class="stat-value" th:text="${postgresCount}">0</div>
+                                    <div class="stat-label">PostgreSQL</div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-xl-3">
+                        <div class="card stat-card h-100">
+                            <div class="card-body d-flex align-items-center gap-3">
+                                <div class="stat-icon stat-icon-cyan"><i class="bi bi-check2-circle"></i></div>
                                 <div>
                                     <div class="stat-value" th:text="${#lists.size(recentActivity)}">0</div>
                                     <div class="stat-label">Recent actions</div>
@@ -53,22 +56,7 @@
                     <div class="col-sm-6 col-xl-3">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
-                                <div class="stat-icon stat-icon-rose">
-                                    <i class="bi bi-shield-lock"></i>
-                                </div>
-                                <div>
-                                    <div class="stat-value">1</div>
-                                    <div class="stat-label">Per-database users</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-sm-6 col-xl-3">
-                        <div class="card stat-card h-100">
-                            <div class="card-body d-flex align-items-center gap-3">
-                                <div class="stat-icon bg-info-subtle text-info">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                </div>
+                                <div class="stat-icon bg-info-subtle text-info"><i class="bi bi-box-arrow-up-right"></i></div>
                                 <div>
                                     <div class="stat-value">direct</div>
                                     <div class="stat-label">Connection mode</div>
@@ -78,93 +66,70 @@
                     </div>
                 </div>
 
-                <!-- Databases list -->
+                <!-- MongoDB list -->
                 <section class="card shadow-sm mb-4">
-                    <div class="card-header bg-transparent d-flex flex-wrap justify-content-between align-items-center gap-2">
-                        <h2 class="h5 mb-0">
-                            <i class="bi bi-collection text-primary me-2"></i> Databases
-                        </h2>
-                        <div class="d-flex align-items-center gap-2" th:if="${!#lists.isEmpty(databases)}">
-                            <div class="input-group input-group-sm" style="max-width: 260px;">
-                                <span class="input-group-text bg-white">
-                                    <i class="bi bi-search"></i>
-                                </span>
-                                <input aria-label="Filter databases" class="form-control"
-                                       data-filter-table="#databasesTable"
-                                       id="dbFilter" placeholder="Filter databases…"
-                                       type="search">
-                            </div>
-                        </div>
+                    <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                        <h2 class="h5 mb-0"><i class="bi bi-database text-primary me-2"></i> MongoDB Databases</h2>
+                        <a class="btn btn-sm btn-outline-primary" th:href="@{/mongo}">View all</a>
                     </div>
                     <div class="card-body p-0">
-                        <div class="empty-state" th:if="${#lists.isEmpty(databases)}">
+                        <div class="empty-state" th:if="${#lists.isEmpty(mongoDatabases)}">
                             <span class="empty-state-icon"><i class="bi bi-database"></i></span>
-                            <p class="empty-state-title">No databases yet</p>
-                            <p class="empty-state-text">Provision your first database to get started.</p>
-                            <a class="btn btn-primary mt-3" th:href="@{/databases/new}" th:if="${canWrite}">
-                                <i class="bi bi-plus-circle me-1"></i> Create your first database
-                            </a>
+                            <p class="empty-state-title">No MongoDB databases yet</p>
+                            <p class="empty-state-text">Provision your first MongoDB database.</p>
+                            <a class="btn btn-primary mt-3" th:href="@{/provision/mongo}" th:if="${canWrite}"><i class="bi bi-plus-circle me-1"></i> Create MongoDB database</a>
                         </div>
-                        <div class="table-responsive" th:if="${!#lists.isEmpty(databases)}">
-                            <table class="table table-hover align-middle mb-0" id="databasesTable">
-                                <thead>
-                                    <tr>
-                                        <th>Database</th>
-                                        <th>User</th>
-                                        <th>Collections</th>
-                                        <th>Storage Size</th>
-                                        <th>Status</th>
-                                        <th class="text-end">Actions</th>
-                                    </tr>
-                                </thead>
+                        <div class="table-responsive" th:if="${!#lists.isEmpty(mongoDatabases)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead><tr><th>Database</th><th>User</th><th>Collections</th><th>Storage Size</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
                                 <tbody>
-                                    <tr th:each="database : ${databases}">
-                                        <td>
-                                            <div class="d-flex align-items-center">
-                                                <i class="bi bi-database text-primary me-2"></i>
-                                                <span class="fw-medium" th:text="${database.dbName}">app_db</span>
-                                            </div>
-                                        </td>
+                                    <tr th:each="database : ${mongoDatabases}">
+                                        <td><i class="bi bi-database text-primary me-2"></i><span class="fw-medium" th:text="${database.dbName}">app_db</span> <span class="badge engine-badge-mongo ms-1">MONGO</span></td>
                                         <td th:text="${database.userName} ?: '—'">app_user</td>
-                                        <td>
-                                            <span class="badge badge-soft-info"
-                                                  th:text="${database.collectionsCount} ?: '—'">0</span>
-                                        </td>
-                                        <td class="text-body-secondary">
-                                            <span th:if="${database.sizeBytes < 1024}"
-                                                  th:text="${database.sizeBytes} + ' B'">0 B</span>
-                                            <span th:if="${database.sizeBytes >= 1024 and database.sizeBytes < 1048576}"
-                                                  th:text="${#numbers.formatDecimal(database.sizeBytes / 1024.0, 1, 1)} + ' KB'">0 KB</span>
-                                            <span th:if="${database.sizeBytes >= 1048576 and database.sizeBytes < 1073741824}"
-                                                  th:text="${#numbers.formatDecimal(database.sizeBytes / 1048576.0, 1, 1)} + ' MB'">0 MB</span>
-                                            <span th:if="${database.sizeBytes >= 1073741824}"
-                                                  th:text="${#numbers.formatDecimal(database.sizeBytes / 1073741824.0, 1, 2)} + ' GB'">0 GB</span>
-                                        </td>
-                                        <td>
-                                            <span class="badge badge-soft-success" th:if="${database.provisioned}">
-                                                <i class="bi bi-check-circle me-1"></i>provisioned
-                                            </span>
-                                            <span class="badge badge-soft-secondary" th:if="${!database.provisioned}">
-                                                <i class="bi bi-box-arrow-up-right me-1"></i>external
-                                            </span>
-                                        </td>
+                                        <td><span class="badge badge-soft-info" th:text="${database.collectionsCount} ?: '—'">0</span></td>
+                                        <td class="text-body-secondary"><span th:text="${database.sizeBytes} + ' B'">0 B</span></td>
+                                        <td><span class="badge badge-soft-success" th:if="${database.provisioned}">provisioned</span><span class="badge badge-soft-secondary" th:if="${!database.provisioned}">external</span></td>
                                         <td class="text-end text-nowrap">
                                             <div class="btn-group btn-group-sm">
-                                                <a class="btn btn-outline-primary"
-                                                   th:href="@{/databases/{name}(name=${database.dbName})}"
-                                                   title="View database">
-                                                    <i class="bi bi-eye"></i>
-                                                </a>
-                                                <a class="btn btn-outline-secondary"
-                                                   th:href="@{/databases/{name}/reset(name=${database.dbName})}"
-                                                   th:if="${canWrite}" title="Reset password">
-                                                    <i class="bi bi-key"></i>
-                                                </a>
-                                                <a class="btn btn-outline-danger"
-                                                   th:href="@{/databases/{name}/delete(name=${database.dbName})}"
-                                                   th:if="${canWrite}" title="Delete database">
-                                                    <i class="bi bi-trash"></i>
-                                                </a>
+                                                <a class="btn btn-outline-primary" th:href="@{/mongo/databases/{name}(name=${database.dbName})}" title="View"><i class="bi bi-eye"></i></a>
+                                                <a class="btn btn-outline-secondary" th:href="@{/mongo/databases/{name}/reset(name=${database.dbName})}" th:if="${canWrite}" title="Reset"><i class="bi bi-key"></i></a>
+                                                <a class="btn btn-outline-danger" th:href="@{/mongo/databases/{name}/delete(name=${database.dbName})}" th:if="${canWrite}" title="Delete"><i class="bi bi-trash"></i></a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- PostgreSQL list -->
+                <section class="card shadow-sm mb-4">
+                    <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                        <h2 class="h5 mb-0"><i class="bi bi-server me-2" style="color:#336791"></i> PostgreSQL Databases</h2>
+                        <a class="btn btn-sm btn-outline-primary" th:href="@{/postgres}">View all</a>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="empty-state" th:if="${#lists.isEmpty(postgresDatabases)}">
+                            <span class="empty-state-icon"><i class="bi bi-server"></i></span>
+                            <p class="empty-state-title">No PostgreSQL databases yet</p>
+                            <p class="empty-state-text">Provision your first PostgreSQL database.</p>
+                            <a class="btn btn-primary mt-3" th:href="@{/provision/postgres}" th:if="${canWrite}"><i class="bi bi-plus-circle me-1"></i> Create PostgreSQL database</a>
+                        </div>
+                        <div class="table-responsive" th:if="${!#lists.isEmpty(postgresDatabases)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead><tr><th>Database</th><th>User</th><th>Storage Size</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                                <tbody>
+                                    <tr th:each="database : ${postgresDatabases}">
+                                        <td><i class="bi bi-server me-2" style="color:#336791"></i><span class="fw-medium" th:text="${database.dbName}">app_db</span> <span class="badge engine-badge-pg ms-1">POSTGRES</span></td>
+                                        <td th:text="${database.userName} ?: '—'">app_user</td>
+                                        <td class="text-body-secondary"><span th:text="${database.sizeBytes} + ' B'">0 B</span></td>
+                                        <td><span class="badge badge-soft-success" th:if="${database.provisioned}">provisioned</span><span class="badge badge-soft-secondary" th:if="${!database.provisioned}">external</span></td>
+                                        <td class="text-end text-nowrap">
+                                            <div class="btn-group btn-group-sm">
+                                                <a class="btn btn-outline-primary" th:href="@{/postgres/databases/{name}(name=${database.dbName})}" title="View"><i class="bi bi-eye"></i></a>
+                                                <a class="btn btn-outline-secondary" th:href="@{/postgres/databases/{name}/reset(name=${database.dbName})}" th:if="${canWrite}" title="Reset"><i class="bi bi-key"></i></a>
+                                                <a class="btn btn-outline-danger" th:href="@{/postgres/databases/{name}/delete(name=${database.dbName})}" th:if="${canWrite}" title="Delete"><i class="bi bi-trash"></i></a>
                                             </div>
                                         </td>
                                     </tr>
@@ -177,45 +142,26 @@
                 <!-- Recent activity -->
                 <section class="card shadow-sm mb-4">
                     <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
-                        <h2 class="h5 mb-0">
-                            <i class="bi bi-clock-history text-primary me-2"></i> Recent activity
-                        </h2>
+                        <h2 class="h5 mb-0"><i class="bi bi-clock-history text-primary me-2"></i> Recent activity</h2>
                         <span class="badge badge-soft-secondary" th:text="${#lists.size(recentActivity)} + ' events'">0 events</span>
                     </div>
                     <div class="card-body p-0">
                         <div class="empty-state" th:if="${#lists.isEmpty(recentActivity)}">
                             <span class="empty-state-icon"><i class="bi bi-clock-history"></i></span>
                             <p class="empty-state-title">No admin activity yet</p>
-                            <p class="empty-state-text">Actions like provisioning and password resets will show up
-                                here.</p>
+                            <p class="empty-state-text">Actions like provisioning and password resets will show up here.</p>
                         </div>
                         <div class="table-responsive" th:if="${!#lists.isEmpty(recentActivity)}">
                             <table class="table table-hover align-middle mb-0">
-                                <thead>
-                                    <tr>
-                                        <th>Action</th>
-                                        <th>Database</th>
-                                        <th>User</th>
-                                        <th>By</th>
-                                        <th>When</th>
-                                    </tr>
-                                </thead>
+                                <thead><tr><th>Action</th><th>Database</th><th>Engine</th><th>User</th><th>By</th><th>When</th></tr></thead>
                                 <tbody>
                                     <tr th:each="event : ${recentActivity}">
-                                        <td>
-                                            <span th:class="${event.eventType == 'DELETE'} ? 'badge badge-soft-danger'
-                                                : (${event.eventType == 'PROVISION'} ? 'badge badge-soft-success' : 'badge badge-soft-info')"
-                                                  th:text="${#strings.replace(event.eventType, '_', ' ')}">PROVISION</span>
-                                        </td>
+                                        <td><span th:class="${event.eventType == 'DELETE'} ? 'badge badge-soft-danger' : (${event.eventType == 'PROVISION'} ? 'badge badge-soft-success' : 'badge badge-soft-info')" th:text="${#strings.replace(event.eventType, '_', ' ')}">PROVISION</span></td>
                                         <td class="fw-medium" th:text="${event.dbName}">myapp</td>
+                                        <td><span class="badge badge-soft-secondary" th:text="${event.engineType} ?: '—'">MONGO</span></td>
                                         <td th:text="${event.userName} ?: '—'">appuser</td>
                                         <td th:text="${event.performedBy}">admin</td>
-                                        <td class="text-body-secondary">
-                                            <span class="d-flex align-items-center">
-                                                <i class="bi bi-clock me-1"></i>
-                                                <span th:text="${event.performedAt}">-</span>
-                                            </span>
-                                        </td>
+                                        <td class="text-body-secondary"><span th:text="${event.performedAt}">-</span></td>
                                     </tr>
                                 </tbody>
                             </table>

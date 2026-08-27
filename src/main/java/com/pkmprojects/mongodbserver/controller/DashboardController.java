@@ -25,8 +25,20 @@ public class DashboardController {
      */
     @GetMapping("/")
     public String dashboard(Model model) {
-        model.addAttribute("databases", provisioningService.listDatabases());
+        var mongoDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO);
+        model.addAttribute("databases", mongoDbs);
+        model.addAttribute("mongoDatabases", mongoDbs);
+        try {
+            var pgDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.POSTGRES);
+            model.addAttribute("postgresDatabases", pgDbs);
+            model.addAttribute("postgresCount", pgDbs.size());
+        } catch (Exception e) {
+            model.addAttribute("postgresDatabases", java.util.List.of());
+            model.addAttribute("postgresCount", 0);
+        }
+        model.addAttribute("mongoCount", mongoDbs.size());
         model.addAttribute("recentActivity", auditLogRepository.findTop10ByOrderByPerformedAtDesc());
+        model.addAttribute("engine", null);
         return "index";
     }
 }

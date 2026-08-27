@@ -1,85 +1,39 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/nav :: head('New database')}"></head>
+<head th:replace="~{fragments/nav :: head('Provision')}"></head>
 <body>
     <div class="layout">
-        <aside th:replace="~{fragments/nav :: nav('dashboard')}"></aside>
-
+        <aside th:replace="~{fragments/nav :: nav('provision')}"></aside>
         <div class="main">
             <main th:replace="~{fragments/nav :: flash}"></main>
-
             <main class="container-xxl py-4">
-                <div class="mx-auto" style="max-width: 720px;">
-                    <nav aria-label="breadcrumb" class="mb-3">
-                        <ol class="breadcrumb mb-0">
-                            <li class="breadcrumb-item"><a class="link-primary" th:href="@{/}">Dashboard</a></li>
-                            <li class="breadcrumb-item active">New database</li>
-                        </ol>
-                    </nav>
-
-                    <section class="card shadow-sm">
-                        <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
-                            <h2 class="h5 mb-0">
-                                <i class="bi bi-plus-circle text-primary me-2"></i> Provision a database
-                            </h2>
-                            <span class="badge badge-soft-success">
-                                <i class="bi bi-lightning-charge me-1"></i>Quick setup
-                            </span>
+                <div class="page-header">
+                    <h1>Provision</h1>
+                    <p class="text-body-secondary">Choose an engine to provision a new database.</p>
+                </div>
+                <div class="row g-4">
+                    <div class="col-md-6">
+                        <div class="card provision-card h-100">
+                            <div class="card-body">
+                                <h5><i class="bi bi-database text-primary me-2"></i>MongoDB</h5>
+                                <p class="text-body-secondary">Document database with collections and JSON export.</p>
+                                <p class="mb-3"><span class="badge badge-soft-info" th:text="${mongoCount} + ' databases'">0 databases</span></p>
+                                <a class="btn btn-primary" th:href="@{/provision/mongo}"><i class="bi bi-plus-lg me-1"></i> Provision MongoDB</a>
+                                <a class="btn btn-outline-secondary ms-2" th:href="@{/mongo}">View MongoDB</a>
+                            </div>
                         </div>
-                        <div class="card-body">
-                            <p class="text-body-secondary mb-4">
-                                Creates a new MongoDB database with a dedicated user that can only read
-                                and write this database. External applications connect with the shown credentials.
-                            </p>
-                            <form class="form-grid" method="post" th:action="@{/databases}" th:object="${form}">
-                                <div class="mb-3">
-                                    <label class="form-label" for="dbName">Database name</label>
-                                    <input class="form-control" id="dbName" maxlength="64" required
-                                           th:field="*{dbName}"
-                                           type="text" placeholder="e.g., myapp_db">
-                                    <div class="form-hint">Letters, digits, '_' and '-'</div>
-                                    <div class="text-danger small mt-1" th:errors="*{dbName}"
-                                         th:if="${#fields.hasErrors('dbName')}">Error
-                                    </div>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label" for="userName">Database user name</label>
-                                    <input class="form-control" id="userName" maxlength="64" required
-                                           th:field="*{userName}" type="text" placeholder="e.g., app_user">
-                                    <div class="form-hint">Letters, digits, '.', '_' and '-'</div>
-                                    <div class="text-danger small mt-1" th:errors="*{userName}"
-                                         th:if="${#fields.hasErrors('userName')}">Error
-                                    </div>
-                                </div>
-                                <div class="mb-3 full">
-                                    <label class="form-label" for="password">
-                                        Password <span class="text-body-secondary">(optional)</span>
-                                    </label>
-                                    <div class="input-group">
-                                        <input autocomplete="new-password" class="form-control" id="password"
-                                               maxlength="128" th:field="*{password}"
-                                               type="password" placeholder="Leave blank to generate">
-                                        <button class="btn btn-outline-secondary" data-toggle-password="password"
-                                                type="button">
-                                            <i class="bi bi-eye"></i>
-                                        </button>
-                                    </div>
-                                    <div class="form-hint form-hint--note">Leave blank to generate a strong password. Stored securely — viewable on the database detail page.</div>
-                                    <div class="text-danger small mt-1" th:errors="*{password}"
-                                         th:if="${#fields.hasErrors('password')}">Error
-                                    </div>
-                                </div>
-                                <div class="form-actions">
-                                    <button class="btn btn-primary" type="submit">
-                                        <i class="bi bi-plus-lg me-1"></i> Create database
-                                    </button>
-                                    <a class="btn btn-outline-secondary" th:href="@{/}">
-                                        <i class="bi bi-arrow-left me-1"></i> Cancel
-                                    </a>
-                                </div>
-                            </form>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card provision-card provision-card-pg h-100">
+                            <div class="card-body">
+                                <h5><i class="bi bi-server me-2" style="color:#336791"></i>PostgreSQL</h5>
+                                <p class="text-body-secondary">Relational database with tables and SQL.</p>
+                                <p class="mb-3"><span class="badge badge-soft-info" th:text="${postgresCount} + ' databases'">0 databases</span></p>
+                                <a class="btn btn-primary" th:href="@{/provision/postgres}"><i class="bi bi-plus-lg me-1"></i> Provision PostgreSQL</a>
+                                <a class="btn btn-outline-secondary ms-2" th:href="@{/postgres}">View PostgreSQL</a>
+                            </div>
                         </div>
-                    </section>
+                    </div>
                 </div>
             </main>
         </div>
