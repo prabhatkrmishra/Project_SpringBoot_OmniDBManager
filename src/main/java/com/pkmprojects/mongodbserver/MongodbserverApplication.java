@@ -3,6 +3,8 @@ package com.pkmprojects.mongodbserver;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
+import org.springframework.boot.jdbc.autoconfigure.DataSourceTransactionManagerAutoConfiguration;
 
 /**
  * Entry point for the MongoDB database provisioning service (control plane).
@@ -12,7 +14,10 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
  * com.pkmprojects.mongodbserver.config.AdminProperties}. Admin credentials come
  * from {@code APP_ADMIN_USERNAME} / {@code APP_ADMIN_PASSWORD} in {@code .env}.</p>
  */
-@SpringBootApplication
+@SpringBootApplication(exclude = {
+        DataSourceAutoConfiguration.class,
+        DataSourceTransactionManagerAutoConfiguration.class
+})
 @ConfigurationPropertiesScan
 public class MongodbserverApplication {
 
