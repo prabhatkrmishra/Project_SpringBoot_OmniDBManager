@@ -1,9 +1,7 @@
 package com.pkmprojects.mongodbserver.service;
 
-import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import org.springframework.stereotype.Component;
 
-import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -12,6 +10,7 @@ import java.util.Set;
  * @deprecated Use {@link DatabaseNameValidator} — kept for backward compat.
  */
 @Component
+@Deprecated
 public class MongoNameValidator extends DatabaseNameValidator {
 
     /**
