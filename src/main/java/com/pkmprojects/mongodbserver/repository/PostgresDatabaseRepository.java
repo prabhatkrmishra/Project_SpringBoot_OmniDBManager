@@ -6,7 +6,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.stereotype.Repository;
 
-import javax.sql.DataSource;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,18 +23,15 @@ import java.util.Map;
 public class PostgresDatabaseRepository {
 
     private final JdbcTemplate jdbcTemplate;
-    private final DataSource dataSource;
     private final String postgresUri;
     private final String username;
     private final String password;
 
     public PostgresDatabaseRepository(JdbcTemplate jdbcTemplate,
-                                      DataSource dataSource,
                                       @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String postgresUri,
                                       @Value("${POSTGRES_ROOT_USER:root}") String username,
                                       @Value("${POSTGRES_ROOT_PASSWORD:root}") String password) {
         this.jdbcTemplate = jdbcTemplate;
-        this.dataSource = dataSource;
         this.postgresUri = postgresUri;
         this.username = username;
         this.password = password;
@@ -43,10 +39,6 @@ public class PostgresDatabaseRepository {
 
     static String quoteIdentifier(String identifier) {
         return "\"" + identifier.replace("\"", "\"\"") + "\"";
-    }
-
-    static String quoteLiteral(String value) {
-        return "'" + value.replace("'", "''") + "'";
     }
 
     private JdbcTemplate jdbcFor(String dbName) {
@@ -185,14 +177,8 @@ public class PostgresDatabaseRepository {
 
     public long countRows(String dbName, String tableName) {
         JdbcTemplate target = jdbcFor(dbName);
-        Long count = target.queryForObject("SELECT COUNT(*) FROM " + quoteIdentifier(tableName), Long.class);
+        Long count = target.queryForObject("SELECT COUNT(*) FROM public." + quoteIdentifier(tableName), Long.class);
         return count != null ? count : 0L;
-    }
-
-    public long getTableSize(String dbName, String tableName) {
-        JdbcTemplate target = jdbcFor(dbName);
-        Long size = target.queryForObject("SELECT pg_total_relation_size(?)", Long.class, quoteIdentifier(tableName));
-        return size != null ? size : 0L;
     }
 
     public long getTableSizeQualified(String dbName, String tableName) {
@@ -203,7 +189,7 @@ public class PostgresDatabaseRepository {
 
     public List<Map<String, Object>> listRows(String dbName, String tableName, int limit, int offset) {
         JdbcTemplate target = jdbcFor(dbName);
-        String sql = "SELECT * FROM " + quoteIdentifier(tableName) + " LIMIT ? OFFSET ?";
+        String sql = "SELECT * FROM public." + quoteIdentifier(tableName) + " LIMIT ? OFFSET ?";
         return target.queryForList(sql, limit, offset);
     }
 

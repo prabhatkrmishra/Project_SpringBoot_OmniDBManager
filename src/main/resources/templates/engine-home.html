@@ -29,7 +29,7 @@
                                 <thead><tr><th>Database</th><th>User</th><th>Storage Size</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
                                 <tbody>
                                     <tr th:each="database : ${databases}">
-                                        <td><i class="bi bi-database text-primary me-2"></i><span class="fw-medium" th:text="${database.dbName}">app_db</span> <span class="badge engine-badge-mongo ms-1" th:if="${database.engineType != null}" th:text="${database.engineType}">MONGO</span></td>
+                                        <td><i class="bi bi-database text-primary me-2"></i><span class="fw-medium" th:text="${database.dbName}">app_db</span> <span class="badge ms-1" th:if="${database.engineType != null}" th:classappend="${database.engineType.name() == 'POSTGRES'} ? 'engine-badge-pg' : 'engine-badge-mongo'" th:text="${database.engineType}">MONGO</span></td>
                                         <td th:text="${database.userName} ?: '—'">app_user</td>
                                         <td th:text="${database.sizeBytes} + ' B'">0 B</td>
                                         <td><span class="badge badge-soft-success" th:if="${database.provisioned}">provisioned</span><span class="badge badge-soft-secondary" th:if="${!database.provisioned}">external</span></td>

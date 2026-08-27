@@ -53,7 +53,7 @@ public class MonitorController {
     @GetMapping("/monitor")
     public String monitor(@RequestParam(name = "engine", required = false) String engine, Model model) {
         String eng = engine != null ? engine.toLowerCase() : "mongo";
-        if (!eng.equals("postgres")) eng = "mongo";
+        if (!eng.equals("postgres") || postgresMonitorService.isEmpty()) eng = "mongo";
         model.addAttribute("monitorEngine", eng);
         model.addAttribute("postgresAvailable", postgresMonitorService.isPresent());
         return "monitor";
@@ -62,7 +62,8 @@ public class MonitorController {
     @GetMapping("/monitor/stream")
     public ResponseEntity<SseEmitter> stream(@RequestParam(name = "engine", required = false) String engine) {
         String eng = engine != null ? engine.toLowerCase() : "mongo";
-        boolean pg = eng.equals("postgres") && postgresMonitorService.isPresent();
+        if (!eng.equals("postgres") || postgresMonitorService.isEmpty()) eng = "mongo";
+        boolean pg = eng.equals("postgres");
         SseEmitter emitter = new SseEmitter(0L);
         ScheduledFuture<?> future = scheduler.scheduleWithFixedDelay(() -> sendTick(emitter, pg),
                 0, TICK_MILLIS, TimeUnit.MILLISECONDS);

@@ -47,12 +47,6 @@ public class PostgresMonitorService {
         Long totalStorageBytes = null;
 
         try {
-            version = postgresRepository.getVersion();
-        } catch (Exception e) {
-            log.warn("Could not read Postgres version for monitor", e);
-        }
-
-        try {
             Map<String, Object> data = postgresRepository.getPostgresMonitorData();
             Object cc = data.get("connectionCount");
             if (cc instanceof Number n) connectionCount = n.intValue();
@@ -63,14 +57,26 @@ public class PostgresMonitorService {
         } catch (Exception e) {
             log.warn("Could not read Postgres monitor data", e);
         }
+        // Fallback version if monitor data did not return it (e.g. permission)
+        if (version == null) {
+            try {
+                version = postgresRepository.getVersion();
+            } catch (Exception e) {
+                log.warn("Could not read Postgres version for monitor", e);
+            }
+        }
 
         try {
             Map<String, Long> sizes = postgresRepository.getDatabaseSizes();
-            // filter out templates like getDatabaseSizes does
-            databaseCount = (int) sizes.keySet().stream()
-                    .filter(k -> !k.equals("postgres") && !k.equals("template0") && !k.equals("template1"))
-                    .count();
-            totalStorageBytes = sizes.values().stream().mapToLong(Long::longValue).sum();
+            Map<String, Long> filtered = new java.util.LinkedHashMap<>();
+            for (Map.Entry<String, Long> e : sizes.entrySet()) {
+                String k = e.getKey();
+                if (!k.equals("postgres") && !k.equals("template0") && !k.equals("template1")) {
+                    filtered.put(k, e.getValue());
+                }
+            }
+            databaseCount = filtered.size();
+            totalStorageBytes = filtered.values().stream().mapToLong(Long::longValue).sum();
         } catch (Exception e) {
             log.warn("Could not read Postgres database sizes for monitor", e);
         }

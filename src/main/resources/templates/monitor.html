@@ -21,7 +21,7 @@
                             <a class="btn" th:classappend="${monitorEngine == 'postgres'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='postgres')}">PostgreSQL</a>
                         </div>
                         <span id="streamStatus" class="badge badge-soft-secondary">
-                            <span id="streamDot" class="live-dot"></span> Connecting…
+                            <span id="streamDot" class="live-dot"></span> <span id="streamText">Connecting…</span>
                         </span>
                         <a class="btn btn-sm btn-outline-secondary" th:href="@{/health}">
                             <i class="bi bi-heart-pulse"></i> Health
@@ -335,10 +335,6 @@
             return s + 's';
         };
 
-        function set(id, value) {
-            document.getElementById(id).textContent = value;
-        }
-
         function safeSet(id, value) {
             const el = document.getElementById(id);
             if (el) el.textContent = value;
@@ -409,9 +405,10 @@
         function markStream(ok) {
             const dot = document.getElementById('streamDot');
             const status = document.getElementById('streamStatus');
+            const text = document.getElementById('streamText');
             dot.classList.toggle('live-dot-off', !ok);
             dot.classList.toggle('live-dot', ok);
-            status.textContent = ok ? 'Live' : 'Reconnecting…';
+            text.textContent = ok ? 'Live' : 'Reconnecting…';
             status.className = ok ? 'badge badge-soft-success' : 'badge badge-soft-warning';
         }
 

@@ -102,7 +102,7 @@ public class PostgresController {
     public ResponseEntity<StreamingResponseBody> exportTable(@PathVariable String dbName, @PathVariable String tableName) {
         var svc = explorationService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("Postgres is not enabled"));
         // Validate before streaming so missing table yields 404 page, not truncated download
-        svc.getRows(dbName, tableName, 1);
+        svc.ensureTableExists(dbName, tableName);
         String filename = dbName + "." + tableName + ".json";
         StreamingResponseBody body = out -> svc.writeAllRowsAsJson(dbName, tableName, out);
         return ResponseEntity.ok()

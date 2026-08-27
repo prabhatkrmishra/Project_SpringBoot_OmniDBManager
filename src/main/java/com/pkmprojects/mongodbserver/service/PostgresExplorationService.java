@@ -99,6 +99,13 @@ public class PostgresExplorationService {
                 columns, rows, safePage > 1, safePage < totalPages);
     }
 
+    public void ensureTableExists(String dbName, String tableName) {
+        nameValidator.validatePostgresDatabaseName(dbName);
+        validateTableName(tableName);
+        requireDatabase(dbName);
+        requireTable(dbName, tableName);
+    }
+
     public void writeAllRowsAsJson(String dbName, String tableName, OutputStream out) {
         nameValidator.validatePostgresDatabaseName(dbName);
         validateTableName(tableName);
@@ -106,24 +113,22 @@ public class PostgresExplorationService {
         requireTable(dbName, tableName);
         try {
             List<String> columns = postgresRepository.getTableColumns(dbName, tableName);
-            // Stream in batches to keep memory bounded
-            long total = postgresRepository.countRows(dbName, tableName);
+            java.util.Set<String> columnSet = new java.util.HashSet<>(columns);
             out.write('[');
             boolean first = true;
             int offset = 0;
             int batch = 1000;
-            while (offset < total || (total == 0 && first)) {
+            while (true) {
                 List<Map<String, Object>> rows = postgresRepository.listRows(dbName, tableName, batch, offset);
                 if (rows.isEmpty()) break;
                 for (Map<String, Object> row : rows) {
                     if (!first) out.write(',');
                     first = false;
-                    out.write(toJson(row, columns).getBytes(StandardCharsets.UTF_8));
+                    out.write(toJson(row, columns, columnSet).getBytes(StandardCharsets.UTF_8));
                 }
                 offset += rows.size();
                 if (rows.size() < batch) break;
             }
-            // Handle empty table: already wrote '[' and need ']'
             out.write(']');
         } catch (IOException e) {
             throw new ProvisioningException("Could not export table '" + tableName + "'", e);
@@ -133,7 +138,7 @@ public class PostgresExplorationService {
         }
     }
 
-    private String toJson(Map<String, Object> row, List<String> columns) {
+    private String toJson(Map<String, Object> row, List<String> columns, java.util.Set<String> columnSet) {
         StringBuilder sb = new StringBuilder(128);
         sb.append('{');
         boolean first = true;
@@ -146,7 +151,7 @@ public class PostgresExplorationService {
         }
         // Include any extra keys not in columns (should not happen, but be safe)
         for (Map.Entry<String, Object> e : row.entrySet()) {
-            if (columns.contains(e.getKey())) continue;
+            if (columnSet.contains(e.getKey())) continue;
             if (!first) sb.append(',');
             first = false;
             sb.append(Json.jsonString(e.getKey())).append(':').append(jsonValue(e.getValue()));
