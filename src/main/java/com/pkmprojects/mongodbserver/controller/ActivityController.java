@@ -79,7 +79,16 @@ public class ActivityController {
             criteria.add(Criteria.where("eventType").is(eventType.trim()));
         }
         if (engineType != null && !engineType.isBlank()) {
-            criteria.add(Criteria.where("engineType").is(engineType.trim()));
+            String trimmed = engineType.trim();
+            if ("MONGO".equalsIgnoreCase(trimmed)) {
+                // Legacy audit events have no engineType (null/missing) — treat as MONGO
+                criteria.add(new Criteria().orOperator(
+                        Criteria.where("engineType").is("MONGO"),
+                        Criteria.where("engineType").exists(false),
+                        Criteria.where("engineType").is(null)));
+            } else {
+                criteria.add(Criteria.where("engineType").is(trimmed));
+            }
         }
         if (dbName != null && !dbName.isBlank()) {
             criteria.add(Criteria.where("dbName").regex(containsPattern(dbName.trim()), "i"));

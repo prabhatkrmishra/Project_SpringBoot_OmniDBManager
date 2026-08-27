@@ -113,7 +113,7 @@ public class PostgresDatabaseRepository {
     }
 
     public String getVersion() {
-        return jdbcTemplate.queryForObject("SHOW server_version", String.class);
+        return jdbcTemplate.queryForObject("SELECT current_setting('server_version')", String.class);
     }
 
     public void createDatabase(String dbName, String owner) {

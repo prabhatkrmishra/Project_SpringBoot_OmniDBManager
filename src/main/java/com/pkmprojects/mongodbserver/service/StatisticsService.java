@@ -29,11 +29,6 @@ public class StatisticsService {
 
     private static final Logger log = LoggerFactory.getLogger(StatisticsService.class);
 
-    /**
-     * Upper bound on concurrent {@code collStats} commands per page load.
-     */
-    private static final int MAX_PARALLEL_COLLECTIONS = 16;
-
     private final MongoDatabaseRepository mongoDatabaseRepository;
     private final MongoNameValidator nameValidator;
 

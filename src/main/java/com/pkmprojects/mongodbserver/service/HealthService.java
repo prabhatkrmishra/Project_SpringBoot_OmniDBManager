@@ -96,7 +96,7 @@ public class HealthService {
         try {
             mongoDatabaseRepository.ping();
             return true;
-        } catch (MongoException e) {
+        } catch (Exception e) {
             log.warn("MongoDB ping failed", e);
             return false;
         }

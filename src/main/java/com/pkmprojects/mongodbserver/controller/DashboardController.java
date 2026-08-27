@@ -29,9 +29,15 @@ public class DashboardController {
      */
     @GetMapping("/")
     public String dashboard(Model model) {
-        var mongoDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO);
+        var mongoDbs = java.util.List.<com.pkmprojects.mongodbserver.dto.DatabaseInfo>of();
+        try {
+            mongoDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO);
+        } catch (Exception e) {
+            // Mongo down — dashboard still renders with empty list and unreachable dot
+        }
         model.addAttribute("databases", mongoDbs);
         model.addAttribute("mongoDatabases", mongoDbs);
+        model.addAttribute("mongoCount", mongoDbs.size());
         try {
             var pgDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.POSTGRES);
             model.addAttribute("postgresDatabases", pgDbs);
@@ -40,7 +46,6 @@ public class DashboardController {
             model.addAttribute("postgresDatabases", java.util.List.of());
             model.addAttribute("postgresCount", 0);
         }
-        model.addAttribute("mongoCount", mongoDbs.size());
         var health = healthService.getHealth();
         model.addAttribute("mongoReachable", health.mongoReachable());
         model.addAttribute("postgresReachable", health.postgresReachable());
