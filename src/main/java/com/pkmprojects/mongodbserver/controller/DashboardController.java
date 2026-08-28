@@ -38,15 +38,20 @@ public class DashboardController {
         model.addAttribute("databases", mongoDbs);
         model.addAttribute("mongoDatabases", mongoDbs);
         model.addAttribute("mongoCount", mongoDbs.size());
-        try {
-            var pgDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.POSTGRES);
-            model.addAttribute("postgresDatabases", pgDbs);
-            model.addAttribute("postgresCount", pgDbs.size());
-        } catch (Exception e) {
+        var health = healthService.getHealth();
+        if (health.postgresEnabled()) {
+            try {
+                var pgDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.POSTGRES);
+                model.addAttribute("postgresDatabases", pgDbs);
+                model.addAttribute("postgresCount", pgDbs.size());
+            } catch (Exception e) {
+                model.addAttribute("postgresDatabases", java.util.List.of());
+                model.addAttribute("postgresCount", 0);
+            }
+        } else {
             model.addAttribute("postgresDatabases", java.util.List.of());
             model.addAttribute("postgresCount", 0);
         }
-        var health = healthService.getHealth();
         model.addAttribute("mongoReachable", health.mongoReachable());
         model.addAttribute("postgresReachable", health.postgresReachable());
         model.addAttribute("postgresEnabled", health.postgresEnabled());

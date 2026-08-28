@@ -153,7 +153,7 @@ public class PostgresDatabaseRepository {
 
     public Map<String, Long> getDatabaseSizes() {
         Map<String, Long> sizes = new LinkedHashMap<>();
-        jdbcTemplate.query("SELECT datname, pg_database_size(datname) AS sz FROM pg_database WHERE datistemplate = false",
+        jdbcTemplate.query("SELECT datname, pg_database_size(datname) AS sz FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres','template0','template1')",
                 rs -> {
                     String name = rs.getString("datname");
                     long sz = rs.getLong("sz");

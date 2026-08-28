@@ -102,10 +102,10 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         String encodedUser = uriEncode(userName);
         String encodedPass = uriEncode(password);
         String base = "postgresql://" + encodedUser + ":" + encodedPass + "@" + host + "/" + dbName;
-        String sslmode = publicTls ? publicSslmode : "disable";
-        // Only add sslmode when TLS is enabled or explicitly require; keep disable explicit for clarity
+        // Official libpq URI: postgresql://user:pass@host:port/db?sslmode=require&application_name=omnidb
+        // When publicTls=false we omit sslmode (libpq defaults to prefer — opportunistic TLS) and keep only application_name
         if (publicTls) {
-            return base + "?sslmode=" + sslmode + "&application_name=omnidb";
+            return base + "?sslmode=" + publicSslmode + "&application_name=omnidb";
         }
         return base + "?application_name=omnidb";
     }
