@@ -34,6 +34,7 @@ public class HealthService {
     private final Optional<MysqlDatabaseRepository> mysqlRepository;
     private final boolean mysqlEnabled;
 
+    @Autowired
     public HealthService(MongoDatabaseRepository mongoDatabaseRepository,
                          @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
                          @Value("${app.postgres.enabled:false}") boolean postgresEnabled,
