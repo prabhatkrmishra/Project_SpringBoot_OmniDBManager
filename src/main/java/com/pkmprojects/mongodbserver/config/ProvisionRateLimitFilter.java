@@ -31,24 +31,31 @@ public class ProvisionRateLimitFilter extends OncePerRequestFilter {
         // Normalize trailing slash so /postgres/databases/ matches provision
         String path = raw.endsWith("/") && raw.length() > 1 ? raw.substring(0, raw.length() - 1) : raw;
         boolean isProvision = path.equals("/mongo/databases") || path.equals("/postgres/databases")
+                || path.equals("/mysql/databases")
                 || path.equals("/databases");
-        boolean isReset = path.matches(".*/(mongo|postgres)/databases/[^/]+/reset")
+        boolean isReset = path.matches(".*/(mongo|postgres|mysql)/databases/[^/]+/reset")
                 || path.matches(".*/databases/[^/]+/reset");
-        boolean isDelete = path.matches(".*/(mongo|postgres)/databases/[^/]+/delete")
-                || path.matches(".*/(mongo|postgres)/databases/[^/]+/users/[^/]+/delete")
+        boolean isDelete = path.matches(".*/(mongo|postgres|mysql)/databases/[^/]+/delete")
+                || path.matches(".*/(mongo|postgres|mysql)/databases/[^/]+/users/[^/]+/delete")
                 || path.matches(".*/databases/[^/]+/delete")
                 || path.matches(".*/databases/[^/]+/users/[^/]+/delete")
                 || path.matches(".*/databases/[^/]+/collections/[^/]+/delete")
                 || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/delete")
-                || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/rows/delete");
-        boolean isBackupRestore = path.matches(".*/(mongo|postgres)/databases/[^/]+/(backup|restore)")
+                || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/rows/delete")
+                || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/delete")
+                || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/truncate")
+                || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/rows/delete");
+        boolean isBackupRestore = path.matches(".*/(mongo|postgres|mysql)/databases/[^/]+/(backup|restore)")
                 || path.matches(".*/databases/[^/]+/(backup|restore)");
         boolean isCollectionCreate = path.matches(".*/databases/[^/]+/collections");
         boolean isImport = path.matches(".*/databases/[^/]+/collections/[^/]+/import");
         boolean isPgTableWrite = path.matches(".*/postgres/databases/[^/]+/tables")
                 || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/truncate")
                 || path.matches(".*/postgres/databases/[^/]+/tables/[^/]+/rows");
-        return !(isProvision || isReset || isDelete || isBackupRestore || isCollectionCreate || isImport || isPgTableWrite);
+        boolean isMysqlTableWrite = path.matches(".*/mysql/databases/[^/]+/tables")
+                || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/truncate")
+                || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/rows");
+        return !(isProvision || isReset || isDelete || isBackupRestore || isCollectionCreate || isImport || isPgTableWrite || isMysqlTableWrite);
     }
 
     @Override
@@ -59,6 +66,8 @@ public class ProvisionRateLimitFilter extends OncePerRequestFilter {
         String engine;
         if (path.startsWith("/postgres/") || path.equals("/postgres")) {
             engine = "POSTGRES";
+        } else if (path.startsWith("/mysql/") || path.equals("/mysql")) {
+            engine = "MYSQL";
         } else if (path.startsWith("/mongo/") || path.equals("/mongo")) {
             engine = "MONGO";
         } else {

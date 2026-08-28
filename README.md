@@ -1,40 +1,40 @@
 # OmniDB Manager
 
-**Enterprise dual-engine database control plane — MongoDB + PostgreSQL 18.**
+**Enterprise triple-engine database control plane — MongoDB + PostgreSQL 18 + MySQL 8.4.**
 
-A self-hosted, Atlas-style provisioning service. Sign in as admin, provision isolated databases with dedicated per-database users on either engine, hand the connection string to your apps, and later rotate passwords, manage tables/rows, back up/restore, or delete — all from a single Spring MVC web UI.
+A self-hosted, Atlas-style provisioning service. Sign in as admin, provision isolated databases with dedicated per-database users on any engine, hand the connection string to your apps, and later rotate passwords, manage tables/rows, back up/restore, or delete — all from a single Spring MVC web UI.
 
 > If you like this project, give it a [⭐ on GitHub](https://github.com/prabhatkrmishra/Project_SpringBoot_OmniDBManager) — it keeps me going!
 
 ## Why OmniDB Manager?
 
-Most teams run MongoDB *and* PostgreSQL. OmniDB Manager unifies them under one control plane with strict isolation:
+Most teams run MongoDB *and* PostgreSQL *and* MySQL. OmniDB Manager unifies them under one control plane with strict isolation:
 
-- **Isolated engines** — every database is `engine:dbName` (`MONGO:myapp` vs `POSTGRES:myapp`). Same name can exist in both engines without collision. Compound unique `(engineType, dbName)` + `DatabaseLockRegistry` key `engine:dbName`.
-- **Prefix routes** — `/mongo/*` and `/postgres/*` with a mandatory engine chooser. No ambiguous default engine.
-- **Least-privilege by default** — Mongo `readWrite` scoped to one DB; Postgres `CONNECT` + `USAGE,CREATE ON SCHEMA public` + `ALTER DEFAULT PRIVILEGES`, with `REVOKE CREATE ON SCHEMA public FROM PUBLIC` hardening.
-- **Not a proxy** — the app is the control plane only. Apps connect directly to MongoDB/PostgreSQL via the issued connection string.
+- **Isolated engines** — every database is `engine:dbName` (`MONGO:myapp` vs `POSTGRES:myapp` vs `MYSQL:myapp`). Same name can exist in all three engines without collision. Compound unique `(engineType, dbName)` + `DatabaseLockRegistry` key `engine:dbName`.
+- **Prefix routes** — `/mongo/*`, `/postgres/*`, and `/mysql/*` with a mandatory engine chooser. No ambiguous default engine.
+- **Least-privilege by default** — Mongo `readWrite` scoped to one DB; Postgres `CONNECT` + `USAGE,CREATE ON SCHEMA public` + `ALTER DEFAULT PRIVILEGES` with `REVOKE CREATE ON SCHEMA public FROM PUBLIC`; MySQL `SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,DROP,... ON db.*` via `GRANT` with `caching_sha2_password`.
+- **Not a proxy** — the app is the control plane only. Apps connect directly to MongoDB/PostgreSQL/MySQL via the issued connection string.
 
 ## Features
 
-- **Dual-engine provisioning** — `POST /mongo/databases` + `POST /postgres/databases` via `DatabaseEngine` abstraction (`MongoDatabaseEngine` / `PostgresDatabaseEngine`).
-- **Engine-aware validation** — `DatabaseNameValidator`: Mongo `[A-Za-z0-9_-]+` max 64; Postgres `^[a-z_][a-z0-9_]*$` max 63, lowercased, system DBs blocked (`admin/local/config/mongodb_admin` vs `postgres/template0/template1`).
-- **Connection strings on demand** — shown after create/reset and re-derived from stored metadata. Mongo `mongodb://user:pass@host/db?authSource=db`; Postgres `postgresql://user:pass@host:5432/db?sslmode=require&application_name=omnidb` (or `verify-full` with CA).
-- **Password rotation & deletion** — reset instantly invalidates old password; delete drops DB + role/user + metadata.
-- **Native Postgres table/row CRUD** — create/drop/truncate tables, insert/delete rows (via `ctid::text AS __pg_ctid` + `DELETE ... WHERE ctid = ?::tid`), add columns on-the-fly (`ALTER TABLE ... ADD COLUMN TEXT`). No Adminer required.
-- **Explorer** — browse databases → collections/tables → paginated documents/rows (50/page) + JSON export.
-- **Statistics & monitor** — `dbStats`/`collStats` (Mongo) + `pg_total_relation_size`/`pg_stat_user_tables` (Postgres), live SSE monitor with per-engine filter `?engine=mongo|postgres`.
-- **Backup & restore** — Mongo gzip'd canonical Extended JSON (`formatVersion:1`); Postgres JDBC gzip'd JSON dump. Streaming download, replace-semantics restore with pre-validation.
-- **Encryption at rest** — `AES-256-GCM` (`ENC:v1:`) for stored per-database passwords. Key from `APP_ENCRYPTION_KEY` (base64 32B or 64 hex); plaintext fallback when blank (dev only).
-- **Hardening** — per-engine rate limit (`IP:engine`, 5/min, `trustXFF=false`), TLS (`sslmode=require` / `verify-full` + `application_name`), `scram-sha-256`, `PGDATA=/var/lib/postgresql/18/docker`, audit trail (`PROVISION/RESET_PASSWORD/DELETE/TABLE_CREATED/DROPPED/TRUNCATED/ROW_INSERTED/ROW_DELETED/BACKUP_CREATED/RESTORED/IMPORT`), Micrometer `provisioned.databases{engine}` gauge, `postgres` HealthIndicator.
+- **Triple-engine provisioning** — `POST /mongo/databases` + `POST /postgres/databases` + `POST /mysql/databases` via `DatabaseEngine` abstraction (`MongoDatabaseEngine` / `PostgresDatabaseEngine` / `MysqlDatabaseEngine`).
+- **Engine-aware validation** — `DatabaseNameValidator`: Mongo `[A-Za-z0-9_-]+` max 64; Postgres `^[a-z_][a-z0-9_]*$` max 63; MySQL `^[a-z_][a-z0-9_]*$` max 64, lowercased, system DBs blocked (`admin/local/config/mongodb_admin` vs `postgres/template0/template1` vs `information_schema/mysql/performance_schema/sys`).
+- **Connection strings on demand** — shown after create/reset and re-derived from stored metadata. Mongo `mongodb://user:pass@host/db?authSource=db`; Postgres `postgresql://user:pass@host:5432/db?sslmode=require&application_name=omnidb` (or `verify-full` with CA); MySQL `mysql://user:pass@host/db?sslMode=REQUIRED` (or `VERIFY_IDENTITY` with CA).
+- **Password rotation & deletion** — reset instantly invalidates old password; delete drops DB + role/user + metadata (per-engine).
+- **Native table/row CRUD** — Postgres via `ctid::text AS __pg_ctid` + `DELETE ... WHERE ctid = ?::tid`; MySQL via PK detection (`information_schema.KEY_COLUMN_USAGE`) + `DELETE ... WHERE pk = ?` (composite PKs rejected, delete via phpMyAdmin). Add columns on-the-fly (`ALTER TABLE ... ADD COLUMN TEXT`). No Adminer/phpMyAdmin required for CRUD.
+- **Explorer** — browse databases → collections/tables → paginated documents/rows (50/page) + JSON export (per-engine).
+- **Statistics & monitor** — `dbStats`/`collStats` (Mongo) + `pg_total_relation_size`/`pg_stat_user_tables` (Postgres) + `information_schema.TABLES` (MySQL), live SSE monitor with per-engine filter `?engine=mongo|postgres|mysql`.
+- **Backup & restore** — Mongo gzip'd canonical Extended JSON (`formatVersion:1`); Postgres & MySQL JDBC gzip'd JSON dumps (`formatVersion:1`, `tables`/`rows`/`columns`). Streaming download, replace-semantics restore with pre-validation.
+- **Encryption at rest** — `AES-256-GCM` (`ENC:v1:`) for stored per-database passwords (all engines). Key from `APP_ENCRYPTION_KEY` (base64 32B or 64 hex); plaintext fallback when blank (dev only).
+- **Hardening** — per-engine rate limit (`IP:engine`, 5/min, `trustXFF=false`), TLS (`sslmode=require` / `verify-full` + `application_name` for PG; `sslMode=REQUIRED` / `VERIFY_IDENTITY` for MySQL), `scram-sha-256` / `caching_sha2_password`, `PGDATA=/var/lib/postgresql/18/docker`, audit trail (`PROVISION/RESET_PASSWORD/DELETE/TABLE_CREATED/DROPPED/TRUNCATED/ROW_INSERTED/ROW_DELETED/BACKUP_CREATED/RESTORED/IMPORT`), Micrometer `provisioned.databases{engine}` gauge, `postgres` + `mysql` HealthIndicators.
 - **Brute-force protection** — login rate limit per IP+username (5/15m, 429 + `Retry-After`).
-- **Bundled UIs (optional)** — mongo-express at `/mongo-express` and Adminer at `/adminer`, both loopback-bound and behind app auth.
+- **Bundled UIs (optional)** — mongo-express at `/mongo-express`, Adminer at `/adminer` (Postgres), phpMyAdmin at `/phpmyadmin` (MySQL), all loopback-bound and behind app auth.
 
 ## Stack
 
 - **Java 25**, **Spring Boot 4.1.0** (`spring-boot-starter-webmvc`, `data-mongodb`, `jdbc`, `security`, `validation`, `actuator`, `micrometer`)
-- **MongoDB 8** + **PostgreSQL 18.6-alpine** + **Adminer 6.0.1-standalone**
-- **PostgreSQL driver 42.7.5**, **HikariCP** (via `spring-boot-starter-jdbc`)
+- **MongoDB 8** + **PostgreSQL 18.6-alpine** + **MySQL 8.4** + **Adminer 6.0.1-standalone** + **phpMyAdmin 5.2**
+- **PostgreSQL driver 42.7.5** + **MySQL Connector/J 9.4**, **HikariCP** (via `spring-boot-starter-jdbc`)
 - **Thymeleaf** + **Bootstrap 5.3.8** + **Bootstrap Icons 1.13.1**
 - **Docker Compose** for local stack; **Testcontainers** for integration tests
 
@@ -56,21 +56,24 @@ Most teams run MongoDB *and* PostgreSQL. OmniDB Manager unifies them under one c
    - `APP_ADMIN_USERNAME` / `APP_ADMIN_PASSWORD` — web UI login
    - `MONGODB_ROOT_USERNAME` / `MONGODB_ROOT_PASSWORD` — Mongo root for provisioning
    - `POSTGRES_ROOT_USER` / `POSTGRES_ROOT_PASSWORD` — Postgres superuser for DDL
+   - `MYSQL_ROOT_PASSWORD` — MySQL root for DDL
    - `MONGO_EXPRESS_*` — mongo-express basic auth
    - `APP_ENCRYPTION_KEY` — `openssl rand -base64 32` (or `openssl rand -hex 32`)
 
 2. Start backing services:
 
    ```bash
-   docker compose up -d              # all engines
+   docker compose up -d              # all engines (mongo + postgres + mysql)
    # or per-engine:
    # docker compose -f compose.mongo.yaml up -d
    # docker compose -f compose.postgres.yaml up -d
+   # docker compose -f compose.mysql.yaml up -d
    ```
 
    - App: http://localhost:9811
    - mongo-express: no direct URL — open **Mongo Express** from sidebar (`/mongo-express`)
    - Adminer: http://localhost:9815 (or via app proxy, loopback-bound)
+   - phpMyAdmin: http://localhost:9817 (or via app proxy `/phpmyadmin`, loopback-bound)
 
 3. Run the app:
 
@@ -78,7 +81,7 @@ Most teams run MongoDB *and* PostgreSQL. OmniDB Manager unifies them under one c
    ./mvnw spring-boot:run
    ```
 
-4. Sign in at http://localhost:9811/login, pick an engine (**MongoDB** or **PostgreSQL**), then **Provision a database**. Copy the connection string — it stays viewable on the database detail page.
+4. Sign in at http://localhost:9811/login, pick an engine (**MongoDB**, **PostgreSQL**, or **MySQL**), then **Provision a database**. Copy the connection string — it stays viewable on the database detail page.
 
 ### Enable PostgreSQL
 
@@ -94,7 +97,23 @@ POSTGRES_PUBLIC_TLS=false
 POSTGRES_PUBLIC_SSLMODE=require
 ```
 
-Restart the app. Dashboard now shows two engine tables; provision via **PostgreSQL → New Database**.
+Restart the app. Dashboard now shows Postgres tables; provision via **PostgreSQL → New Database**.
+
+### Enable MySQL
+
+MySQL is opt-in (8.4 LTS):
+
+```bash
+# .env
+MYSQL_ENABLED=true
+MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+# optional public host for issued strings
+MYSQL_PUBLIC_HOST=mysql.example.com
+MYSQL_PUBLIC_TLS=false
+MYSQL_PUBLIC_SSLMODE=REQUIRED
+```
+
+Restart the app. Dashboard now shows MySQL tables; provision via **MySQL → New Database**. MySQL uses `caching_sha2_password` and `utf8mb4`/`utf8mb4_0900_ai_ci` by default.
 
 ### Run from the compiled jar (no repo needed)
 
@@ -247,6 +266,12 @@ Issued connection strings derive from the active `spring.mongodb.uri` host.
 | `POSTGRES_URI` | `jdbc:postgresql://127.0.0.1:9813/postgres` | JDBC URL for admin DataSource |
 | `POSTGRES_PUBLIC_HOST` | *(derived)* | Host in issued Postgres strings |
 | `POSTGRES_PUBLIC_TLS` / `POSTGRES_PUBLIC_SSLMODE` | `false` / `require` | TLS for Postgres strings (`require` or `verify-full`) |
+| `MYSQL_ENABLED` | `false` | Enable MySQL engine |
+| `MYSQL_ROOT_PASSWORD` | `root` | MySQL root for DDL |
+| `MYSQL_URI` | `jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC` | JDBC URL for admin DataSource |
+| `MYSQL_PUBLIC_HOST` | *(derived)* | Host in issued MySQL strings |
+| `MYSQL_PUBLIC_TLS` / `MYSQL_PUBLIC_SSLMODE` | `false` / `REQUIRED` | TLS for MySQL strings (`REQUIRED` or `VERIFY_IDENTITY`) |
+| `PHPMYADMIN_BASE_URL` | `http://127.0.0.1:9817` | phpMyAdmin base URL |
 | `ADMINER_BASE_URL` | `http://127.0.0.1:9815` | Adminer base URL |
 | `MONGO_EXPRESS_BASE_URL` | `http://127.0.0.1:9814/mongo-express` | mongo-express base URL |
 | `APP_ENCRYPTION_KEY` | *(empty = plaintext)* | Base64 32B or 64 hex for AES-256-GCM (`ENC:v1:`) |
@@ -265,17 +290,18 @@ Controller  →  Service  →  Repository (Mongo Java driver / JdbcTemplate)
      └──── Thymeleaf views (server-rendered, th:text only)
 ```
 
-- `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit).
-- `DatabaseEngine` — `MongoDatabaseEngine` (wraps `MongoDatabaseRepository`) + `PostgresDatabaseEngine` (wraps `PostgresDatabaseRepository` via `JdbcTemplate`, no `@Transactional` — `CREATE/DROP DATABASE` cannot run in a transaction).
+- `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit, `EncryptionService` `ENC:v1:` for all engines).
+- `DatabaseEngine` — `MongoDatabaseEngine` (wraps `MongoDatabaseRepository`) + `PostgresDatabaseEngine` (wraps `PostgresDatabaseRepository` via `JdbcTemplate`, no `@Transactional` — `CREATE/DROP DATABASE` cannot run in a transaction) + `MysqlDatabaseEngine` (wraps `MysqlDatabaseRepository`, backtick quoting, `caching_sha2_password`, `utf8mb4`).
 - `PostgresDatabaseRepository` — `CREATE DATABASE "db" OWNER "user" TEMPLATE template0`, `CREATE ROLE ... WITH LOGIN PASSWORD`, `pg_terminate_backend`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `quoteIdentifier`, `executeInDatabase`, `listTables`/`listRowsWithCtid` (`ctid::text AS __pg_ctid`).
-- `ExplorationService` / `PostgresExplorationService` — read-only browsing, bounded pagination (50/page), JSON export.
-- `PostgresBackupService` / `BackupService` — gzip'd JSON dumps, streaming, replace-semantics restore.
+- `MysqlDatabaseRepository` — ``CREATE DATABASE `db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci``, ``CREATE USER 'u'@'%' IDENTIFIED BY ?`` + `GRANT ... ON db.*`, `information_schema` sizes/tables/columns, `quoteIdentifier` backticks, `getPrimaryKeyColumn` single-PK guard.
+- `ExplorationService` / `PostgresExplorationService` / `MysqlExplorationService` — read-only browsing, bounded pagination (50/page), JSON export, PK-aware delete.
+- `PostgresBackupService` / `MysqlBackupService` / `BackupService` — gzip'd JSON dumps (`formatVersion:1`), streaming, replace-semantics restore.
 - `ManagedDatabaseRepository` — Spring Data metadata in `mongodb_admin` (stores encrypted per-DB password, `id=engine:dbName`, `countByEngineType`).
-- `SecurityConfig` — form login, CSRF on, `hasRole(ADMIN)` for `/postgres/databases/**` and writes.
-- `ProvisionRateLimitFilter` (`IP:engine`, order `-9`) + `LoginRateLimitFilter` — in-process fixed-window.
-- `PostgresHealthIndicator` (`postgres` component) + `ProvisionedDatabaseMetrics` (`provisioned.databases{engine}`).
-- `EncryptionService` / `EncryptionProperties` — AES-256-GCM `ENC:v1:`.
-- `MongoExpressProxyFilter` / Adminer proxy — reverse-proxy bundled UIs behind app auth.
+- `SecurityConfig` — form login, CSRF on, `hasRole(ADMIN)` for `/postgres/databases/**`, `/mysql/databases/**`, `/phpmyadmin/**` and writes.
+- `ProvisionRateLimitFilter` (`IP:engine` `MONGO/POSTGRES/MYSQL`, order `-9`) + `LoginRateLimitFilter` — in-process fixed-window.
+- `PostgresHealthIndicator` + `MysqlHealthIndicator` + `ProvisionedDatabaseMetrics` (`provisioned.databases{engine}` `MONGO/POSTGRES/MYSQL`).
+- `EncryptionService` / `EncryptionProperties` — AES-256-GCM `ENC:v1:` (all engines).
+- `MongoExpressProxyFilter` / `AdminerProxyFilter` / `PhpMyAdminProxyFilter` — reverse-proxy bundled UIs behind app auth.
 
 Naming is validated per-engine; system databases are protected.
 
@@ -284,6 +310,13 @@ Naming is validated per-engine; system databases are protected.
 - **DDL** — `CREATE/DROP DATABASE` runs outside transactions (auto-commit `JdbcTemplate`). `CREATE DATABASE "db" OWNER "user" TEMPLATE template0 ENCODING 'UTF8'`; `CREATE ROLE "user" WITH LOGIN PASSWORD '...'` (`scram-sha-256`); `GRANT CONNECT` + schema grants.
 - **Table/row CRUD** — `CREATE TABLE ... (col TEXT)`, `DROP TABLE IF EXISTS ... CASCADE`, `TRUNCATE ... CASCADE`, `INSERT` dynamic, `SELECT *, ctid::text AS __pg_ctid LIMIT ? OFFSET ?`, `DELETE ... WHERE ctid = ?::tid`. Columns lowercased, `distinct()`, reserved names blocked (`__pg_ctid/__ctid/ctid/__new_col/__new_val/_csrf`).
 - **Connection strings** — built from `app.postgres.public-host` or parsed `spring.datasource` host, `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb` (or `verify-full`).
+
+## MySQL specifics
+
+- **DDL** — auto-commit `JdbcTemplate` (MySQL DDL implicit commit). ``CREATE DATABASE `db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci``; ``CREATE USER 'user'@'%' IDENTIFIED BY '...'`` (`caching_sha2_password`); ``GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,DROP,REFERENCES,CREATE VIEW,SHOW VIEW,TRIGGER,CREATE TEMPORARY TABLES,LOCK TABLES,EXECUTE ON `db`.* TO 'user'@'%'``.
+- **Table/row CRUD** — ``CREATE TABLE `db`.`table` (col TEXT)``, ``DROP TABLE IF EXISTS `db`.`table```, ``TRUNCATE TABLE `db`.`table```, `INSERT` dynamic, ``SELECT * FROM `db`.`table` LIMIT ? OFFSET ?``, PK detection via `information_schema.KEY_COLUMN_USAGE` (`constraint_name='PRIMARY'`), single-PK guard (composite PKs → delete via phpMyAdmin), `DELETE ... WHERE pk = ?`. Columns lowercased, `distinct()`, reserved names blocked (`__mysql_pk/__mysql_pk_col/__new_col/__new_val/_csrf`).
+- **Connection strings** — built from `app.mysql.public-host` or parsed `app.mysql.uri` host, `uriEncode` for user/pass, `mysql://user:pass@host/db?sslMode=REQUIRED` (or `VERIFY_IDENTITY` with CA). JDBC: `jdbc:mysql://host/db?sslMode=REQUIRED&serverTimezone=UTC`.
+- **Sizes & monitor** — `SUM(data_length+index_length) FROM information_schema.TABLES`, `information_schema.PROCESSLIST` + `performance_schema.global_status` (`Com_commit`/`Com_rollback`, `Uptime` as `VARCHAR` → `Long.parseLong`).
 
 ## Releases & deployment
 

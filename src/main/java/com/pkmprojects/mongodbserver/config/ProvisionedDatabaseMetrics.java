@@ -7,7 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Component;
 
 /**
- * Exposes {@code provisioned_databases} gauge per engine (MONGO / POSTGRES).
+ * Exposes {@code provisioned_databases} gauge per engine (MONGO / POSTGRES / MYSQL).
  * Value is read live from {@link ManagedDatabaseRepository} so it reflects
  * provision/delete without restart. Visible at {@code /actuator/metrics/provisioned.databases}
  * and via Prometheus if enabled.
