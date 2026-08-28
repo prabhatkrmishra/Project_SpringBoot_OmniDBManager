@@ -157,10 +157,15 @@ class PostgresDatabaseRepositoryIntegrationTest {
     void getDatabaseSizesAndPingAndVersion() {
         repo.ping();
         assertThat(repo.getVersion()).isNotBlank();
-        Map<String, Long> sizes = repo.getDatabaseSizes();
-        assertThat(sizes).containsKey("postgres");
-        assertThat(sizes.get("postgres")).isGreaterThanOrEqualTo(0L);
-        assertThat(repo.getDatabaseSize("postgres")).isGreaterThanOrEqualTo(0L);
+        repo.createDatabase("testdb_size", "root");
+        try {
+            Map<String, Long> sizes = repo.getDatabaseSizes();
+            assertThat(sizes).containsKey("testdb_size");
+            assertThat(sizes.get("testdb_size")).isGreaterThanOrEqualTo(0L);
+            assertThat(repo.getDatabaseSize("testdb_size")).isGreaterThanOrEqualTo(0L);
+        } finally {
+            try { repo.dropDatabase("testdb_size"); } catch (Exception ignored) {}
+        }
     }
 
     @Test
