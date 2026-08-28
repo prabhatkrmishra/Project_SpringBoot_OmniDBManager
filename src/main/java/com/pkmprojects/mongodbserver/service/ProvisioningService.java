@@ -344,11 +344,11 @@ public class ProvisioningService {
                 metadata.ifPresent(m -> managedDatabaseRepository.deleteByEngineTypeAndDbName(engineType, dbName));
             } else {
                 try { engine.dropDatabase(dbName); } catch (Exception e) {
-                    log.warn("Failed to drop PG database '{}': {}", dbName, e.getMessage());
+                    log.warn("Failed to drop {} database '{}': {}", engineType, dbName, e.getMessage());
                 }
                 metadata.ifPresent(m -> {
                     try { engine.dropUser(dbName, m.getUserName()); } catch (Exception e) {
-                        log.warn("Failed to drop PG role '{}': {}", m.getUserName(), e.getMessage());
+                        log.warn("Failed to drop {} role/user '{}': {}", engineType, m.getUserName(), e.getMessage());
                     }
                 });
                 metadata.ifPresent(m -> managedDatabaseRepository.deleteByEngineTypeAndDbName(engineType, dbName));

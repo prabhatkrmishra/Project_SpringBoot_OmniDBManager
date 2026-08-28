@@ -62,7 +62,7 @@ public class MysqlDatabaseRepository {
 
     public Map<String, Long> getDatabaseSizes() {
         Map<String, Long> sizes = new LinkedHashMap<>();
-        jdbcTemplate.query("SELECT table_schema, COALESCE(SUM(data_length + index_length),0) AS sz FROM information_schema.TABLES GROUP BY table_schema",
+        jdbcTemplate.query("SELECT table_schema, COALESCE(SUM(data_length + index_length),0) AS sz FROM information_schema.TABLES WHERE table_schema NOT IN ('information_schema','mysql','performance_schema','sys') GROUP BY table_schema",
                 rs -> {
                     String name = rs.getString("table_schema");
                     long sz = rs.getLong("sz");
