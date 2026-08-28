@@ -27,7 +27,7 @@ public class PostgresDatabaseRepository {
     private final String username;
     private final String password;
 
-    public PostgresDatabaseRepository(JdbcTemplate jdbcTemplate,
+    public PostgresDatabaseRepository(@org.springframework.beans.factory.annotation.Qualifier("postgresJdbcTemplate") JdbcTemplate jdbcTemplate,
                                       @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String postgresUri,
                                       @Value("${POSTGRES_ROOT_USER:root}") String username,
                                       @Value("${POSTGRES_ROOT_PASSWORD:root}") String password) {

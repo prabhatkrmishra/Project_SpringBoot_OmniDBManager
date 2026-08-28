@@ -17,6 +17,7 @@ import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
+import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
 import org.bson.Document;
@@ -55,6 +56,8 @@ public class ProvisioningService {
     private final MongoDatabaseEngine mongoEngine;
     private final Optional<PostgresDatabaseEngine> postgresEngine;
     private final Optional<PostgresDatabaseRepository> postgresRepository;
+    private final Optional<MysqlDatabaseEngine> mysqlEngine;
+    private final Optional<MysqlDatabaseRepository> mysqlRepository;
     private final EncryptionService encryptionService;
 
     @Autowired
@@ -70,6 +73,8 @@ public class ProvisioningService {
                                MongoDatabaseEngine mongoEngine,
                                @Autowired(required = false) PostgresDatabaseEngine postgresEngine,
                                @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
+                               @Autowired(required = false) MysqlDatabaseEngine mysqlEngine,
+                               @Autowired(required = false) MysqlDatabaseRepository mysqlRepository,
                                @Autowired(required = false) EncryptionService encryptionService) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.managedDatabaseRepository = managedDatabaseRepository;
@@ -83,6 +88,8 @@ public class ProvisioningService {
         this.mongoEngine = mongoEngine;
         this.postgresEngine = Optional.ofNullable(postgresEngine);
         this.postgresRepository = Optional.ofNullable(postgresRepository);
+        this.mysqlEngine = Optional.ofNullable(mysqlEngine);
+        this.mysqlRepository = Optional.ofNullable(mysqlRepository);
         this.encryptionService = encryptionService;
     }
 
@@ -101,7 +108,26 @@ public class ProvisioningService {
                                PostgresDatabaseRepository postgresRepository) {
         this(mongoDatabaseRepository, managedDatabaseRepository, auditLogRepository, nameValidator,
                 passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
-                mongoEngine, postgresEngine, postgresRepository, null);
+                mongoEngine, postgresEngine, postgresRepository, null, null, null);
+    }
+
+    // Legacy 13-arg constructor for tests without MySQL (keeps existing tests green)
+    public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
+                               ManagedDatabaseRepository managedDatabaseRepository,
+                               AuditLogRepository auditLogRepository,
+                               DatabaseNameValidator nameValidator,
+                               PasswordGenerator passwordGenerator,
+                               java.time.Clock clock,
+                               Environment environment,
+                               ApplicationEventPublisher applicationEventPublisher,
+                               DatabaseLockRegistry databaseLocks,
+                               MongoDatabaseEngine mongoEngine,
+                               PostgresDatabaseEngine postgresEngine,
+                               PostgresDatabaseRepository postgresRepository,
+                               EncryptionService encryptionService) {
+        this(mongoDatabaseRepository, managedDatabaseRepository, auditLogRepository, nameValidator,
+                passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
+                mongoEngine, postgresEngine, postgresRepository, null, null, encryptionService);
     }
 
     private String encryptPassword(String password) {
@@ -119,6 +145,9 @@ public class ProvisioningService {
         if (type == DatabaseEngineType.POSTGRES) {
             return postgresEngine.orElseThrow(() -> new ProvisioningException("Postgres is not enabled"));
         }
+        if (type == DatabaseEngineType.MYSQL) {
+            return mysqlEngine.orElseThrow(() -> new ProvisioningException("MySQL is not enabled"));
+        }
         return mongoEngine;
     }
 
@@ -134,6 +163,9 @@ public class ProvisioningService {
         if (engineType == DatabaseEngineType.POSTGRES) {
             nameValidator.validatePostgresDatabaseName(dbName);
             nameValidator.validatePostgresUserName(userName);
+        } else if (engineType == DatabaseEngineType.MYSQL) {
+            nameValidator.validateMysqlDatabaseName(dbName);
+            nameValidator.validateMysqlUserName(userName);
         } else {
             nameValidator.validateMongoDatabaseName(dbName);
             nameValidator.validateUserName(userName);
@@ -153,12 +185,20 @@ public class ProvisioningService {
             DatabaseEngine engine = engineFor(engineType);
             boolean pgUserCreated = false;
             boolean pgDbCreated = false;
+            boolean mysqlUserCreated = false;
+            boolean mysqlDbCreated = false;
             try {
                 if (engineType == DatabaseEngineType.POSTGRES) {
                     engine.createUser(dbName, userName, password);
                     pgUserCreated = true;
                     engine.createDatabase(dbName, userName);
                     pgDbCreated = true;
+                    engine.grantPrivileges(dbName, userName);
+                } else if (engineType == DatabaseEngineType.MYSQL) {
+                    engine.createUser(dbName, userName, password);
+                    mysqlUserCreated = true;
+                    engine.createDatabase(dbName, userName);
+                    mysqlDbCreated = true;
                     engine.grantPrivileges(dbName, userName);
                 } else {
                     engine.createUser(dbName, userName, password);
@@ -179,15 +219,27 @@ public class ProvisioningService {
                     if (pgUserCreated) {
                         try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created PG role '{}'", userName, ce); }
                     }
+                } else if (engineType == DatabaseEngineType.MYSQL) {
+                    if (mysqlDbCreated) {
+                        try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up partially created MySQL database '{}'", dbName, ce); }
+                    }
+                    if (mysqlUserCreated) {
+                        try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created MySQL user '{}'", userName, ce); }
+                    }
                 }
                 log.error("Failed to provision database '{}' (user '{}')", dbName, userName, e);
                 throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
             }
 
             java.time.Instant now = clock.instant();
-            List<String> roles = engineType == DatabaseEngineType.POSTGRES
-                    ? List.of("CONNECT:" + dbName)
-                    : List.of("readWrite:" + dbName);
+            List<String> roles;
+            if (engineType == DatabaseEngineType.POSTGRES) {
+                roles = List.of("CONNECT:" + dbName);
+            } else if (engineType == DatabaseEngineType.MYSQL) {
+                roles = List.of("ALL:" + dbName);
+            } else {
+                roles = List.of("readWrite:" + dbName);
+            }
             ManagedDatabase metadata = new ManagedDatabase(dbName, engineType, userName, roles, now, now, null);
             metadata.setStoredPassword(encryptPassword(password));
             managedDatabaseRepository.save(metadata);
@@ -210,6 +262,7 @@ public class ProvisioningService {
 
     public DatabaseInfo resetPassword(DatabaseEngineType engineType, String dbName, ResetPasswordForm form) {
         if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
         else nameValidator.validateDatabaseName(dbName);
         String requestedPassword = form.password() == null ? "" : form.password().trim();
         nameValidator.validatePassword(requestedPassword);
@@ -252,11 +305,13 @@ public class ProvisioningService {
             }
             return;
         }
-        // Not provisioned: try Mongo then Postgres
+        // Not provisioned: try Mongo then Postgres then MySQL
         if (mongoEngine.databaseExists(dbName)) {
             delete(DatabaseEngineType.MONGO, dbName);
         } else if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) {
             delete(DatabaseEngineType.POSTGRES, dbName);
+        } else if (mysqlEngine.isPresent() && mysqlEngine.get().databaseExists(dbName)) {
+            delete(DatabaseEngineType.MYSQL, dbName);
         } else {
             // Still try Mongo delete for idempotency
             delete(DatabaseEngineType.MONGO, dbName);
@@ -265,6 +320,7 @@ public class ProvisioningService {
 
     public void delete(DatabaseEngineType engineType, String dbName) {
         if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
         else nameValidator.validateDatabaseName(dbName);
         databaseLocks.withLock(lockKey(engineType, dbName), () -> {
             Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName);
@@ -341,11 +397,17 @@ public class ProvisioningService {
 
     public List<DatabaseUser> listUsers(DatabaseEngineType engineType, String dbName) {
         if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
         else nameValidator.validateDatabaseName(dbName);
         requireDatabase(dbName, engineType);
         if (engineType == DatabaseEngineType.POSTGRES) {
             return engineFor(engineType).getUsers(dbName).stream()
                     .map(u -> new DatabaseUser(u, List.of("CONNECT:" + dbName), dbName))
+                    .toList();
+        }
+        if (engineType == DatabaseEngineType.MYSQL) {
+            return engineFor(engineType).getUsers(dbName).stream()
+                    .map(u -> new DatabaseUser(u, List.of("ALL:" + dbName), dbName))
                     .toList();
         }
         return mongoDatabaseRepository.getUsers(dbName).stream()
@@ -367,8 +429,10 @@ public class ProvisioningService {
 
     public void revokeUser(DatabaseEngineType engineType, String dbName, String userName) {
         if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresUserName(userName);
+        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlUserName(userName);
         else nameValidator.validateUserName(userName);
         if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
         else nameValidator.validateDatabaseName(dbName);
         databaseLocks.withLock(lockKey(engineType, dbName), () -> {
             requireDatabase(dbName, engineType);
@@ -378,6 +442,14 @@ public class ProvisioningService {
                 }
                 audit(AuditEvent.REVOKE_USER, dbName, engineType, userName, clock.instant());
                 log.info("Revoked PG user '{}' from database '{}'", userName, dbName);
+                return;
+            }
+            if (engineType == DatabaseEngineType.MYSQL) {
+                try { engineFor(engineType).dropUser(dbName, userName); } catch (Exception e) {
+                    throw new ProvisioningException("Could not revoke user '" + userName + "'", e);
+                }
+                audit(AuditEvent.REVOKE_USER, dbName, engineType, userName, clock.instant());
+                log.info("Revoked MySQL user '{}' from database '{}'", userName, dbName);
                 return;
             }
             List<Document> users = mongoDatabaseRepository.getUsers(dbName);
@@ -413,9 +485,10 @@ public class ProvisioningService {
             log.error("Could not list databases on {}", engineType, e);
             throw new ProvisioningException("Could not list databases on " + engineType, e);
         }
-        Set<String> systemDbs = engineType == DatabaseEngineType.POSTGRES
-                ? DatabaseNameValidator.POSTGRES_SYSTEM_DATABASES
-                : DatabaseNameValidator.SYSTEM_DATABASES;
+        Set<String> systemDbs;
+        if (engineType == DatabaseEngineType.POSTGRES) systemDbs = DatabaseNameValidator.POSTGRES_SYSTEM_DATABASES;
+        else if (engineType == DatabaseEngineType.MYSQL) systemDbs = DatabaseNameValidator.MYSQL_SYSTEM_DATABASES;
+        else systemDbs = DatabaseNameValidator.SYSTEM_DATABASES;
         return dbNames.stream()
                 .filter(dbName -> !systemDbs.contains(dbName.toLowerCase(Locale.ROOT)))
                 .map(dbName -> toInfo(dbName, engineType, byName.get(dbName), collectionCount(dbName, engineType), null, sizes.getOrDefault(dbName, 0L)))
@@ -424,16 +497,18 @@ public class ProvisioningService {
     }
 
     public DatabaseInfo getDatabase(String dbName) {
-        // Try Mongo first, then Postgres
+        // Try Mongo first, then Postgres, then MySQL
         ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
         if (md != null) return getDatabase(md.getEngineType(), dbName);
         if (mongoEngine.databaseExists(dbName)) return getDatabase(DatabaseEngineType.MONGO, dbName);
         if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.POSTGRES, dbName);
+        if (mysqlEngine.isPresent() && mysqlEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.MYSQL, dbName);
         throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
     }
 
     public DatabaseInfo getDatabase(DatabaseEngineType engineType, String dbName) {
         if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
+        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
         else nameValidator.validateDatabaseName(dbName);
         if (!engineFor(engineType).databaseExists(dbName)) throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist in " + engineType);
         Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName);
@@ -470,7 +545,7 @@ public class ProvisioningService {
     }
 
     private Long collectionCount(String dbName, DatabaseEngineType engineType) {
-        if (engineType == DatabaseEngineType.POSTGRES) return null;
+        if (engineType == DatabaseEngineType.POSTGRES || engineType == DatabaseEngineType.MYSQL) return null;
         try { return (long) mongoDatabaseRepository.listCollectionNames(dbName).size(); } catch (MongoException e) {
             log.warn("Could not count collections of {}; leaving count blank", dbName, e);
             return null;

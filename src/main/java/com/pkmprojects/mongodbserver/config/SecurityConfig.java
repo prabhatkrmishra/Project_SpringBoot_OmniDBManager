@@ -34,18 +34,19 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.authorizeHttpRequests(auth -> auth
                         .requestMatchers("/login", "/css/**", "/js/**", "/webjars/**", "/error", "/favicon.ico").permitAll()
-                        .requestMatchers("/adminer/**", "/mongo-express/**").hasRole("ADMIN")
+                        .requestMatchers("/adminer/**", "/mongo-express/**", "/phpmyadmin/**").hasRole("ADMIN")
                         .requestMatchers("/databases/*/reset", "/databases/*/delete",
                                 "/databases/*/backup", "/databases/*/restore",
                                 "/databases/*/collections/*/import").hasRole("ADMIN")
                         .requestMatchers("/postgres/databases/*/backup", "/postgres/databases/*/restore").hasRole("ADMIN")
+                        .requestMatchers("/mysql/databases/*/backup", "/mysql/databases/*/restore").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/databases", "/databases/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.POST, "/mongo/databases/**", "/postgres/databases/**").hasRole("ADMIN")
-                        .requestMatchers(HttpMethod.GET, "/mongo/**", "/postgres/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/mongo/databases/**", "/postgres/databases/**", "/mysql/databases/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/mongo/**", "/postgres/**", "/mysql/**").authenticated()
                         .requestMatchers("/webhooks", "/webhooks/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 // The proxied UIs have their own CSRF protection; Spring's token would otherwise reject their POSTs.
-                .csrf(csrf -> csrf.ignoringRequestMatchers("/mongo-express/**", "/adminer/**"))
+                .csrf(csrf -> csrf.ignoringRequestMatchers("/mongo-express/**", "/adminer/**", "/phpmyadmin/**"))
                 .formLogin(form -> form
                         .loginPage("/login")
                         .defaultSuccessUrl("/", true)

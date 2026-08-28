@@ -12,16 +12,16 @@ import javax.sql.DataSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 
 @Configuration(proxyBeanMethods = false)
-@ConditionalOnProperty(name = "app.postgres.enabled", havingValue = "true")
-public class PostgresConfig {
+@ConditionalOnProperty(name = "app.mysql.enabled", havingValue = "true")
+public class MysqlConfig {
 
     @Bean
-    DataSource postgresDataSource(
-            @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String uri,
-            @Value("${POSTGRES_ROOT_USER:root}") String username,
-            @Value("${POSTGRES_ROOT_PASSWORD:root}") String password) {
+    DataSource mysqlDataSource(
+            @Value("${app.mysql.uri:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}") String uri,
+            @Value("${MYSQL_ROOT_USER:root}") String username,
+            @Value("${MYSQL_ROOT_PASSWORD:root}") String password) {
         DriverManagerDataSource ds = new DriverManagerDataSource();
-        ds.setDriverClassName("org.postgresql.Driver");
+        ds.setDriverClassName("com.mysql.cj.jdbc.Driver");
         ds.setUrl(uri);
         ds.setUsername(username);
         ds.setPassword(password);
@@ -29,7 +29,7 @@ public class PostgresConfig {
     }
 
     @Bean
-    JdbcTemplate postgresJdbcTemplate(@Qualifier("postgresDataSource") DataSource postgresDataSource) {
-        return new JdbcTemplate(postgresDataSource);
+    JdbcTemplate mysqlJdbcTemplate(@Qualifier("mysqlDataSource") DataSource mysqlDataSource) {
+        return new JdbcTemplate(mysqlDataSource);
     }
 }

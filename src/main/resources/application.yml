@@ -75,8 +75,16 @@ app:
     public-host: ${POSTGRES_PUBLIC_HOST:}
     public-tls: ${POSTGRES_PUBLIC_TLS:false}
     public-sslmode: ${POSTGRES_PUBLIC_SSLMODE:require}
+  mysql:
+    enabled: ${MYSQL_ENABLED:false}
+    uri: ${MYSQL_URI:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    public-host: ${MYSQL_PUBLIC_HOST:}
+    public-tls: ${MYSQL_PUBLIC_TLS:false}
+    public-sslmode: ${MYSQL_PUBLIC_SSLMODE:REQUIRED}
   adminer:
     base-url: ${ADMINER_BASE_URL:http://127.0.0.1:9815}
+  phpmyadmin:
+    base-url: ${PHPMYADMIN_BASE_URL:http://127.0.0.1:9817}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)

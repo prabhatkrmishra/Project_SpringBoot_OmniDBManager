@@ -31,8 +31,8 @@
 
             <!-- Engine header -->
             <div class="engine-header" th:if="${engine != null}">
-                <i th:class="${engine.name() == 'POSTGRES'} ? 'bi bi-server' : 'bi bi-database'"></i>
-                <span th:text="${engine.name() == 'POSTGRES'} ? 'PostgreSQL' : 'MongoDB'">MongoDB</span>
+                <i th:class="${engine.name() == 'POSTGRES'} ? 'bi bi-server' : (${engine.name() == 'MYSQL'} ? 'bi bi-hdd-stack' : 'bi bi-database')"></i>
+                <span th:text="${engine.name() == 'POSTGRES'} ? 'PostgreSQL' : (${engine.name() == 'MYSQL'} ? 'MySQL' : 'MongoDB')">MongoDB</span>
             </div>
 
             <!-- Root nav -->
@@ -58,22 +58,25 @@
                 <div class="d-flex gap-2 px-1 mt-1">
                     <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/mongo}" th:if="${canWrite}">MongoDB</a>
                     <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/postgres}" th:if="${canWrite}">PostgreSQL</a>
+                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/mysql}" th:if="${canWrite}">MySQL</a>
                 </div>
 
                 <div class="sidebar-section-label mt-3">Databases</div>
                 <a class="sidebar-link" th:href="@{/mongo}"><i class="bi bi-database"></i> MongoDB</a>
                 <a class="sidebar-link" th:href="@{/postgres}"><i class="bi bi-server"></i> PostgreSQL</a>
+                <a class="sidebar-link" th:href="@{/mysql}"><i class="bi bi-hdd-stack"></i> MySQL</a>
 
                 <div class="sidebar-section-label mt-3">Explorers</div>
                 <a class="sidebar-link" th:href="@{/mongo-express}"><i class="bi bi-box-arrow-up-right"></i> Mongo Express</a>
                 <a class="sidebar-link" th:href="@{/adminer}"><i class="bi bi-box-arrow-up-right"></i> Adminer</a>
+                <a class="sidebar-link" th:href="@{/phpmyadmin}"><i class="bi bi-box-arrow-up-right"></i> phpMyAdmin</a>
             </div>
 
             <!-- Engine-scoped nav -->
             <div th:if="${engine != null}">
                 <div class="sidebar-section-label">Navigation</div>
                 <a class="sidebar-link" th:classappend="${page == 'engine-home'} ? 'active'"
-                   th:href="${engine.name() == 'POSTGRES'} ? @{/postgres} : @{/mongo}">
+                   th:href="${engine.name() == 'POSTGRES'} ? @{/postgres} : (${engine.name() == 'MYSQL'} ? @{/mysql} : @{/mongo})">
                     <i class="bi bi-collection"></i> Databases
                 </a>
                 <a class="sidebar-link" th:href="@{/provision/mongo}" th:if="${engine.name() == 'MONGO' and canWrite}">
@@ -82,12 +85,18 @@
                 <a class="sidebar-link" th:href="@{/provision/postgres}" th:if="${engine.name() == 'POSTGRES' and canWrite}">
                     <i class="bi bi-plus-circle"></i> New Postgres DB
                 </a>
+                <a class="sidebar-link" th:href="@{/provision/mysql}" th:if="${engine.name() == 'MYSQL' and canWrite}">
+                    <i class="bi bi-plus-circle"></i> New MySQL DB
+                </a>
                 <div class="sidebar-section-label mt-3">Explorer</div>
                 <a class="sidebar-link" th:href="@{/mongo-express}" th:if="${engine.name() == 'MONGO'}">
                     <i class="bi bi-box-arrow-up-right"></i> Mongo Express
                 </a>
                 <a class="sidebar-link" th:href="@{/adminer}" th:if="${engine.name() == 'POSTGRES'}">
                     <i class="bi bi-box-arrow-up-right"></i> Adminer
+                </a>
+                <a class="sidebar-link" th:href="@{/phpmyadmin}" th:if="${engine.name() == 'MYSQL'}">
+                    <i class="bi bi-box-arrow-up-right"></i> phpMyAdmin
                 </a>
             </div>
 

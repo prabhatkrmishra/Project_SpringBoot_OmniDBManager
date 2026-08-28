@@ -31,6 +31,11 @@ public class ProvisionController {
         } catch (Exception e) {
             model.addAttribute("postgresCount", 0);
         }
+        try {
+            model.addAttribute("mysqlCount", provisioningService.listDatabases(DatabaseEngineType.MYSQL).size());
+        } catch (Exception e) {
+            model.addAttribute("mysqlCount", 0);
+        }
         model.addAttribute("engine", null);
         return "provision";
     }
@@ -53,5 +58,15 @@ public class ProvisionController {
         }
         model.addAttribute("engine", DatabaseEngineType.POSTGRES);
         return "provision-postgres";
+    }
+
+    @GetMapping("/provision/mysql")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String mysqlForm(Model model) {
+        if (!model.containsAttribute("form")) {
+            model.addAttribute("form", new CreateDatabaseForm("", DatabaseEngineType.MYSQL, "", ""));
+        }
+        model.addAttribute("engine", DatabaseEngineType.MYSQL);
+        return "provision-mysql";
     }
 }

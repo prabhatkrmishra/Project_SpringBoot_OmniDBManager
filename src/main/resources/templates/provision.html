@@ -12,7 +12,7 @@
                     <p class="text-body-secondary">Choose an engine to provision a new database.</p>
                 </div>
                 <div class="row g-4">
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="card provision-card h-100">
                             <div class="card-body">
                                 <h5><i class="bi bi-database text-primary me-2"></i>MongoDB</h5>
@@ -23,7 +23,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-4">
                         <div class="card provision-card provision-card-pg h-100">
                             <div class="card-body">
                                 <h5><i class="bi bi-server me-2" style="color:#336791"></i>PostgreSQL</h5>
@@ -31,6 +31,17 @@
                                 <p class="mb-3"><span class="badge badge-soft-info" th:text="${postgresCount} + ' databases'">0 databases</span></p>
                                 <a class="btn btn-primary" th:href="@{/provision/postgres}"><i class="bi bi-plus-lg me-1"></i> Provision PostgreSQL</a>
                                 <a class="btn btn-outline-secondary ms-2" th:href="@{/postgres}">View PostgreSQL</a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card provision-card provision-card-mysql h-100">
+                            <div class="card-body">
+                                <h5><i class="bi bi-hdd-stack me-2" style="color:#00758F"></i>MySQL</h5>
+                                <p class="text-body-secondary">Relational database with tables and SQL.</p>
+                                <p class="mb-3"><span class="badge badge-soft-info" th:text="${mysqlCount} + ' databases'">0 databases</span></p>
+                                <a class="btn btn-primary" th:href="@{/provision/mysql}"><i class="bi bi-plus-lg me-1"></i> Provision MySQL</a>
+                                <a class="btn btn-outline-secondary ms-2" th:href="@{/mysql}">View MySQL</a>
                             </div>
                         </div>
                     </div>

@@ -1021,8 +1021,10 @@ a {
 .provision-card { border-left: 4px solid var(--bs-primary); transition: transform .15s; }
 .provision-card:hover { transform: translateY(-2px); }
 .provision-card-pg { border-left-color: #336791; }
+.provision-card-mysql { border-left-color: #00758F; }
 .engine-badge-mongo { background: rgb(0 104 74 / 0.12); color:#00684a; font-size:0.65rem; }
 .engine-badge-pg { background: rgb(51 103 145 / 0.12); color:#336791; font-size:0.65rem; }
+.engine-badge-mysql { background: rgb(0 117 143 / 0.12); color:#00758F; font-size:0.65rem; }
 
 /* --------------------------------------------------------------------------
     19. Responsive
