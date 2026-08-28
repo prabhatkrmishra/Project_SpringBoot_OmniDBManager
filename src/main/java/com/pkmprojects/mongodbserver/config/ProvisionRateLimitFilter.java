@@ -11,7 +11,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Per-engine rate limit for provision/reset/delete (POST /mongo/** and POST /postgres/**).
+ * Per-engine rate limit for provision/reset/delete (POST /mongo/**, POST /postgres/**, POST /mysql/**).
  * Key is IP + engine so one engine cannot starve the other.
  */
 public class ProvisionRateLimitFilter extends OncePerRequestFilter {

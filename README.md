@@ -117,7 +117,7 @@ Restart the app. Dashboard now shows MySQL tables; provision via **MySQL → New
 
 ### Run from the compiled jar (no repo needed)
 
-The jar is the web layer only — it connects to MongoDB/PostgreSQL, it does not start them.
+The jar is the web layer only — it connects to MongoDB/PostgreSQL/MySQL, it does not start them.
 
 1. Build once (from repo):
 
@@ -354,23 +354,24 @@ CI: `.github/workflows/maven.yml` — `mvn -B clean package -DargLine=-Xmx1024m`
 ## Project layout
 
 ```
-compose.yaml                      # orchestrator (include: mongo + postgres)
+compose.yaml                      # orchestrator (include: mongo + postgres + mysql)
 compose.mongo.yaml                # MongoDB 8 + mongo-express (standalone: -f compose.mongo.yaml)
 compose.postgres.yaml             # PostgreSQL 18.6 + Adminer (standalone: -f compose.postgres.yaml)
+compose.mysql.yaml                # MySQL 8.4 + phpMyAdmin (standalone: -f compose.mysql.yaml)
 .env / .env.example               # credentials (gitignored)
 src/main/java/com/pkmprojects/mongodbserver
-  MongodbserverApplication.java   # @SpringBootApplication (excludes DataSourceAutoConfiguration when PG disabled)
-  config/                         # Security, rate limiting, PostgresConfig, EncryptionProperties, HealthIndicator, metrics
-  controller/                     # Login, Dashboard, Database, Collection, Postgres, Activity, Backup, Monitor
-  dto/                            # Form + view objects (CreateDatabaseForm, DatabaseInfo, TableInfo, TableRowPage, ...)
+  MongodbserverApplication.java   # @SpringBootApplication (excludes DataSourceAutoConfiguration when PG/MySQL disabled)
+  config/                         # Security, rate limiting, PostgresConfig/MysqlConfig, EncryptionProperties, HealthIndicators, metrics, proxy filters
+  controller/                     # Login, Dashboard, Database, Collection, Postgres, Mysql, Activity, Backup, Monitor
+  dto/                            # Form + view objects (CreateDatabaseForm, DatabaseInfo, TableInfo, TableRowPage, MysqlDatabaseStats, ...)
   error/                          # Domain exceptions + global handler
   model/                          # AuditEvent, ManagedDatabase (id=engine:dbName, encrypted password), DatabaseEngineType
-  repository/                     # MongoDatabaseRepository, PostgresDatabaseRepository, ManagedDatabaseRepository, AuditLogRepository
+  repository/                     # MongoDatabaseRepository, PostgresDatabaseRepository, MysqlDatabaseRepository, ManagedDatabaseRepository, AuditLogRepository
   security/                       # Password generator
-  service/                        # Provisioning, Exploration, PostgresExploration, Backup, Statistics, Monitor, Encryption, DatabaseNameValidator
+  service/                        # Provisioning, Exploration, PostgresExploration, MysqlExploration, Backup, Statistics, Monitor, Encryption, DatabaseNameValidator
   util/                           # Json helpers
 src/main/resources
-  application.yml                 # defaults (spring.mongodb.*, app.postgres.*, rate-limit, management)
+  application.yml                 # defaults (spring.mongodb.*, app.postgres.*, app.mysql.*, rate-limit, management)
   static/css/site.css             # UI styling
   static/js/app.js                # copy-to-clipboard, confirm, toggle-password helpers
   templates/                      # Thymeleaf views (login, index, database, table-rows, collections, activity, ...)
