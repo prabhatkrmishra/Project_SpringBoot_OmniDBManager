@@ -159,7 +159,9 @@ public class MysqlDatabaseRepository {
         List<String> cols = jdbcTemplate.queryForList(
                 "SELECT column_name FROM information_schema.KEY_COLUMN_USAGE WHERE table_schema = ? AND table_name = ? AND constraint_name = 'PRIMARY' ORDER BY ordinal_position",
                 String.class, dbName, tableName);
-        return cols.isEmpty() ? null : cols.get(0);
+        if (cols.isEmpty()) return null;
+        if (cols.size() != 1) return null;
+        return cols.get(0);
     }
 
     public List<Map<String, Object>> listRows(String dbName, String tableName, int limit, int offset) {
@@ -230,7 +232,11 @@ public class MysqlDatabaseRepository {
             result.put("version", version);
             Integer connCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM information_schema.PROCESSLIST", Integer.class);
             result.put("connectionCount", connCount != null ? connCount : 0);
-            Long uptime = jdbcTemplate.queryForObject("SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Uptime'", Long.class);
+            Long uptime = null;
+            try {
+                String raw = jdbcTemplate.queryForObject("SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Uptime'", String.class);
+                if (raw != null) uptime = Long.parseLong(raw);
+            } catch (Exception ignored) {}
             if (uptime == null) {
                 try {
                     String val = jdbcTemplate.queryForObject("SHOW GLOBAL STATUS LIKE 'Uptime'", (rs, rn) -> rs.getString(2));

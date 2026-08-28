@@ -13,7 +13,8 @@
                     <div>
                         <h1 class="mb-1">Live monitoring</h1>
                         <p class="mb-0 text-body-secondary" th:if="${monitorEngine == 'postgres'}">Real-time activity for the connected PostgreSQL server, refreshed every 2 seconds.</p>
-                        <p class="mb-0 text-body-secondary" th:if="${monitorEngine != 'postgres'}">Real-time activity for the connected MongoDB server, refreshed every 2 seconds.</p>
+                        <p class="mb-0 text-body-secondary" th:if="${monitorEngine == 'mysql'}">Real-time activity for the connected MySQL server, refreshed every 2 seconds.</p>
+                        <p class="mb-0 text-body-secondary" th:if="${monitorEngine == 'mongo'}">Real-time activity for the connected MongoDB server, refreshed every 2 seconds.</p>
                     </div>
                     <div class="d-flex align-items-center gap-3">
                         <div class="btn-group btn-group-sm" role="group" th:if="${postgresAvailable or mysqlAvailable}">
@@ -232,6 +233,82 @@
                     </div>
                 </section>
 
+                <!-- MySQL-only: activity + transactions (same shape as Postgres) -->
+                <section class="row g-4 mb-4" th:if="${monitorEngine == 'mysql'}">
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                                <i class="bi bi-activity text-primary"></i>
+                                <span class="fw-medium">Activity</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Active</div>
+                                            <div class="health-metric-value" id="mysqlActive">—</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Idle</div>
+                                            <div class="health-metric-value" id="mysqlIdle">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                                <i class="bi bi-arrow-left-right text-success"></i>
+                                <span class="fw-medium">Transactions</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Committed</div>
+                                            <div class="health-metric-value" id="mysqlCommitted">—</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Rolled back</div>
+                                            <div class="health-metric-value" id="mysqlRolledBack">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                                <i class="bi bi-layers text-primary"></i>
+                                <span class="fw-medium">Databases</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Count</div>
+                                            <div class="health-metric-value" id="mysqlDatabaseCount">—</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="health-metric">
+                                            <div class="health-metric-label">Storage</div>
+                                            <div class="health-metric-value" id="mysqlTotalStorage">—</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Postgres-only: activity + transactions -->
                 <section class="row g-4 mb-4" th:if="${monitorEngine == 'postgres'}">
                     <div class="col-lg-4">
@@ -363,6 +440,15 @@
                 safeSet('pgRolledBack', fmtNum(s.transactionsRolledBack));
                 safeSet('pgDatabaseCount', fmtNum(s.databaseCount));
                 safeSet('pgTotalStorage', s.totalStorageBytes == null ? '—' : formatStorage(s.totalStorageBytes));
+                return;
+            }
+            if (monitorEngine === 'mysql') {
+                safeSet('mysqlActive', fmtNum(s.activeConnections));
+                safeSet('mysqlIdle', fmtNum(s.idleConnections));
+                safeSet('mysqlCommitted', fmtNum(s.transactionsCommitted));
+                safeSet('mysqlRolledBack', fmtNum(s.transactionsRolledBack));
+                safeSet('mysqlDatabaseCount', fmtNum(s.databaseCount));
+                safeSet('mysqlTotalStorage', s.totalStorageBytes == null ? '—' : formatStorage(s.totalStorageBytes));
                 return;
             }
 

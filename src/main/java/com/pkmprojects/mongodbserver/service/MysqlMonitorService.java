@@ -81,8 +81,12 @@ public class MysqlMonitorService {
             log.debug("Could not read PROCESSLIST breakdown", e);
         }
         try {
-            Long committed = mysqlRepository.getJdbcTemplate().queryForObject(
-                    "SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Com_commit'", Long.class);
+            Long committed = null;
+            try {
+                String raw = mysqlRepository.getJdbcTemplate().queryForObject(
+                        "SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Com_commit'", String.class);
+                if (raw != null) committed = Long.parseLong(raw);
+            } catch (Exception ignored) {}
             if (committed == null) {
                 try {
                     String val = mysqlRepository.getJdbcTemplate().queryForObject("SHOW GLOBAL STATUS LIKE 'Com_commit'", (rs, rn) -> rs.getString(2));
@@ -90,8 +94,12 @@ public class MysqlMonitorService {
                 } catch (Exception ignored) {}
             }
             txCommitted = committed != null ? committed : 0L;
-            Long rolled = mysqlRepository.getJdbcTemplate().queryForObject(
-                    "SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Com_rollback'", Long.class);
+            Long rolled = null;
+            try {
+                String raw = mysqlRepository.getJdbcTemplate().queryForObject(
+                        "SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME='Com_rollback'", String.class);
+                if (raw != null) rolled = Long.parseLong(raw);
+            } catch (Exception ignored) {}
             if (rolled == null) {
                 try {
                     String val = mysqlRepository.getJdbcTemplate().queryForObject("SHOW GLOBAL STATUS LIKE 'Com_rollback'", (rs, rn) -> rs.getString(2));
