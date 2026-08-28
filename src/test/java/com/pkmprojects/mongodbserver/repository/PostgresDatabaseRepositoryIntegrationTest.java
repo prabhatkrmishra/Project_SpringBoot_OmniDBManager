@@ -1,6 +1,7 @@
 package com.pkmprojects.mongodbserver.repository;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -43,8 +44,17 @@ class PostgresDatabaseRepositoryIntegrationTest {
     @Autowired
     private PostgresDatabaseRepository repo;
 
+    @BeforeEach
+    void setUp() {
+        cleanupTestDatabases();
+    }
+
     @AfterEach
     void cleanUp() {
+        cleanupTestDatabases();
+    }
+
+    private void cleanupTestDatabases() {
         for (String db : List.copyOf(repo.listDatabaseNames())) {
             if (!db.equals("postgres")) {
                 try { repo.dropDatabase(db); } catch (Exception ignored) {}
@@ -53,7 +63,6 @@ class PostgresDatabaseRepositoryIntegrationTest {
                 try { repo.dropUser(db, "testuser"); } catch (Exception ignored) {}
             }
         }
-        // also clean up any leftover test tables in postgres db itself is not needed
     }
 
     @Test

@@ -178,8 +178,10 @@ public class PostgresDatabaseRepository {
     }
 
     public void dropDatabase(String dbName) {
-        // Terminate backends except our own
-        jdbcTemplate.update("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()", dbName);
+        try {
+            jdbcTemplate.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()", (rs, rowNum) -> null, dbName);
+        } catch (Exception ignored) {
+        }
         jdbcTemplate.execute("DROP DATABASE IF EXISTS " + quoteIdentifier(dbName));
     }
 
