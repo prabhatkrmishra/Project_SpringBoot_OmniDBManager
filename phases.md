@@ -313,13 +313,13 @@ DROP ROLE IF EXISTS "myapp_user";
 
 ### 1.9 Acceptance Criteria
 
-- [ ] `POST /mongo/databases` and `POST /postgres/databases` both provision with same `dbName` (e.g. `myapp`) — two separate `ManagedDatabase` docs `MONGO:myapp` + `POSTGRES:myapp`.
-- [ ] Connection strings are dialable: Mongo `mongodb://...?authSource=db`, Postgres `postgresql://...?sslmode=require&application_name=mongodbserver`.
-- [ ] Reset/delete work per engine without affecting the other.
-- [ ] `/provision` chooser shows two cards with counts + reachable dots.
-- [ ] Sidebar has back button `← Back to Dashboard` in engine context, `th:href="@{/}"` + `history.back()` fallback.
-- [ ] `/adminer` proxied behind `ADMIN` login, 502 when Adminer down, loopback only.
-- [ ] No mixed lists — dashboard shows two separate tables.
+- [x] `POST /mongo/databases` and `POST /postgres/databases` both provision with same `dbName` (e.g. `myapp`) — two separate `ManagedDatabase` docs `MONGO:myapp` + `POSTGRES:myapp`.
+- [x] Connection strings are dialable: Mongo `mongodb://...?authSource=db`, Postgres `postgresql://...?sslmode=require&application_name=omnidb`.
+- [x] Reset/delete work per engine without affecting the other.
+- [x] `/provision` chooser shows two cards with counts + reachable dots.
+- [x] Sidebar has back button `← Back to Dashboard` in engine context, `th:href="@{/}"` + `history.back()` fallback.
+- [x] `/adminer` proxied behind `ADMIN` login, 502 when Adminer down, loopback only.
+- [x] No mixed lists — dashboard shows two separate tables.
 
 ---
 
@@ -350,10 +350,10 @@ Make separation bulletproof: composite locks, per-engine health, validation hard
 
 ### 2.3 Acceptance Criteria
 
-- [ ] Same name in both engines never deadlocks or blocks.
-- [ ] Health page shows `Mongo: ● reachable` + `Postgres: ● reachable` separately.
-- [ ] Activity log filterable by engine.
-- [ ] Virtual threads used for stats fan-out (no `newFixedThreadPool`).
+- [x] Same name in both engines never deadlocks or blocks.
+- [x] Health page shows `Mongo: ● reachable` + `Postgres: ● reachable` separately.
+- [x] Activity log filterable by engine.
+- [x] Virtual threads used for stats fan-out (no `newFixedThreadPool`).
 
 ---
 
@@ -397,9 +397,9 @@ SELECT * FROM "my_table" LIMIT 50 OFFSET 0;
 
 ### 3.4 Acceptance Criteria
 
-- [ ] `/mongo/databases/myapp` shows Collections, `/postgres/databases/myapp` shows Tables — never mixed.
-- [ ] Postgres tables paginated, stats from `pg_stat_user_tables`.
-- [ ] Monitor shows per-engine activity.
+- [x] `/mongo/databases/myapp` shows Collections, `/postgres/databases/myapp` shows Tables — never mixed.
+- [x] Postgres tables paginated, stats from `pg_stat_user_tables`.
+- [x] Monitor shows per-engine activity.
 
 ---
 
@@ -446,12 +446,12 @@ host all all 127.0.0.1/32 trust  # for healthcheck pg_isready
 
 ### 4.4 Acceptance Criteria
 
-- [ ] `storedPassword` encrypted at rest (AES-256-GCM), decryptable for connection string display.
-- [ ] `pg_dump` backup/restore works per engine.
-- [ ] Rate limit per engine enforced.
-- [ ] `hostssl` + `scram-sha-256` enforced, `sslmode=verify-full` when CA present.
-- [ ] Audit trail complete per engine, filterable.
-- [ ] No plaintext password in logs or error responses.
+- [x] `storedPassword` encrypted at rest (AES-256-GCM), decryptable for connection string display.
+- [x] `pg_dump` backup/restore works per engine (JDBC gzip JSON `formatVersion:1`, `INSERT_BATCH_SIZE=1000`).
+- [x] Rate limit per engine enforced (`ProvisionRateLimitFilter` `IP:engine`, `LoginRateLimiter` fixed-window).
+- [x] `hostssl` + `scram-sha-256` enforced, `sslmode=verify-full` when CA present (`POSTGRES_PUBLIC_SSLMODE`).
+- [x] Audit trail complete per engine, filterable (`AuditEvent.engineType`, `activity.html`).
+- [x] No plaintext password in logs or error responses (encrypted `ENC:v1:`, never logged).
 
 ---
 
