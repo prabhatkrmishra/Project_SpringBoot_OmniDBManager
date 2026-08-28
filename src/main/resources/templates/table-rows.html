@@ -13,7 +13,7 @@
                     <ol class="breadcrumb mb-0">
                         <li class="breadcrumb-item"><a class="link-primary" th:href="@{/}">Dashboard</a></li>
                         <li class="breadcrumb-item"><a class="link-primary"
-                                                       th:href="@{/postgres/databases/{name}(name=${tablePage.dbName})}"
+                                                       th:href="${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}(name=${tablePage.dbName})} : @{/postgres/databases/{name}(name=${tablePage.dbName})}"
                                                        th:text="${tablePage.dbName}">database</a></li>
                         <li class="breadcrumb-item active" th:text="${tablePage.tableName}">table</li>
                     </ol>
@@ -33,18 +33,18 @@
                     </div>
                     <div class="d-flex gap-2 flex-wrap">
                         <a class="btn btn-sm btn-outline-secondary"
-                           th:href="@{/postgres/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page - 1})}"
+                           th:href="${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page - 1})} : @{/postgres/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page - 1})}"
                            th:if="${tablePage.hasPrev}"><i class="bi bi-chevron-left"></i> Previous</a>
                         <a class="btn btn-sm btn-outline-secondary"
-                           th:href="@{/postgres/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page + 1})}"
+                           th:href="${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page + 1})} : @{/postgres/databases/{name}/tables/{tname}(name=${tablePage.dbName}, tname=${tablePage.tableName}, page=${tablePage.page + 1})}"
                            th:if="${tablePage.hasNext}">Next <i class="bi bi-chevron-right"></i></a>
                         <a class="btn btn-sm btn-outline-primary"
-                           th:href="@{/postgres/databases/{name}/tables/{tname}/export(name=${tablePage.dbName}, tname=${tablePage.tableName})}"
+                           th:href="${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/tables/{tname}/export(name=${tablePage.dbName}, tname=${tablePage.tableName})} : @{/postgres/databases/{name}/tables/{tname}/export(name=${tablePage.dbName}, tname=${tablePage.tableName})}"
                            th:if="${tablePage.totalCount > 0}">
                             <i class="bi bi-download"></i> Export JSON
                         </a>
                         <a class="btn btn-sm btn-outline-secondary"
-                           th:href="@{/postgres/databases/{name}(name=${tablePage.dbName})}">
+                           th:href="${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}(name=${tablePage.dbName})} : @{/postgres/databases/{name}(name=${tablePage.dbName})}">
                             <i class="bi bi-arrow-left"></i> Back to database
                         </a>
                     </div>
@@ -56,7 +56,7 @@
                     </div>
                     <div class="card-body">
                         <form class="row g-2 align-items-end" method="post"
-                              th:action="@{/postgres/databases/{name}/tables/{tname}/rows(name=${tablePage.dbName}, tname=${tablePage.tableName})}">
+                              th:action="${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/tables/{tname}/rows(name=${tablePage.dbName}, tname=${tablePage.tableName})} : @{/postgres/databases/{name}/tables/{tname}/rows(name=${tablePage.dbName}, tname=${tablePage.tableName})}">
                             <div class="col-sm-6 col-md-4" th:each="col : ${tablePage.columns}">
                                 <label class="form-label small mb-1" th:text="${col}">col</label>
                                 <input class="form-control form-control-sm" th:name="${col}" th:placeholder="${col}" type="text">
@@ -104,11 +104,17 @@
                                         <span th:if="${row.get(col) != null}" th:text="${row.get(col)}">value</span>
                                     </td>
                                     <td th:if="${canWrite}" class="text-end text-nowrap">
-                                        <form class="d-inline" method="post"
+                                        <form class="d-inline" method="post" th:if="${engine == null or engine.name() != 'MYSQL'}"
                                               th:action="@{/postgres/databases/{name}/tables/{tname}/rows/delete(name=${tablePage.dbName}, tname=${tablePage.tableName})}"
                                               th:attr="data-confirm='Delete this row? This cannot be undone.'">
                                             <input type="hidden" name="ctid" th:value="${row.get('__pg_ctid')}">
                                             <button class="btn btn-sm btn-outline-danger" type="submit"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                        <form class="d-inline" method="post" th:if="${engine != null and engine.name() == 'MYSQL'}"
+                                              th:action="@{/mysql/databases/{name}/tables/{tname}/rows/delete(name=${tablePage.dbName}, tname=${tablePage.tableName})}"
+                                              th:attr="data-confirm='Delete this row? This cannot be undone.'">
+                                            <input type="hidden" name="pk" th:value="${row.get('__mysql_pk')}">
+                                            <button class="btn btn-sm btn-outline-danger" type="submit" th:disabled="${row.get('__mysql_pk') == null}" title="Requires primary key"><i class="bi bi-trash"></i></button>
                                         </form>
                                     </td>
                                 </tr>

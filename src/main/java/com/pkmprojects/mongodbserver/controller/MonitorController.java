@@ -1,6 +1,7 @@
 package com.pkmprojects.mongodbserver.controller;
 
 import com.pkmprojects.mongodbserver.service.MonitorService;
+import com.pkmprojects.mongodbserver.service.MysqlMonitorService;
 import com.pkmprojects.mongodbserver.service.PostgresMonitorService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -37,12 +38,15 @@ public class MonitorController {
 
     private final MonitorService monitorService;
     private final Optional<PostgresMonitorService> postgresMonitorService;
+    private final Optional<MysqlMonitorService> mysqlMonitorService;
     private final ScheduledExecutorService scheduler;
 
     public MonitorController(MonitorService monitorService,
-                             @Autowired(required = false) PostgresMonitorService postgresMonitorService) {
+                             @Autowired(required = false) PostgresMonitorService postgresMonitorService,
+                             @Autowired(required = false) MysqlMonitorService mysqlMonitorService) {
         this.monitorService = monitorService;
         this.postgresMonitorService = Optional.ofNullable(postgresMonitorService);
+        this.mysqlMonitorService = Optional.ofNullable(mysqlMonitorService);
         this.scheduler = Executors.newScheduledThreadPool(4, runnable -> {
             Thread thread = new Thread(runnable, "monitor-sse");
             thread.setDaemon(true);
@@ -53,19 +57,24 @@ public class MonitorController {
     @GetMapping("/monitor")
     public String monitor(@RequestParam(name = "engine", required = false) String engine, Model model) {
         String eng = engine != null ? engine.toLowerCase() : "mongo";
-        if (!eng.equals("postgres") || postgresMonitorService.isEmpty()) eng = "mongo";
+        if (eng.equals("postgres") && postgresMonitorService.isEmpty()) eng = "mongo";
+        if (eng.equals("mysql") && mysqlMonitorService.isEmpty()) eng = "mongo";
+        if (!eng.equals("postgres") && !eng.equals("mysql")) eng = "mongo";
         model.addAttribute("monitorEngine", eng);
         model.addAttribute("postgresAvailable", postgresMonitorService.isPresent());
+        model.addAttribute("mysqlAvailable", mysqlMonitorService.isPresent());
         return "monitor";
     }
 
     @GetMapping("/monitor/stream")
     public ResponseEntity<SseEmitter> stream(@RequestParam(name = "engine", required = false) String engine) {
         String eng = engine != null ? engine.toLowerCase() : "mongo";
-        if (!eng.equals("postgres") || postgresMonitorService.isEmpty()) eng = "mongo";
-        boolean pg = eng.equals("postgres");
+        if (eng.equals("postgres") && postgresMonitorService.isEmpty()) eng = "mongo";
+        if (eng.equals("mysql") && mysqlMonitorService.isEmpty()) eng = "mongo";
+        if (!eng.equals("postgres") && !eng.equals("mysql")) eng = "mongo";
+        String finalEng = eng;
         SseEmitter emitter = new SseEmitter(0L);
-        ScheduledFuture<?> future = scheduler.scheduleWithFixedDelay(() -> sendTick(emitter, pg),
+        ScheduledFuture<?> future = scheduler.scheduleWithFixedDelay(() -> sendTick(emitter, finalEng),
                 0, TICK_MILLIS, TimeUnit.MILLISECONDS);
         emitter.onCompletion(() -> future.cancel(true));
         emitter.onTimeout(() -> future.cancel(true));
@@ -76,12 +85,15 @@ public class MonitorController {
                 .body(emitter);
     }
 
-    private void sendTick(SseEmitter emitter, boolean postgres) {
+    private void sendTick(SseEmitter emitter, String engine) {
         try {
             String data;
-            if (postgres) {
+            if ("postgres".equals(engine)) {
                 var snapshot = postgresMonitorService.get().getSnapshot();
                 data = postgresMonitorService.get().serialize(snapshot);
+            } else if ("mysql".equals(engine)) {
+                var snapshot = mysqlMonitorService.get().getSnapshot();
+                data = mysqlMonitorService.get().serialize(snapshot);
             } else {
                 var snapshot = monitorService.getSnapshot();
                 data = monitorService.serialize(snapshot);

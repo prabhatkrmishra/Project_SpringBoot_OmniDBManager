@@ -16,9 +16,10 @@
                         <p class="mb-0 text-body-secondary" th:if="${monitorEngine != 'postgres'}">Real-time activity for the connected MongoDB server, refreshed every 2 seconds.</p>
                     </div>
                     <div class="d-flex align-items-center gap-3">
-                        <div class="btn-group btn-group-sm" role="group" th:if="${postgresAvailable}">
-                            <a class="btn" th:classappend="${monitorEngine != 'postgres'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='mongo')}">MongoDB</a>
-                            <a class="btn" th:classappend="${monitorEngine == 'postgres'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='postgres')}">PostgreSQL</a>
+                        <div class="btn-group btn-group-sm" role="group" th:if="${postgresAvailable or mysqlAvailable}">
+                            <a class="btn" th:classappend="${monitorEngine == 'mongo'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='mongo')}">MongoDB</a>
+                            <a class="btn" th:classappend="${monitorEngine == 'postgres'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='postgres')}" th:if="${postgresAvailable}">PostgreSQL</a>
+                            <a class="btn" th:classappend="${monitorEngine == 'mysql'} ? 'btn-primary' : 'btn-outline-primary'" th:href="@{/monitor(engine='mysql')}" th:if="${mysqlAvailable}">MySQL</a>
                         </div>
                         <span id="streamStatus" class="badge badge-soft-secondary">
                             <span id="streamDot" class="live-dot"></span> <span id="streamText">Connecting…</span>

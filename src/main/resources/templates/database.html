@@ -33,9 +33,9 @@
                 <section class="card shadow-sm mb-4">
                     <div class="card-header bg-transparent d-flex flex-wrap justify-content-between align-items-center gap-2">
                         <h2 class="h5 mb-0">
-                            <i th:class="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'bi bi-server me-1' : 'bi bi-database text-primary me-1'"></i>
+                            <i th:class="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'bi bi-server me-1' : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? 'bi bi-hdd-stack me-1' : 'bi bi-database text-primary me-1')"></i>
                             <span th:text="${database.dbName}">database</span>
-                            <span class="badge ms-2" th:classappend="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'engine-badge-pg' : 'engine-badge-mongo'" th:if="${database.engineType != null}" th:text="${database.engineType}">MONGO</span>
+                            <span class="badge ms-2" th:classappend="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'engine-badge-pg' : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? 'engine-badge-mysql' : 'engine-badge-mongo')" th:if="${database.engineType != null}" th:text="${database.engineType}">MONGO</span>
                             <span class="badge badge-soft-success ms-2"
                                   th:if="${database.provisioned}">provisioned</span>
                             <span class="badge badge-soft-secondary ms-2"
@@ -43,29 +43,29 @@
                         </h2>
                         <div class="d-flex gap-2">
                             <a class="btn btn-sm btn-outline-info"
-                               th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/stats(name=${database.dbName})} : @{/databases/{name}/stats(name=${database.dbName})}">
+                               th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/stats(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/stats(name=${database.dbName})} : @{/databases/{name}/stats(name=${database.dbName})})">
                                 <i class="bi bi-bar-chart-line"></i> Statistics
                             </a>
                             <div class="d-flex gap-2" th:if="${canWrite}">
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/backup(name=${database.dbName})} : @{/databases/{name}/backup(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/backup(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/backup(name=${database.dbName})} : @{/databases/{name}/backup(name=${database.dbName})})">
                                     <i class="bi bi-download"></i> Backup
                                 </a>
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/restore(name=${database.dbName})} : @{/databases/{name}/restore(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/restore(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/restore(name=${database.dbName})} : @{/databases/{name}/restore(name=${database.dbName})})">
                                     <i class="bi bi-upload"></i> Restore
                                 </a>
                                 <a class="btn btn-sm btn-outline-info"
-                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/users(name=${database.dbName})} : @{/databases/{name}/users(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/users(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/users(name=${database.dbName})} : @{/databases/{name}/users(name=${database.dbName})})">
                                     <i class="bi bi-people"></i> Users
                                 </a>
                                 <a class="btn btn-sm btn-outline-secondary"
-                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/reset(name=${database.dbName})} : @{/databases/{name}/reset(name=${database.dbName})}"
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/reset(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/reset(name=${database.dbName})} : @{/databases/{name}/reset(name=${database.dbName})})"
                                    th:if="${database.provisioned}">
                                     <i class="bi bi-key"></i> Reset password
                                 </a>
                                 <a class="btn btn-sm btn-outline-danger"
-                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/delete(name=${database.dbName})} : @{/databases/{name}/delete(name=${database.dbName})}">
+                                   th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/delete(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/delete(name=${database.dbName})} : @{/databases/{name}/delete(name=${database.dbName})})">
                                     <i class="bi bi-trash"></i> Delete database
                                 </a>
                             </div>
@@ -90,6 +90,10 @@
                                 <dd th:text="${database.collectionsCount} ?: '—'">0</dd>
                             </div>
                             <div th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES'}">
+                                <dt>Tables</dt>
+                                <dd th:text="${tables != null ? tables.size() : '—'}">0</dd>
+                            </div>
+                            <div th:if="${database.engineType != null and database.engineType.name() == 'MYSQL'}">
                                 <dt>Tables</dt>
                                 <dd th:text="${tables != null ? tables.size() : '—'}">0</dd>
                             </div>
@@ -128,9 +132,9 @@
                     </div>
                     <div class="card-body">
                         <p class="text-body-secondary small mb-3">Copy this connection string into your application's
-                            <span th:text="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'PostgreSQL' : 'MongoDB'">MongoDB</span> driver configuration.</p>
+                            <span th:text="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'PostgreSQL' : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? 'MySQL' : 'MongoDB')">MongoDB</span> driver configuration.</p>
                         <div class="mb-3">
-                            <label class="form-label fw-medium" th:text="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'PostgreSQL URI' : 'MongoDB URI'">MongoDB URI</label>
+                            <label class="form-label fw-medium" th:text="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? 'PostgreSQL URI' : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? 'MySQL URI' : 'MongoDB URI')">MongoDB URI</label>
                             <div class="input-group">
                                 <input class="form-control form-control-sm font-monospace bg-body-secondary" readonly
                                        th:value="${database.connectionString}" type="text">
@@ -285,6 +289,78 @@
                                             </form>
                                             <form class="d-inline" method="post"
                                                   th:action="@{/postgres/databases/{name}/tables/{tname}/delete(name=${database.dbName}, tname=${table.name})}"
+                                                  th:attr="data-confirm='Drop table ' + ${table.name} + '? This cannot be undone.'">
+                                                <button class="btn btn-sm btn-outline-danger" th:if="${canWrite}" type="submit">
+                                                    <i class="bi bi-trash"></i> Drop
+                                                </button>
+                                            </form>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-4" th:if="${canWrite and database.engineType != null and database.engineType.name() == 'MYSQL'}">
+                    <div class="card-body">
+                        <h3 class="h6 mb-2"><i class="bi bi-table text-primary"></i> Create table</h3>
+                        <form class="d-flex gap-2 flex-wrap" method="post"
+                              th:action="@{/mysql/databases/{name}/tables(name=${database.dbName})}">
+                            <input aria-label="Table name" class="form-control collection-name-input" maxlength="64"
+                                   name="tableName" placeholder="table name" required type="text">
+                            <input aria-label="Columns" class="form-control" name="columns"
+                                   placeholder="columns comma-separated (optional, TEXT)" type="text">
+                            <button class="btn btn-primary btn-sm" type="submit">
+                                <i class="bi bi-plus-lg"></i> Create
+                            </button>
+                        </form>
+                        <p class="text-body-secondary small mb-0 mt-2">Columns are created as TEXT; new columns are added automatically when inserting rows.</p>
+                    </div>
+                </section>
+
+                <section class="card shadow-sm mb-4" th:if="${database.engineType != null and database.engineType.name() == 'MYSQL'}">
+                    <div class="card-header bg-transparent">
+                        <h3 class="h6 mb-0"><i class="bi bi-table text-primary"></i> Tables</h3>
+                    </div>
+                    <div class="card-body p-0">
+                        <p class="text-body-secondary p-3 mb-0" th:if="${tables == null or #lists.isEmpty(tables)}">
+                            This database has no tables yet.
+                        </p>
+                        <div class="table-responsive" th:if="${tables != null and !#lists.isEmpty(tables)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Table</th>
+                                        <th class="text-end">Rows</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="table : ${tables}">
+                                        <td>
+                                            <i class="bi bi-table text-primary me-1"></i>
+                                            <span th:text="${table.name}">table</span>
+                                        </td>
+                                        <td class="text-end" th:text="${table.rowCount}">0</td>
+                                        <td class="text-end text-nowrap">
+                                            <a class="btn btn-sm btn-outline-primary"
+                                               th:href="@{/mysql/databases/{name}/tables/{tname}(name=${database.dbName}, tname=${table.name})}">
+                                                <i class="bi bi-search"></i> Browse
+                                            </a>
+                                            <a class="btn btn-sm btn-outline-secondary"
+                                               th:href="@{/mysql/databases/{name}/tables/{tname}/export(name=${database.dbName}, tname=${table.name})}">
+                                                <i class="bi bi-download"></i> Export
+                                            </a>
+                                            <form class="d-inline" method="post"
+                                                  th:action="@{/mysql/databases/{name}/tables/{tname}/truncate(name=${database.dbName}, tname=${table.name})}"
+                                                  th:attr="data-confirm='Truncate table ' + ${table.name} + '? All rows will be deleted.'">
+                                                <button class="btn btn-sm btn-outline-warning" th:if="${canWrite}" type="submit">
+                                                    <i class="bi bi-eraser"></i> Truncate
+                                                </button>
+                                            </form>
+                                            <form class="d-inline" method="post"
+                                                  th:action="@{/mysql/databases/{name}/tables/{tname}/delete(name=${database.dbName}, tname=${table.name})}"
                                                   th:attr="data-confirm='Drop table ' + ${table.name} + '? This cannot be undone.'">
                                                 <button class="btn btn-sm btn-outline-danger" th:if="${canWrite}" type="submit">
                                                     <i class="bi bi-trash"></i> Drop

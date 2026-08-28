@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{fragments/nav :: head(${engine.name() == 'POSTGRES'} ? 'PostgreSQL' : 'MongoDB')}"></head>
+<head th:replace="~{fragments/nav :: head(${engine.name() == 'POSTGRES'} ? 'PostgreSQL' : (${engine.name() == 'MYSQL'} ? 'MySQL' : 'MongoDB'))}"></head>
 <body>
     <div class="layout">
         <aside th:replace="~{fragments/nav :: nav('engine-home')}"></aside>
@@ -9,14 +9,15 @@
             <main class="container-xxl py-4">
                 <div class="page-header d-flex justify-content-between align-items-center">
                     <div>
-                        <h1 th:text="${engine.name() == 'POSTGRES'} ? 'PostgreSQL' : 'MongoDB'">MongoDB</h1>
+                        <h1 th:text="${engine.name() == 'POSTGRES'} ? 'PostgreSQL' : (${engine.name() == 'MYSQL'} ? 'MySQL' : 'MongoDB')">MongoDB</h1>
                         <p class="text-body-secondary" th:text="${#lists.size(databases)} + ' databases'">0 databases</p>
                     </div>
-                    <a class="btn btn-primary" th:href="${engine.name() == 'POSTGRES'} ? @{/provision/postgres} : @{/provision/mongo}" th:if="${canWrite}">
+                    <a class="btn btn-primary" th:href="${engine.name() == 'POSTGRES'} ? @{/provision/postgres} : (${engine.name() == 'MYSQL'} ? @{/provision/mysql} : @{/provision/mongo})" th:if="${canWrite}">
                         <i class="bi bi-plus-circle me-1"></i> New database
                     </a>
                 </div>
                 <div class="alert alert-warning" th:if="${postgresError}" th:text="${postgresError}">Error</div>
+                <div class="alert alert-warning" th:if="${mysqlError}" th:text="${mysqlError}">Error</div>
                 <section class="card shadow-sm">
                     <div class="card-body p-0">
                         <div class="empty-state" th:if="${#lists.isEmpty(databases)}">
@@ -29,15 +30,15 @@
                                 <thead><tr><th>Database</th><th>User</th><th>Storage Size</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
                                 <tbody>
                                     <tr th:each="database : ${databases}">
-                                        <td><i class="bi bi-database text-primary me-2"></i><span class="fw-medium" th:text="${database.dbName}">app_db</span> <span class="badge ms-1" th:if="${database.engineType != null}" th:classappend="${database.engineType.name() == 'POSTGRES'} ? 'engine-badge-pg' : 'engine-badge-mongo'" th:text="${database.engineType}">MONGO</span></td>
+                                        <td><i class="bi bi-database text-primary me-2"></i><span class="fw-medium" th:text="${database.dbName}">app_db</span> <span class="badge ms-1" th:if="${database.engineType != null}" th:classappend="${database.engineType.name() == 'POSTGRES'} ? 'engine-badge-pg' : (${database.engineType.name() == 'MYSQL'} ? 'engine-badge-mysql' : 'engine-badge-mongo')" th:text="${database.engineType}">MONGO</span></td>
                                         <td th:text="${database.userName} ?: '—'">app_user</td>
                                         <td th:text="${database.sizeBytes} + ' B'">0 B</td>
                                         <td><span class="badge badge-soft-success" th:if="${database.provisioned}">provisioned</span><span class="badge badge-soft-secondary" th:if="${!database.provisioned}">external</span></td>
                                         <td class="text-end text-nowrap">
                                             <div class="btn-group btn-group-sm">
-                                                <a class="btn btn-outline-primary" th:href="${engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : @{/mongo/databases/{name}(name=${database.dbName})}" title="View"><i class="bi bi-eye"></i></a>
-                                                <a class="btn btn-outline-secondary" th:href="${engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/reset(name=${database.dbName})} : @{/mongo/databases/{name}/reset(name=${database.dbName})}" th:if="${canWrite}" title="Reset"><i class="bi bi-key"></i></a>
-                                                <a class="btn btn-outline-danger" th:href="${engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/delete(name=${database.dbName})} : @{/mongo/databases/{name}/delete(name=${database.dbName})}" th:if="${canWrite}" title="Delete"><i class="bi bi-trash"></i></a>
+                                                <a class="btn btn-outline-primary" th:href="${engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : (${engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}(name=${database.dbName})} : @{/mongo/databases/{name}(name=${database.dbName})})" title="View"><i class="bi bi-eye"></i></a>
+                                                <a class="btn btn-outline-secondary" th:href="${engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/reset(name=${database.dbName})} : (${engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/reset(name=${database.dbName})} : @{/mongo/databases/{name}/reset(name=${database.dbName})})" th:if="${canWrite}" title="Reset"><i class="bi bi-key"></i></a>
+                                                <a class="btn btn-outline-danger" th:href="${engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/delete(name=${database.dbName})} : (${engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/delete(name=${database.dbName})} : @{/mongo/databases/{name}/delete(name=${database.dbName})})" th:if="${canWrite}" title="Delete"><i class="bi bi-trash"></i></a>
                                             </div>
                                         </td>
                                     </tr>
