@@ -62,7 +62,10 @@ Most teams run MongoDB *and* PostgreSQL. OmniDB Manager unifies them under one c
 2. Start backing services:
 
    ```bash
-   docker compose up -d
+   docker compose up -d              # all engines
+   # or per-engine:
+   # docker compose -f compose.mongo.yaml up -d
+   # docker compose -f compose.postgres.yaml up -d
    ```
 
    - App: http://localhost:9811
@@ -103,12 +106,15 @@ The jar is the web layer only — it connects to MongoDB/PostgreSQL, it does not
    ./mvnw clean package
    ```
 
-2. Copy `target/omnidb-manager-*.jar` (or `mongodbserver-*.jar` for older tags), `.env`, and `compose.yaml` to the server.
+2. Copy `target/omnidb-manager-*.jar` (or `mongodbserver-*.jar` for older tags), `.env`, and `compose*.yaml` to the server.
 
 3. Start backing services:
 
    ```bash
-   docker compose up -d
+   docker compose up -d              # all engines (via compose.yaml include)
+   # or per-engine:
+   # docker compose -f compose.mongo.yaml up -d
+   # docker compose -f compose.postgres.yaml up -d
    ```
 
 4. Run:
@@ -135,7 +141,7 @@ java -Xms64m -Xmx256m -XX:+UseSerialGC -XX:+UseCompactObjectHeaders \
 
 Override via `JAVA_OPTS` before `deploy.sh`. For **1 GB-RAM servers**:
 
-- `compose.yaml` pins guardrails: WiredTiger cache 256 MB, `--maxConns 500`, 64k nofile ulimit, 650 MB container cap. Raise together on bigger boxes.
+- `compose.mongo.yaml` pins guardrails: WiredTiger cache 256 MB, `--maxConns 500`, 64k nofile ulimit, 650 MB container cap. Raise together on bigger boxes.
 - Remove `mongo-express`/`adminer` if unused — app works without them (`/mongo-express` → 502).
 - Large restores need heap headroom: keep uploads well under 256 MB with `-Xmx256m`, or raise `-Xmx`.
 
@@ -173,7 +179,7 @@ POSTGRES_PUBLIC_SSLMODE=verify-full
 POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=verify-full&sslrootcert=./certs/ca.crt
 ```
 
-Mount certs in `compose.yaml` (see commented `postgres` service) and set `pg_hba.conf: hostssl all all 0.0.0.0/0 scram-sha-256`. Issued strings then carry `sslmode=verify-full`.
+Mount certs in `compose.postgres.yaml` (see commented `postgres` service) and set `pg_hba.conf: hostssl all all 0.0.0.0/0 scram-sha-256`. Issued strings then carry `sslmode=verify-full`.
 
 ## Using the provisioned database
 
@@ -315,7 +321,9 @@ CI: `.github/workflows/maven.yml` — `mvn -B clean package -DargLine=-Xmx1024m`
 ## Project layout
 
 ```
-compose.yaml                      # MongoDB + mongo-express + PostgreSQL 18.6 + Adminer (all loopback-bound)
+compose.yaml                      # orchestrator (include: mongo + postgres)
+compose.mongo.yaml                # MongoDB 8 + mongo-express (standalone: -f compose.mongo.yaml)
+compose.postgres.yaml             # PostgreSQL 18.6 + Adminer (standalone: -f compose.postgres.yaml)
 .env / .env.example               # credentials (gitignored)
 src/main/java/com/pkmprojects/mongodbserver
   MongodbserverApplication.java   # @SpringBootApplication (excludes DataSourceAutoConfiguration when PG disabled)

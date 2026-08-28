@@ -1,0 +1,52 @@
+# MongoDB engine — run standalone with:
+#   docker compose -f compose.mongo.yaml up -d
+# Or all engines via the orchestrator:
+#   docker compose up -d
+services:
+  mongo:
+    image: mongo:8
+    container_name: omnidb-mongo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9812:27017"
+    # Small-VPS guardrails (see README "Memory footprint"):
+    # - WiredTiger cache pinned instead of the auto-tuned default, so mongod
+    #   cannot grow into the JVM's share of RAM.
+    # - Connection cap (--maxConns): every client connection costs mongod
+    #   ~0.5-1MB of RAM; 500 bound the blast radius of a misbehaving tenant
+    #   app (raise if needed).
+    command: ["--wiredTigerCacheSizeGB", "0.25", "--maxConns", "500"]
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
+    mem_limit: 650m
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:-root}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:-root}
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok", "-u", "${MONGODB_ROOT_USERNAME:-root}", "-p", "${MONGODB_ROOT_PASSWORD:-root}", "--authenticationDatabase", "admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: omnidb-mongo-express
+    restart: unless-stopped
+    ports:
+      # Loopback only: the UI is reachable through the admin app proxy at /mongo-express
+      - "127.0.0.1:9814:8081"
+    environment:
+      ME_CONFIG_MONGODB_URL: mongodb://${MONGODB_ROOT_USERNAME:-root}:${MONGODB_ROOT_PASSWORD:-root}@mongo:27017/?authSource=admin
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-admin}
+      ME_CONFIG_SITE_BASEURL: /mongo-express
+    depends_on:
+      - mongo
+
+volumes:
+  mongo-data:
