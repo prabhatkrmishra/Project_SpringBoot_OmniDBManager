@@ -52,17 +52,24 @@ public class DashboardController {
             model.addAttribute("postgresDatabases", java.util.List.of());
             model.addAttribute("postgresCount", 0);
         }
-        try {
-            var mysqlDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.MYSQL);
-            model.addAttribute("mysqlDatabases", mysqlDbs);
-            model.addAttribute("mysqlCount", mysqlDbs.size());
-        } catch (Exception e) {
+        if (health.mysqlEnabled()) {
+            try {
+                var mysqlDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.MYSQL);
+                model.addAttribute("mysqlDatabases", mysqlDbs);
+                model.addAttribute("mysqlCount", mysqlDbs.size());
+            } catch (Exception e) {
+                model.addAttribute("mysqlDatabases", java.util.List.of());
+                model.addAttribute("mysqlCount", 0);
+            }
+        } else {
             model.addAttribute("mysqlDatabases", java.util.List.of());
             model.addAttribute("mysqlCount", 0);
         }
         model.addAttribute("mongoReachable", health.mongoReachable());
         model.addAttribute("postgresReachable", health.postgresReachable());
         model.addAttribute("postgresEnabled", health.postgresEnabled());
+        model.addAttribute("mysqlReachable", health.mysqlReachable());
+        model.addAttribute("mysqlEnabled", health.mysqlEnabled());
         model.addAttribute("recentActivity", auditLogRepository.findTop10ByOrderByPerformedAtDesc());
         model.addAttribute("engine", null);
         return "index";

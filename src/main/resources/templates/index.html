@@ -12,7 +12,7 @@
                 <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
                     <div>
                         <h1 class="mb-1">Dashboard</h1>
-                        <p class="mb-0 text-body-secondary">Provision and manage MongoDB and PostgreSQL databases.</p>
+                        <p class="mb-0 text-body-secondary">Provision and manage MongoDB, PostgreSQL and MySQL databases.</p>
                     </div>
                     <a class="btn btn-primary" th:href="@{/provision}" th:if="${canWrite}">
                         <i class="bi bi-plus-circle me-1"></i> New database
@@ -52,10 +52,14 @@
                     <div class="col-sm-6 col-xl-3">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
-                                <div class="stat-icon stat-icon-cyan"><i class="bi bi-check2-circle"></i></div>
+                                <div class="stat-icon" style="background: rgb(0 117 143 / 0.12); color:#00758F"><i class="bi bi-hdd-stack"></i></div>
                                 <div>
-                                    <div class="stat-value" th:text="${#lists.size(recentActivity)}">0</div>
-                                    <div class="stat-label">Recent actions</div>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="stat-value mb-0" th:text="${mysqlCount}">0</div>
+                                        <span th:class="${mysqlReachable} ? 'live-dot' : 'live-dot-off'" th:title="${mysqlReachable} ? 'reachable' : 'unreachable'"></span>
+                                        <span class="badge badge-soft-secondary" style="font-size:0.6rem" th:if="${mysqlEnabled == false}">disabled</span>
+                                    </div>
+                                    <div class="stat-label">MySQL</div>
                                 </div>
                             </div>
                         </div>
@@ -63,10 +67,10 @@
                     <div class="col-sm-6 col-xl-3">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
-                                <div class="stat-icon bg-info-subtle text-info"><i class="bi bi-box-arrow-up-right"></i></div>
+                                <div class="stat-icon stat-icon-cyan"><i class="bi bi-check2-circle"></i></div>
                                 <div>
-                                    <div class="stat-value">direct</div>
-                                    <div class="stat-label">Connection mode</div>
+                                    <div class="stat-value" th:text="${#lists.size(recentActivity)}">0</div>
+                                    <div class="stat-label">Recent actions</div>
                                 </div>
                             </div>
                         </div>
@@ -137,6 +141,42 @@
                                                 <a class="btn btn-outline-primary" th:href="@{/postgres/databases/{name}(name=${database.dbName})}" title="View"><i class="bi bi-eye"></i></a>
                                                 <a class="btn btn-outline-secondary" th:href="@{/postgres/databases/{name}/reset(name=${database.dbName})}" th:if="${canWrite}" title="Reset"><i class="bi bi-key"></i></a>
                                                 <a class="btn btn-outline-danger" th:href="@{/postgres/databases/{name}/delete(name=${database.dbName})}" th:if="${canWrite}" title="Delete"><i class="bi bi-trash"></i></a>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- MySQL list -->
+                <section class="card shadow-sm mb-4">
+                    <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                        <h2 class="h5 mb-0"><i class="bi bi-hdd-stack me-2" style="color:#00758F"></i> MySQL Databases</h2>
+                        <a class="btn btn-sm btn-outline-primary" th:href="@{/mysql}">View all</a>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="empty-state" th:if="${#lists.isEmpty(mysqlDatabases)}">
+                            <span class="empty-state-icon"><i class="bi bi-hdd-stack"></i></span>
+                            <p class="empty-state-title">No MySQL databases yet</p>
+                            <p class="empty-state-text">Provision your first MySQL database.</p>
+                            <a class="btn btn-primary mt-3" th:href="@{/provision/mysql}" th:if="${canWrite}"><i class="bi bi-plus-circle me-1"></i> Create MySQL database</a>
+                        </div>
+                        <div class="table-responsive" th:if="${!#lists.isEmpty(mysqlDatabases)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead><tr><th>Database</th><th>User</th><th>Storage Size</th><th>Status</th><th class="text-end">Actions</th></tr></thead>
+                                <tbody>
+                                    <tr th:each="database : ${mysqlDatabases}">
+                                        <td><i class="bi bi-hdd-stack me-2" style="color:#00758F"></i><span class="fw-medium" th:text="${database.dbName}">app_db</span> <span class="badge engine-badge-mysql ms-1">MYSQL</span></td>
+                                        <td th:text="${database.userName} ?: '—'">app_user</td>
+                                        <td class="text-body-secondary"><span th:text="${database.sizeBytes} + ' B'">0 B</span></td>
+                                        <td><span class="badge badge-soft-success" th:if="${database.provisioned}">provisioned</span><span class="badge badge-soft-secondary" th:if="${!database.provisioned}">external</span></td>
+                                        <td class="text-end text-nowrap">
+                                            <div class="btn-group btn-group-sm">
+                                                <a class="btn btn-outline-primary" th:href="@{/mysql/databases/{name}(name=${database.dbName})}" title="View"><i class="bi bi-eye"></i></a>
+                                                <a class="btn btn-outline-secondary" th:href="@{/mysql/databases/{name}/reset(name=${database.dbName})}" th:if="${canWrite}" title="Reset"><i class="bi bi-key"></i></a>
+                                                <a class="btn btn-outline-danger" th:href="@{/mysql/databases/{name}/delete(name=${database.dbName})}" th:if="${canWrite}" title="Delete"><i class="bi bi-trash"></i></a>
                                             </div>
                                         </td>
                                     </tr>

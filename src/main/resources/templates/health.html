@@ -103,6 +103,39 @@
                         <p class="text-body-secondary mb-0">PostgreSQL is disabled. Set <code>POSTGRES_ENABLED=true</code> to enable.</p>
                     </div>
                 </section>
+
+                <!-- MySQL -->
+                <section class="card shadow-sm mb-4">
+                    <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                        <i class="bi bi-hdd-stack" style="color:#00758F"></i>
+                        <span class="fw-medium">MySQL</span>
+                        <span class="ms-2" th:class="${health.mysqlReachable} ? 'live-dot' : 'live-dot-off'"></span>
+                        <span class="badge ms-auto" th:classappend="${health.mysqlReachable} ? 'badge-soft-success' : 'badge-soft-danger'" th:text="${health.mysqlReachable} ? 'Reachable' : 'Unreachable'">Unreachable</span>
+                        <span class="badge badge-soft-secondary ms-2" th:if="${!health.mysqlEnabled}">disabled</span>
+                    </div>
+                    <div class="card-body" th:if="${health.mysqlReachable}">
+                        <div class="row g-3">
+                            <div class="col-sm-6 col-lg-6">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Version</div>
+                                    <div class="health-metric-value" th:text="${health.mysqlVersion} ?: '—'">-</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-lg-6">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Status</div>
+                                    <div class="health-metric-value text-success">Connected</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body text-center py-4" th:if="${!health.mysqlReachable and health.mysqlEnabled}">
+                        <p class="text-body-secondary mb-0">MySQL could not be reached. Check that it is running and <code>MYSQL_ENABLED=true</code> is set.</p>
+                    </div>
+                    <div class="card-body text-center py-4" th:if="${!health.mysqlEnabled}">
+                        <p class="text-body-secondary mb-0">MySQL is disabled. Set <code>MYSQL_ENABLED=true</code> to enable.</p>
+                    </div>
+                </section>
             </main>
         </div>
     </div>

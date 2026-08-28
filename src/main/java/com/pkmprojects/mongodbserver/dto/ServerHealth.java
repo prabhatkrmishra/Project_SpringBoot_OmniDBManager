@@ -19,15 +19,28 @@ public record ServerHealth(
         boolean mongoReachable,
         boolean postgresReachable,
         String postgresVersion,
-        boolean postgresEnabled) {
+        boolean postgresEnabled,
+        boolean mysqlReachable,
+        String mysqlVersion,
+        boolean mysqlEnabled) {
 
     /**
-     * Legacy constructor — defaults postgres fields to disabled.
+     * Legacy constructor — defaults postgres/mysql fields to disabled.
      */
     public ServerHealth(boolean reachable, String version, Long uptimeSeconds,
                         int databaseCount, Long totalStorageBytes, Integer connectionCount) {
         this(reachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
-                reachable, false, null, false);
+                reachable, false, null, false, false, null, false);
+    }
+
+    /**
+     * Postgres-era constructor — defaults mysql fields to disabled.
+     */
+    public ServerHealth(boolean reachable, String version, Long uptimeSeconds,
+                        int databaseCount, Long totalStorageBytes, Integer connectionCount,
+                        boolean mongoReachable, boolean postgresReachable, String postgresVersion, boolean postgresEnabled) {
+        this(reachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
+                mongoReachable, postgresReachable, postgresVersion, postgresEnabled, false, null, false);
     }
 
     /**

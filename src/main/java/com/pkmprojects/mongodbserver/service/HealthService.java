@@ -3,6 +3,7 @@ package com.pkmprojects.mongodbserver.service;
 import com.mongodb.MongoException;
 import com.pkmprojects.mongodbserver.dto.ServerHealth;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
+import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -30,13 +31,26 @@ public class HealthService {
     private final MongoDatabaseRepository mongoDatabaseRepository;
     private final Optional<PostgresDatabaseRepository> postgresRepository;
     private final boolean postgresEnabled;
+    private final Optional<MysqlDatabaseRepository> mysqlRepository;
+    private final boolean mysqlEnabled;
 
     public HealthService(MongoDatabaseRepository mongoDatabaseRepository,
                          @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
-                         @Value("${app.postgres.enabled:false}") boolean postgresEnabled) {
+                         @Value("${app.postgres.enabled:false}") boolean postgresEnabled,
+                         @Autowired(required = false) MysqlDatabaseRepository mysqlRepository,
+                         @Value("${app.mysql.enabled:false}") boolean mysqlEnabled) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.postgresRepository = Optional.ofNullable(postgresRepository);
         this.postgresEnabled = postgresEnabled;
+        this.mysqlRepository = Optional.ofNullable(mysqlRepository);
+        this.mysqlEnabled = mysqlEnabled;
+    }
+
+    // Legacy 3-arg constructor for tests without MySQL
+    public HealthService(MongoDatabaseRepository mongoDatabaseRepository,
+                         PostgresDatabaseRepository postgresRepository,
+                         boolean postgresEnabled) {
+        this(mongoDatabaseRepository, postgresRepository, postgresEnabled, null, false);
     }
 
     public ServerHealth getHealth() {
@@ -88,8 +102,25 @@ public class HealthService {
             }
         }
 
+        boolean mysqlReachable = false;
+        String mysqlVersion = null;
+        if (mysqlEnabled && mysqlRepository.isPresent()) {
+            try {
+                mysqlRepository.get().ping();
+                mysqlReachable = true;
+                try {
+                    mysqlVersion = mysqlRepository.get().getVersion();
+                } catch (Exception e) {
+                    log.debug("Could not read MySQL version", e);
+                }
+            } catch (Exception e) {
+                log.warn("MySQL ping failed", e);
+            }
+        }
+
         return new ServerHealth(mongoReachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
-                mongoReachable, postgresReachable, postgresVersion, postgresEnabled);
+                mongoReachable, postgresReachable, postgresVersion, postgresEnabled,
+                mysqlReachable, mysqlVersion, mysqlEnabled);
     }
 
     private boolean pingMongo() {
