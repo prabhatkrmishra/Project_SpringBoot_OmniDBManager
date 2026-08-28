@@ -88,9 +88,12 @@ public class MysqlStatisticsService {
             if (tr instanceof Number n) liveTuples = n.longValue();
             Object dl = stat.get("data_length");
             Object il = stat.get("index_length");
-            long dlVal = dl instanceof Number n ? n.longValue() : 0L;
-            long ilVal = il instanceof Number n ? n.longValue() : 0L;
-            sizeBytes = dlVal + ilVal;
+            // data_length/index_length can be NULL for views or empty engines — only overwrite when present
+            if (dl != null || il != null) {
+                long dlVal = dl instanceof Number n ? n.longValue() : 0L;
+                long ilVal = il instanceof Number n ? n.longValue() : 0L;
+                sizeBytes = dlVal + ilVal;
+            }
         } catch (Exception e) {
             log.warn("Could not read information_schema for {}.{}", dbName, tableName, e);
         }
@@ -101,8 +104,10 @@ public class MysqlStatisticsService {
         try {
             return future.join();
         } catch (CompletionException e) {
-            if (e.getCause() instanceof RuntimeException re) throw re;
-            throw e;
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException re) throw re;
+            if (cause instanceof Error err) throw err;
+            throw new ProvisioningException(cause != null ? cause.getMessage() : e.getMessage(), cause);
         }
     }
 

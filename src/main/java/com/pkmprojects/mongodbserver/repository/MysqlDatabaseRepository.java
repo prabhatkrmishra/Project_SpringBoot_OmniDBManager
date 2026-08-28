@@ -56,13 +56,13 @@ public class MysqlDatabaseRepository {
 
     public long getDatabaseSize(String dbName) {
         Long size = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(SUM(data_length + index_length),0) FROM information_schema.TABLES WHERE table_schema = ?", Long.class, dbName);
+                "SELECT COALESCE(SUM(COALESCE(data_length,0) + COALESCE(index_length,0)),0) FROM information_schema.TABLES WHERE table_schema = ?", Long.class, dbName);
         return size != null ? size : 0L;
     }
 
     public Map<String, Long> getDatabaseSizes() {
         Map<String, Long> sizes = new LinkedHashMap<>();
-        jdbcTemplate.query("SELECT table_schema, COALESCE(SUM(data_length + index_length),0) AS sz FROM information_schema.TABLES WHERE table_schema NOT IN ('information_schema','mysql','performance_schema','sys') GROUP BY table_schema",
+        jdbcTemplate.query("SELECT table_schema, COALESCE(SUM(COALESCE(data_length,0) + COALESCE(index_length,0)),0) AS sz FROM information_schema.TABLES WHERE table_schema NOT IN ('information_schema','mysql','performance_schema','sys') GROUP BY table_schema",
                 rs -> {
                     String name = rs.getString("table_schema");
                     long sz = rs.getLong("sz");
@@ -144,7 +144,7 @@ public class MysqlDatabaseRepository {
 
     public long getTableSize(String dbName, String tableName) {
         Long size = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(data_length + index_length,0) FROM information_schema.TABLES WHERE table_schema = ? AND table_name = ?",
+                "SELECT COALESCE(COALESCE(data_length,0) + COALESCE(index_length,0),0) FROM information_schema.TABLES WHERE table_schema = ? AND table_name = ?",
                 Long.class, dbName, tableName);
         return size != null ? size : 0L;
     }
@@ -239,7 +239,7 @@ public class MysqlDatabaseRepository {
             } catch (Exception ignored) {}
             if (uptime == null) {
                 try {
-                    String val = jdbcTemplate.queryForObject("SHOW GLOBAL STATUS LIKE 'Uptime'", (rs, rn) -> rs.getString(2));
+                    String val = jdbcTemplate.queryForObject("SHOW GLOBAL STATUS LIKE 'Uptime'", (rs, rn) -> rs.getString("Value"));
                     if (val != null) uptime = Long.parseLong(val);
                 } catch (Exception ignored) {}
             }

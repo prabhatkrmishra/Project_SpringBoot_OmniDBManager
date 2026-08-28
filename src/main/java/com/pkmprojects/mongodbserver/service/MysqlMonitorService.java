@@ -89,11 +89,11 @@ public class MysqlMonitorService {
             } catch (Exception ignored) {}
             if (committed == null) {
                 try {
-                    String val = mysqlRepository.getJdbcTemplate().queryForObject("SHOW GLOBAL STATUS LIKE 'Com_commit'", (rs, rn) -> rs.getString(2));
+                    String val = mysqlRepository.getJdbcTemplate().queryForObject("SHOW GLOBAL STATUS LIKE 'Com_commit'", (rs, rn) -> rs.getString("Value"));
                     if (val != null) committed = Long.parseLong(val);
                 } catch (Exception ignored) {}
             }
-            txCommitted = committed != null ? committed : 0L;
+            txCommitted = committed;
             Long rolled = null;
             try {
                 String raw = mysqlRepository.getJdbcTemplate().queryForObject(
@@ -102,11 +102,11 @@ public class MysqlMonitorService {
             } catch (Exception ignored) {}
             if (rolled == null) {
                 try {
-                    String val = mysqlRepository.getJdbcTemplate().queryForObject("SHOW GLOBAL STATUS LIKE 'Com_rollback'", (rs, rn) -> rs.getString(2));
+                    String val = mysqlRepository.getJdbcTemplate().queryForObject("SHOW GLOBAL STATUS LIKE 'Com_rollback'", (rs, rn) -> rs.getString("Value"));
                     if (val != null) rolled = Long.parseLong(val);
                 } catch (Exception ignored) {}
             }
-            txRolledBack = rolled != null ? rolled : 0L;
+            txRolledBack = rolled;
         } catch (Exception e) {
             log.debug("Could not read MySQL xact stats", e);
         }

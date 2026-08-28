@@ -23,6 +23,7 @@ public class DatabaseNameValidator {
     private static final int MAX_MONGO_NAME_LENGTH = 64;
     private static final int MAX_POSTGRES_NAME_LENGTH = 63;
     private static final int MAX_MYSQL_NAME_LENGTH = 64;
+    private static final int MAX_MYSQL_USER_LENGTH = 32;
 
     private static final String MONGO_DATABASE_PATTERN = "[A-Za-z0-9_-]+";
     private static final String MONGO_USER_PATTERN = "[A-Za-z0-9_.-]+";
@@ -114,7 +115,7 @@ public class DatabaseNameValidator {
     }
 
     public void validateMysqlUserName(String userName) {
-        requireValid(userName, MYSQL_PATTERN, MAX_MYSQL_NAME_LENGTH,
+        requireValid(userName, MYSQL_PATTERN, MAX_MYSQL_USER_LENGTH,
                 "MySQL user name must start with a letter or underscore and contain only lowercase letters, digits, and underscores");
         if (!userName.equals(userName.toLowerCase(Locale.ROOT))) {
             throw new NameNotAllowedException("MySQL user name must be lowercase");

@@ -12,7 +12,7 @@
                 <nav aria-label="breadcrumb" class="mb-3">
                     <ol class="breadcrumb mb-0">
                         <li class="breadcrumb-item"><a class="link-primary" th:href="@{/}">Dashboard</a></li>
-                        <li class="breadcrumb-item"><a class="link-primary" th:href="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : @{/databases/{name}(name=${database.dbName})}">database</a></li>
+                        <li class="breadcrumb-item"><a class="link-primary" th:href="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : (${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}(name=${database.dbName})} : @{/databases/{name}(name=${database.dbName})})">database</a></li>
                         <li class="breadcrumb-item active">Restore</li>
                     </ol>
                 </nav>
@@ -32,22 +32,24 @@
                             <span th:if="${database.exists}">
                                 The database currently exists with
                                 <strong th:text="${database.collectionCount}">0</strong>
-                                <span th:text="${engine != null and engine.name() == 'POSTGRES'} ? 'table(s)' : 'collection(s)'">collection(s)</span>.
+                                <span th:text="${engine != null and (engine.name() == 'POSTGRES' or engine.name() == 'MYSQL')} ? 'table(s)' : 'collection(s)'">collection(s)</span>.
                             </span>
                             <span th:if="${!database.exists}">
                                 <span th:if="${engine != null and engine.name() == 'POSTGRES'}">The database does not exist — provision it first before restoring.</span>
-                                <span th:if="${engine == null or engine.name() != 'POSTGRES'}">The database does not exist yet and will be created.</span>
+                                <span th:if="${engine != null and engine.name() == 'MYSQL'}">The database does not exist — provision it first before restoring.</span>
+                                <span th:if="${engine == null or (engine.name() != 'POSTGRES' and engine.name() != 'MYSQL')}">The database does not exist yet and will be created.</span>
                             </span>
                         </p>
 
                         <div class="alert alert-danger" role="alert">
                             <i class="bi bi-exclamation-triangle me-2"></i>
                             <span th:if="${engine != null and engine.name() == 'POSTGRES'}">Restoring <strong>replaces</strong> the database's current content: every table is truncated (with CASCADE) before rows are re-inserted. This cannot be undone.</span>
-                            <span th:if="${engine == null or engine.name() != 'POSTGRES'}">Restoring <strong>replaces</strong> the database's current content: every existing collection is dropped before the backup is recreated. This cannot be undone.</span>
+                            <span th:if="${engine != null and engine.name() == 'MYSQL'}">Restoring <strong>replaces</strong> the database's current content: every table is truncated before rows are re-inserted. This cannot be undone.</span>
+                            <span th:if="${engine == null or (engine.name() != 'POSTGRES' and engine.name() != 'MYSQL')}">Restoring <strong>replaces</strong> the database's current content: every existing collection is dropped before the backup is recreated. This cannot be undone.</span>
                         </div>
 
                         <form method="post" enctype="multipart/form-data"
-                              th:action="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/restore(name=${database.dbName})} : @{/databases/{name}/restore(name=${database.dbName})}">
+                              th:action="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/restore(name=${database.dbName})} : (${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/restore(name=${database.dbName})} : @{/databases/{name}/restore(name=${database.dbName})})">
                             <div class="mb-3">
                                 <label class="form-label fw-medium" for="backupFile">Backup file</label>
                                 <input class="form-control" id="backupFile" name="file" type="file"
@@ -66,7 +68,7 @@
                                     <i class="bi bi-upload"></i> Restore
                                 </button>
                                 <a class="btn btn-outline-secondary"
-                                   th:href="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : @{/databases/{name}(name=${database.dbName})}">
+                                   th:href="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : (${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}(name=${database.dbName})} : @{/databases/{name}(name=${database.dbName})})">
                                     Cancel
                                 </a>
                             </div>

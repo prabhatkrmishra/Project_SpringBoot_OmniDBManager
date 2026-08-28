@@ -226,6 +226,10 @@ public class ProvisioningService {
                     if (mysqlUserCreated) {
                         try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created MySQL user '{}'", userName, ce); }
                     }
+                } else {
+                    // MONGO generic failure (non-MongoException): best-effort cleanup
+                    try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up partially created MONGO database '{}'", dbName, ce); }
+                    try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created MONGO user '{}'", userName, ce); }
                 }
                 log.error("Failed to provision database '{}' (user '{}')", dbName, userName, e);
                 throw new ProvisioningException("Could not provision database '" + dbName + "'", e);

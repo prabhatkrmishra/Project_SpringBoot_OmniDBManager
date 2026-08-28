@@ -289,7 +289,7 @@ public class MysqlController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<StreamingResponseBody> downloadBackup(@PathVariable String dbName) {
         var svc = backupService.orElseThrow(() -> new com.pkmprojects.mongodbserver.error.ProvisioningException("MySQL is not enabled"));
-        // backupService will validate existence
+        svc.requireDatabaseExists(dbName);
         String filename = "backup-" + dbName + "-" + FILENAME_TIMESTAMP.format(clock.instant()) + ".json.gz";
         StreamingResponseBody body = out -> {
             try {

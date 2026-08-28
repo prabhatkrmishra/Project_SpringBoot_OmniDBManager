@@ -68,7 +68,7 @@
                 </section>
 
                 <!-- Mongo-only: ops / network / memory / lock -->
-                <section class="card shadow-sm mb-4" id="opsCard" th:if="${monitorEngine != 'postgres'}">
+                <section class="card shadow-sm mb-4" id="opsCard" th:if="${monitorEngine == 'mongo'}">
                     <div class="card-header bg-transparent d-flex align-items-center gap-2">
                         <i class="bi bi-activity text-primary"></i>
                         <span class="fw-medium">Operations</span>
@@ -110,7 +110,7 @@
                     </div>
                 </section>
 
-                <section class="row g-4 mb-4" th:if="${monitorEngine != 'postgres'}">
+                <section class="row g-4 mb-4" th:if="${monitorEngine == 'mongo'}">
                     <div class="col-lg-4">
                         <div class="card shadow-sm h-100">
                             <div class="card-header bg-transparent d-flex align-items-center gap-2">
@@ -185,7 +185,7 @@
                     </div>
                 </section>
 
-                <section class="card shadow-sm mb-4" id="lockCard" th:if="${monitorEngine != 'postgres'}">
+                <section class="card shadow-sm mb-4" id="lockCard" th:if="${monitorEngine == 'mongo'}">
                     <div class="card-header bg-transparent d-flex align-items-center gap-2">
                         <i class="bi bi-lock text-danger"></i>
                         <span class="fw-medium">Global lock</span>

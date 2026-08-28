@@ -13,7 +13,7 @@
                     <ol class="breadcrumb mb-0">
                         <li class="breadcrumb-item"><a class="link-primary" th:href="@{/}">Dashboard</a></li>
                         <li class="breadcrumb-item"><a class="link-primary"
-                                                       th:href="@{/databases/{name}(name=${database.dbName})}"
+                                                       th:href="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : (${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}(name=${database.dbName})} : @{/databases/{name}(name=${database.dbName})})"
                                                        th:text="${database.dbName}">database</a></li>
                         <li class="breadcrumb-item active">Users</li>
                     </ol>
@@ -26,7 +26,7 @@
                             Users in <span th:text="${database.dbName}">database</span>
                         </h2>
                         <a class="btn btn-sm btn-outline-secondary"
-                           th:href="@{/databases/{name}(name=${database.dbName})}">
+                           th:href="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}(name=${database.dbName})} : (${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}(name=${database.dbName})} : @{/databases/{name}(name=${database.dbName})})">
                             <i class="bi bi-arrow-left"></i> Back to database
                         </a>
                     </div>
@@ -59,7 +59,7 @@
                                         <td class="text-end">
                                             <form class="d-inline"
                                                   method="post"
-                                                  th:action="@{/databases/{name}/users/{uname}/delete(name=${database.dbName}, uname=${user.userName})}"
+                                                  th:action="${engine != null and engine.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/users/{uname}/delete(name=${database.dbName}, uname=${user.userName})} : (${engine != null and engine.name() == 'MYSQL'} ? @{/mysql/databases/{name}/users/{uname}/delete(name=${database.dbName}, uname=${user.userName})} : @{/databases/{name}/users/{uname}/delete(name=${database.dbName}, uname=${user.userName})})"
                                                   th:attr="data-confirm='Revoke access for user ' + ${user.userName} + '? This cannot be undone.'">
                                                 <button class="btn btn-sm btn-outline-danger" type="submit">
                                                     <i class="bi bi-person-dash"></i> Revoke

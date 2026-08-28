@@ -162,7 +162,14 @@ public class MysqlBackupService {
                 try {
                     mysqlRepository.truncateTable(dbName, pt.name);
                 } catch (Exception e) {
-                    throw new ProvisioningException("Could not truncate table '" + pt.name + "'", e);
+                    // TRUNCATE fails when FK parent is referenced; fall back to DELETE
+                    try {
+                        mysqlRepository.getJdbcTemplate().execute(
+                                "DELETE FROM " + MysqlDatabaseRepository.quoteIdentifier(dbName) + "." + MysqlDatabaseRepository.quoteIdentifier(pt.name));
+                    } catch (Exception e2) {
+                        e.addSuppressed(e2);
+                        throw new ProvisioningException("Could not truncate table '" + pt.name + "'", e);
+                    }
                 }
                 if (cols.isEmpty() || pt.rows.isEmpty()) {
                     continue;
@@ -249,6 +256,8 @@ public class MysqlBackupService {
         } catch (Exception e) {
             throw new NameNotAllowedException("Backup file could not be read or is not a valid backup");
         }
+        String engine = doc.getString("engine");
+        if (engine != null && !"MYSQL".equals(engine)) throw new NameNotAllowedException("Backup is for " + engine + ", not MySQL");
         Integer ver = doc.getInteger("formatVersion");
         if (ver == null || ver != FORMAT_VERSION) throw new NameNotAllowedException("Unsupported backup format version: " + ver);
         List<Document> tables = doc.getList("tables", Document.class);

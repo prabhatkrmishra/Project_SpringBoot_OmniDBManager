@@ -1,7 +1,8 @@
 package com.pkmprojects.mongodbserver.dto;
 
 /**
- * View model for one PostgreSQL table's statistics from pg_stat_user_tables + pg_total_relation_size.
+ * View model for one table's statistics (PostgreSQL: pg_stat_user_tables + pg_total_relation_size;
+ * MySQL: information_schema.TABLES + COUNT(*)).
  */
 public record TableStats(
         String name,
