@@ -10,7 +10,7 @@ import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
-import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
+import com.pkmprojects.mongodbserver.store.ManagedDatabaseStore;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
@@ -46,7 +46,7 @@ class ProvisioningServicePostgresTest {
     private static final Instant NOW = Instant.parse("2026-08-16T10:00:00Z");
 
     @Mock private MongoDatabaseRepository mongoRepo;
-    @Mock private ManagedDatabaseRepository managedRepo;
+    @Mock private ManagedDatabaseStore managedRepo;
     @Mock private AuditLogRepository auditRepo;
     @Mock private PasswordGenerator passwordGen;
     @Mock private Environment env;

@@ -17,7 +17,7 @@ import com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter;
 import org.bson.Document;
 import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
-import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
+import com.pkmprojects.mongodbserver.store.ManagedDatabaseStore;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
 import com.pkmprojects.mongodbserver.store.AuditStore;
@@ -61,7 +61,7 @@ class ProvisioningServiceTest {
     @Mock
     private MongoDatabaseRepository mongoDatabaseRepository;
     @Mock
-    private ManagedDatabaseRepository managedDatabaseRepository;
+    private ManagedDatabaseStore managedDatabaseStore;
     @Mock
     private AuditLogRepository auditLogRepository;
     @Mock
@@ -83,7 +83,7 @@ class ProvisioningServiceTest {
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         AuditStore auditStore = new AuditLogRepositoryAdapter(auditLogRepository);
         MongoDatabaseEngine mongoEngine = new MongoDatabaseEngine(mongoDatabaseRepository, environment);
-        service = new ProvisioningService(mongoDatabaseRepository, managedDatabaseRepository,
+        service = new ProvisioningService(mongoDatabaseRepository, managedDatabaseStore,
                 auditStore, new DatabaseNameValidator(), passwordGenerator,
                 Clock.fixed(NOW, ZoneOffset.UTC), environment, applicationEventPublisher,
                 new DatabaseLockRegistry(), mongoEngine, null, null, null, null, null);
@@ -104,7 +104,7 @@ class ProvisioningServiceTest {
         verify(mongoDatabaseRepository).createUser("myapp", "appuser", "generatedPass123");
         verify(mongoDatabaseRepository).createDatabase("myapp");
         ArgumentCaptor<ManagedDatabase> metadataCaptor = ArgumentCaptor.forClass(ManagedDatabase.class);
-        verify(managedDatabaseRepository).save(metadataCaptor.capture());
+        verify(managedDatabaseStore).save(metadataCaptor.capture());
         ManagedDatabase saved = metadataCaptor.getValue();
         assertThat(saved.getDbName()).isEqualTo("myapp");
         assertThat(saved.getUserName()).isEqualTo("appuser");
@@ -133,7 +133,7 @@ class ProvisioningServiceTest {
 
         verify(mongoDatabaseRepository).createUser("myapp", "appuser", "mysecret123");
         ArgumentCaptor<ManagedDatabase> metadataCaptor = ArgumentCaptor.forClass(ManagedDatabase.class);
-        verify(managedDatabaseRepository).save(metadataCaptor.capture());
+        verify(managedDatabaseStore).save(metadataCaptor.capture());
         assertThat(metadataCaptor.getValue().getStoredPassword()).isEqualTo("mysecret123");
         assertThat(info.connectionString()).contains("appuser:mysecret123@");
     }
@@ -178,7 +178,7 @@ class ProvisioningServiceTest {
 
     @Test
     void provisionRejectsExistingMetadata() {
-        when(managedDatabaseRepository.existsByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(true);
+        when(managedDatabaseStore.existsByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(true);
 
         assertThatThrownBy(() -> service.provision(new CreateDatabaseForm("myapp", "appuser", "")))
                 .isInstanceOf(DatabaseAlreadyExistsException.class);
@@ -194,7 +194,7 @@ class ProvisioningServiceTest {
                 .isInstanceOf(ProvisioningException.class);
 
         verify(mongoDatabaseRepository).dropUser("myapp", "appuser");
-        verify(managedDatabaseRepository, never()).save(any());
+        verify(managedDatabaseStore, never()).save(any());
     }
 
     @Test
@@ -210,8 +210,8 @@ class ProvisioningServiceTest {
     void resetPasswordRotatesAndReturnsNewCredentials() {
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),
                 NOW, NOW, null);
-        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.of(metadata));
-        when(managedDatabaseRepository.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByDbName("myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
 
         DatabaseInfo info = service.resetPassword("myapp", new ResetPasswordForm("newsecret456"));
 
@@ -219,7 +219,7 @@ class ProvisioningServiceTest {
         assertThat(info.connectionString()).isEqualTo("mongodb://appuser:newsecret456@localhost:27017/myapp?authSource=myapp");
         assertThat(metadata.getLastPasswordResetAt()).isEqualTo(NOW);
         assertThat(metadata.getStoredPassword()).isEqualTo("newsecret456");
-        verify(managedDatabaseRepository).save(metadata);
+        verify(managedDatabaseStore).save(metadata);
 
         ArgumentCaptor<AuditEvent> auditCaptor = ArgumentCaptor.forClass(AuditEvent.class);
         verify(auditLogRepository).save(auditCaptor.capture());
@@ -230,8 +230,8 @@ class ProvisioningServiceTest {
     void resetPasswordGeneratesWhenBlank() {
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),
                 NOW, NOW, null);
-        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.of(metadata));
-        when(managedDatabaseRepository.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByDbName("myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
         when(passwordGenerator.generate(16)).thenReturn("rotatedPass456");
 
         service.resetPassword("myapp", new ResetPasswordForm(""));
@@ -242,8 +242,8 @@ class ProvisioningServiceTest {
 
     @Test
     void resetPasswordOnUnprovisionedDatabaseThrows() {
-        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.empty());
-        when(managedDatabaseRepository.findAll()).thenReturn(List.of());
+        when(managedDatabaseStore.findByDbName("myapp")).thenReturn(Optional.empty());
+        when(managedDatabaseStore.findAll()).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.resetPassword("myapp", new ResetPasswordForm("newsecret456")))
                 .isInstanceOf(DatabaseNotFoundException.class);
@@ -253,14 +253,14 @@ class ProvisioningServiceTest {
     void deleteDropsUserDatabaseAndMetadata() {
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),
                 NOW, NOW, null);
-        when(managedDatabaseRepository.findByDbNameOrderByEngineType("myapp")).thenReturn(List.of(metadata));
-        when(managedDatabaseRepository.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByDbNameOrderByEngineType("myapp")).thenReturn(List.of(metadata));
+        when(managedDatabaseStore.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
 
         service.delete("myapp");
 
         verify(mongoDatabaseRepository).dropDatabase("myapp");
         verify(mongoDatabaseRepository).dropUser("myapp", "appuser");
-        verify(managedDatabaseRepository).deleteByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp");
+        verify(managedDatabaseStore).deleteByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp");
 
         ArgumentCaptor<AuditEvent> auditCaptor = ArgumentCaptor.forClass(AuditEvent.class);
         verify(auditLogRepository).save(auditCaptor.capture());
@@ -269,22 +269,22 @@ class ProvisioningServiceTest {
 
     @Test
     void deleteWithoutMetadataSkipsUserAndMetadata() {
-        when(managedDatabaseRepository.findByDbNameOrderByEngineType("externaldb")).thenReturn(List.of());
+        when(managedDatabaseStore.findByDbNameOrderByEngineType("externaldb")).thenReturn(List.of());
         when(mongoDatabaseRepository.databaseExists("externaldb")).thenReturn(true);
 
         service.delete("externaldb");
 
         verify(mongoDatabaseRepository, never()).dropUser(any(), any());
         verify(mongoDatabaseRepository).dropDatabase("externaldb");
-        verify(managedDatabaseRepository, never()).deleteByEngineTypeAndDbName(any(), any());
+        verify(managedDatabaseStore, never()).deleteByEngineTypeAndDbName(any(), any());
     }
 
     @Test
     void deleteToleratesMissingUserAndNamespace() {
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),
                 NOW, NOW, null);
-        when(managedDatabaseRepository.findByDbNameOrderByEngineType("myapp")).thenReturn(List.of(metadata));
-        when(managedDatabaseRepository.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByDbNameOrderByEngineType("myapp")).thenReturn(List.of(metadata));
+        when(managedDatabaseStore.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
         org.mockito.Mockito.doThrow(mongoError(26, "NamespaceNotFound"))
                 .when(mongoDatabaseRepository).dropDatabase("myapp");
         org.mockito.Mockito.doThrow(mongoError(11, "UserNotFound"))
@@ -294,19 +294,19 @@ class ProvisioningServiceTest {
 
         verify(mongoDatabaseRepository).dropDatabase("myapp");
         verify(mongoDatabaseRepository).dropUser("myapp", "appuser");
-        verify(managedDatabaseRepository).deleteByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp");
+        verify(managedDatabaseStore).deleteByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp");
     }
 
     @Test
     void deletePropagatesRealErrors() {
-        when(managedDatabaseRepository.findByDbNameOrderByEngineType("myapp")).thenReturn(List.of());
+        when(managedDatabaseStore.findByDbNameOrderByEngineType("myapp")).thenReturn(List.of());
         when(mongoDatabaseRepository.databaseExists("myapp")).thenReturn(false);
         org.mockito.Mockito.doThrow(mongoError(13, "Unauthorized"))
                 .when(mongoDatabaseRepository).dropDatabase("myapp");
 
         assertThatThrownBy(() -> service.delete("myapp"))
                 .isInstanceOf(ProvisioningException.class);
-        verify(managedDatabaseRepository, never()).deleteByEngineTypeAndDbName(any(), any());
+        verify(managedDatabaseStore, never()).deleteByEngineTypeAndDbName(any(), any());
     }
 
     @Test
@@ -368,7 +368,7 @@ class ProvisioningServiceTest {
                 .thenReturn(Map.of("myapp", 1024L, "externaldb", 2048L));
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),
                 NOW, NOW, null);
-        when(managedDatabaseRepository.findAllByEngineType(DatabaseEngineType.MONGO)).thenReturn(List.of(metadata));
+        when(managedDatabaseStore.findAllByEngineType(DatabaseEngineType.MONGO)).thenReturn(List.of(metadata));
 
         List<DatabaseInfo> databases = service.listDatabases();
 
@@ -396,7 +396,7 @@ class ProvisioningServiceTest {
                 .thenReturn(List.of("myapp"));
         when(mongoDatabaseRepository.listCollectionNames("myapp")).thenReturn(List.of("_bootstrap"));
         when(mongoDatabaseRepository.getDatabaseSizes()).thenReturn(Map.of("myapp", 524288L));
-        when(managedDatabaseRepository.findAllByEngineType(DatabaseEngineType.MONGO)).thenReturn(List.of());
+        when(managedDatabaseStore.findAllByEngineType(DatabaseEngineType.MONGO)).thenReturn(List.of());
 
         List<DatabaseInfo> databases = service.listDatabases();
 
@@ -407,7 +407,7 @@ class ProvisioningServiceTest {
     @Test
     void getDatabasePropagatesSizeOnDisk() {
         when(mongoDatabaseRepository.databaseExists("myapp")).thenReturn(true);
-        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.empty());
+        when(managedDatabaseStore.findByDbName("myapp")).thenReturn(Optional.empty());
         when(mongoDatabaseRepository.listCollectionNames("myapp")).thenReturn(List.of());
         when(mongoDatabaseRepository.getDatabaseSizes()).thenReturn(Map.of("myapp", 1048576L));
 
@@ -419,7 +419,7 @@ class ProvisioningServiceTest {
     @Test
     void getDatabaseDegradesCollectionCountToUnknownWhenListingFails() {
         when(mongoDatabaseRepository.databaseExists("myapp")).thenReturn(true);
-        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.empty());
+        when(managedDatabaseStore.findByDbName("myapp")).thenReturn(Optional.empty());
         org.mockito.Mockito.doThrow(mongoError(13, "Unauthorized"))
                 .when(mongoDatabaseRepository).listCollectionNames("myapp");
         when(mongoDatabaseRepository.getDatabaseSizes()).thenReturn(Map.of("myapp", 1024L));
@@ -436,8 +436,8 @@ class ProvisioningServiceTest {
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),
                 NOW, NOW, null);
         metadata.setStoredPassword("mypassword");
-        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.of(metadata));
-        when(managedDatabaseRepository.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByDbName("myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
         when(mongoDatabaseRepository.listCollectionNames("myapp")).thenReturn(List.of("items"));
         when(mongoDatabaseRepository.getDatabaseSizes()).thenReturn(Map.of("myapp", 4096L));
 
@@ -454,8 +454,8 @@ class ProvisioningServiceTest {
         when(mongoDatabaseRepository.databaseExists("myapp")).thenReturn(true);
         ManagedDatabase metadata = new ManagedDatabase("myapp", "appuser", List.of("readWrite:myapp"),
                 NOW, NOW, null);
-        when(managedDatabaseRepository.findByDbName("myapp")).thenReturn(Optional.of(metadata));
-        when(managedDatabaseRepository.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByDbName("myapp")).thenReturn(Optional.of(metadata));
+        when(managedDatabaseStore.findByEngineTypeAndDbName(DatabaseEngineType.MONGO, "myapp")).thenReturn(Optional.of(metadata));
         when(mongoDatabaseRepository.listCollectionNames("myapp")).thenReturn(List.of());
         when(mongoDatabaseRepository.getDatabaseSizes()).thenReturn(Map.of());
 

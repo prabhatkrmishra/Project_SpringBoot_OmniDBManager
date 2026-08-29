@@ -16,7 +16,7 @@ import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.store.AuditStore;
-import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
+import com.pkmprojects.mongodbserver.store.ManagedDatabaseStore;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
@@ -46,7 +46,7 @@ public class ProvisioningService {
     private static final int MONGO_CODE_USER_ALREADY_EXISTS = 51003;
 
     private final Optional<MongoDatabaseRepository> mongoDatabaseRepository;
-    private final ManagedDatabaseRepository managedDatabaseRepository;
+    private final ManagedDatabaseStore managedDatabaseStore;
     private final AuditStore auditStore;
     private final DatabaseNameValidator nameValidator;
     private final PasswordGenerator passwordGenerator;
@@ -63,7 +63,7 @@ public class ProvisioningService {
 
     @Autowired
     public ProvisioningService(@Autowired(required = false) MongoDatabaseRepository mongoDatabaseRepository,
-                               ManagedDatabaseRepository managedDatabaseRepository,
+                               ManagedDatabaseStore managedDatabaseStore,
                                AuditStore auditStore,
                                DatabaseNameValidator nameValidator,
                                PasswordGenerator passwordGenerator,
@@ -78,7 +78,7 @@ public class ProvisioningService {
                                @Autowired(required = false) MysqlDatabaseRepository mysqlRepository,
                                @Autowired(required = false) EncryptionService encryptionService) {
         this.mongoDatabaseRepository = Optional.ofNullable(mongoDatabaseRepository);
-        this.managedDatabaseRepository = managedDatabaseRepository;
+        this.managedDatabaseStore = managedDatabaseStore;
         this.auditStore = auditStore;
         this.nameValidator = nameValidator;
         this.passwordGenerator = passwordGenerator;
@@ -96,7 +96,7 @@ public class ProvisioningService {
 
     // Legacy 12-arg constructor for tests without EncryptionService
     public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
-                               ManagedDatabaseRepository managedDatabaseRepository,
+                               ManagedDatabaseStore managedDatabaseStore,
                                AuditLogRepository auditLogRepository,
                                DatabaseNameValidator nameValidator,
                                PasswordGenerator passwordGenerator,
@@ -107,7 +107,7 @@ public class ProvisioningService {
                                MongoDatabaseEngine mongoEngine,
                                PostgresDatabaseEngine postgresEngine,
                                PostgresDatabaseRepository postgresRepository) {
-        this(mongoDatabaseRepository, managedDatabaseRepository,
+        this(mongoDatabaseRepository, managedDatabaseStore,
                 new com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter(auditLogRepository), nameValidator,
                 passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
                 mongoEngine, postgresEngine, postgresRepository, null, null, null);
@@ -115,7 +115,7 @@ public class ProvisioningService {
 
     // Legacy 13-arg constructor for tests without MySQL (keeps existing tests green)
     public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
-                               ManagedDatabaseRepository managedDatabaseRepository,
+                               ManagedDatabaseStore managedDatabaseStore,
                                AuditLogRepository auditLogRepository,
                                DatabaseNameValidator nameValidator,
                                PasswordGenerator passwordGenerator,
@@ -127,7 +127,7 @@ public class ProvisioningService {
                                PostgresDatabaseEngine postgresEngine,
                                PostgresDatabaseRepository postgresRepository,
                                EncryptionService encryptionService) {
-        this(mongoDatabaseRepository, managedDatabaseRepository,
+        this(mongoDatabaseRepository, managedDatabaseStore,
                 new com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter(auditLogRepository), nameValidator,
                 passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
                 mongoEngine, postgresEngine, postgresRepository, null, null, encryptionService);
@@ -180,7 +180,7 @@ public class ProvisioningService {
         nameValidator.validatePassword(requestedPassword);
 
         return databaseLocks.withLock(lockKey(engineType, dbName), () -> {
-            if (managedDatabaseRepository.existsByEngineTypeAndDbName(engineType, dbName)
+            if (managedDatabaseStore.existsByEngineTypeAndDbName(engineType, dbName)
                     || engineFor(engineType).databaseExists(dbName)) {
                 throw new DatabaseAlreadyExistsException("Database '" + dbName + "' already exists in " + engineType);
             }
@@ -253,7 +253,7 @@ public class ProvisioningService {
             }
             ManagedDatabase metadata = new ManagedDatabase(dbName, engineType, userName, roles, now, now, null);
             metadata.setStoredPassword(encryptPassword(password));
-            managedDatabaseRepository.save(metadata);
+            managedDatabaseStore.save(metadata);
             audit(AuditEvent.PROVISION, dbName, engineType, userName, now);
             log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, userName);
 
@@ -264,8 +264,8 @@ public class ProvisioningService {
 
     public DatabaseInfo resetPassword(String dbName, ResetPasswordForm form) {
         // Legacy: lookup engine from metadata
-        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName)
-                .orElseGet(() -> managedDatabaseRepository.findAll().stream()
+        ManagedDatabase md = managedDatabaseStore.findByDbName(dbName)
+                .orElseGet(() -> managedDatabaseStore.findAll().stream()
                         .filter(m -> m.getDbName().equals(dbName)).findFirst().orElse(null));
         if (md == null) throw new DatabaseNotFoundException("Database '" + dbName + "' is not provisioned");
         return resetPassword(md.getEngineType(), dbName, form);
@@ -279,7 +279,7 @@ public class ProvisioningService {
         nameValidator.validatePassword(requestedPassword);
 
         return databaseLocks.withLock(lockKey(engineType, dbName), () -> {
-            ManagedDatabase metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName)
+            ManagedDatabase metadata = managedDatabaseStore.findByEngineTypeAndDbName(engineType, dbName)
                     .orElseThrow(() -> new DatabaseNotFoundException("Database '" + dbName + "' is not provisioned in " + engineType));
 
             String password = requestedPassword.isBlank()
@@ -298,7 +298,7 @@ public class ProvisioningService {
 
             metadata.setStoredPassword(encryptPassword(password));
             metadata.setLastPasswordResetAt(clock.instant());
-            managedDatabaseRepository.save(metadata);
+            managedDatabaseStore.save(metadata);
             audit(AuditEvent.RESET_PASSWORD, dbName, engineType, metadata.getUserName(), metadata.getLastPasswordResetAt());
             log.info("Reset password for user '{}' on database '{}' ({})", metadata.getUserName(), dbName, engineType);
 
@@ -309,7 +309,7 @@ public class ProvisioningService {
 
     public void delete(String dbName) {
         // Legacy: try to find engine, delete all matching
-        List<ManagedDatabase> metas = managedDatabaseRepository.findByDbNameOrderByEngineType(dbName);
+        List<ManagedDatabase> metas = managedDatabaseStore.findByDbNameOrderByEngineType(dbName);
         if (!metas.isEmpty()) {
             for (ManagedDatabase m : metas) {
                 delete(m.getEngineType(), dbName);
@@ -334,7 +334,7 @@ public class ProvisioningService {
         else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
         else nameValidator.validateDatabaseName(dbName);
         databaseLocks.withLock(lockKey(engineType, dbName), () -> {
-            Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName);
+            Optional<ManagedDatabase> metadata = managedDatabaseStore.findByEngineTypeAndDbName(engineType, dbName);
             DatabaseEngine engine = engineFor(engineType);
 
             if (engineType == DatabaseEngineType.MONGO) {
@@ -352,7 +352,7 @@ public class ProvisioningService {
                         }
                     }
                 });
-                metadata.ifPresent(m -> managedDatabaseRepository.deleteByEngineTypeAndDbName(engineType, dbName));
+                metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
             } else {
                 try { engine.dropDatabase(dbName); } catch (Exception e) {
                     log.warn("Failed to drop {} database '{}': {}", engineType, dbName, e.getMessage());
@@ -362,7 +362,7 @@ public class ProvisioningService {
                         log.warn("Failed to drop {} role/user '{}': {}", engineType, m.getUserName(), e.getMessage());
                     }
                 });
-                metadata.ifPresent(m -> managedDatabaseRepository.deleteByEngineTypeAndDbName(engineType, dbName));
+                metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
             }
             audit(AuditEvent.DELETE, dbName, engineType, metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
             log.info("Deleted {} database '{}'", engineType, dbName);
@@ -403,7 +403,7 @@ public class ProvisioningService {
     }
 
     public List<DatabaseUser> listUsers(String dbName) {
-        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
+        ManagedDatabase md = managedDatabaseStore.findByDbName(dbName).orElse(null);
         DatabaseEngineType engine = md != null ? md.getEngineType() : DatabaseEngineType.MONGO;
         return listUsers(engine, dbName);
     }
@@ -435,7 +435,7 @@ public class ProvisioningService {
     }
 
     public void revokeUser(String dbName, String userName) {
-        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
+        ManagedDatabase md = managedDatabaseStore.findByDbName(dbName).orElse(null);
         DatabaseEngineType engine = md != null ? md.getEngineType() : DatabaseEngineType.MONGO;
         revokeUser(engine, dbName, userName);
     }
@@ -483,7 +483,7 @@ public class ProvisioningService {
     }
 
     public List<DatabaseInfo> listDatabases(DatabaseEngineType engineType) {
-        Map<String, ManagedDatabase> byName = managedDatabaseRepository.findAllByEngineType(engineType).stream()
+        Map<String, ManagedDatabase> byName = managedDatabaseStore.findAllByEngineType(engineType).stream()
                 .collect(Collectors.toMap(ManagedDatabase::getDbName, Function.identity(), (a, b) -> a, LinkedHashMap::new));
         Map<String, Long> sizes;
         try { sizes = engineFor(engineType).getDatabaseSizes(); } catch (Exception e) {
@@ -511,7 +511,7 @@ public class ProvisioningService {
 
     public DatabaseInfo getDatabase(String dbName) {
         // Try Mongo first, then Postgres, then MySQL
-        ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
+        ManagedDatabase md = managedDatabaseStore.findByDbName(dbName).orElse(null);
         if (md != null) return getDatabase(md.getEngineType(), dbName);
         if (mongoEngine.isPresent() && mongoEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.MONGO, dbName);
         if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.POSTGRES, dbName);
@@ -524,7 +524,7 @@ public class ProvisioningService {
         else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
         else nameValidator.validateDatabaseName(dbName);
         if (!engineFor(engineType).databaseExists(dbName)) throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist in " + engineType);
-        Optional<ManagedDatabase> metadata = managedDatabaseRepository.findByEngineTypeAndDbName(engineType, dbName);
+        Optional<ManagedDatabase> metadata = managedDatabaseStore.findByEngineTypeAndDbName(engineType, dbName);
         ManagedDatabase md = metadata.orElse(null);
         String connectionString = null;
         if (md != null && md.getStoredPassword() != null) {
