@@ -7,6 +7,7 @@ import com.pkmprojects.mongodbserver.service.ExplorationService;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
 import com.pkmprojects.mongodbserver.service.StatisticsService;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -27,7 +28,8 @@ public class DatabaseController {
     private final ExplorationService explorationService;
     private final StatisticsService statisticsService;
 
-    public DatabaseController(ProvisioningService provisioningService, ExplorationService explorationService,
+    public DatabaseController(ProvisioningService provisioningService,
+                              @Autowired(required = false) ExplorationService explorationService,
                               StatisticsService statisticsService) {
         this.provisioningService = provisioningService;
         this.explorationService = explorationService;
@@ -72,7 +74,11 @@ public class DatabaseController {
     @GetMapping("/databases/{dbName}")
     public String detail(@PathVariable String dbName, Model model) {
         model.addAttribute("database", provisioningService.getDatabase(dbName));
-        model.addAttribute("collections", explorationService.listCollections(dbName));
+        if (explorationService != null) {
+            model.addAttribute("collections", explorationService.listCollections(dbName));
+        } else {
+            model.addAttribute("collections", java.util.List.of());
+        }
         if (!model.containsAttribute("resetForm")) {
             model.addAttribute("resetForm", new ResetPasswordForm(""));
         }
