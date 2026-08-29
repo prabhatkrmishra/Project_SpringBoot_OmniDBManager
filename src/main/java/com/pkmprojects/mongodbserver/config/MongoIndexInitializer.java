@@ -5,6 +5,7 @@ import com.mongodb.client.MongoClient;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -28,13 +29,17 @@ public class MongoIndexInitializer implements ApplicationRunner {
     private final MongoClient mongoClient;
     private final Environment environment;
 
-    public MongoIndexInitializer(MongoClient mongoClient, Environment environment) {
+    public MongoIndexInitializer(@Autowired(required = false) MongoClient mongoClient, Environment environment) {
         this.mongoClient = mongoClient;
         this.environment = environment;
     }
 
     @Override
     public void run(ApplicationArguments args) {
+        if (mongoClient == null) {
+            log.warn("MongoIndexInitializer skipped: MongoClient unavailable");
+            return;
+        }
         String metadataDatabase = environment.getProperty("spring.mongodb.database", DEFAULT_METADATA_DATABASE);
         try {
             mongoClient.getDatabase(metadataDatabase)

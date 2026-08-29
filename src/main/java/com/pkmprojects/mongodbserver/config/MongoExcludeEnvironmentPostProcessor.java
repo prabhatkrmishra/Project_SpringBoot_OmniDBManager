@@ -1,20 +1,29 @@
 package com.pkmprojects.mongodbserver.config;
 
-import org.springframework.boot.env.EnvironmentPostProcessor;
+import org.springframework.boot.EnvironmentPostProcessor;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.Ordered;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Makes Mongo auto-configuration truly conditional on {@code app.mongo.enabled}
  * and normalizes blank URI vars so {@code VAR=} (empty) does not break the
  * {@code ${VAR:default}} fallbacks in {@code application.yml} — empty strings
  * are treated as absent.
+ *
+ * <p>Runs with {@link Ordered#LOWEST_PRECEDENCE} so it executes after
+ * {@code springboot4-dotenv} and other environment post-processors that may
+ * populate properties from {@code .env}.</p>
  */
-public class MongoExcludeEnvironmentPostProcessor implements EnvironmentPostProcessor {
+public class MongoExcludeEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
+    private static final Logger log = LoggerFactory.getLogger(MongoExcludeEnvironmentPostProcessor.class);
     private static final String PROP = "app.mongo.enabled";
     private static final String EXCLUDE_PROP = "spring.autoconfigure.exclude";
 
@@ -47,15 +56,23 @@ public class MongoExcludeEnvironmentPostProcessor implements EnvironmentPostProc
         }
 
         boolean mongoEnabled = environment.getProperty(PROP, Boolean.class, false);
+        log.info("MongoExcludeEnvironmentPostProcessor: app.mongo.enabled={}", mongoEnabled);
         if (mongoEnabled) {
+            log.info("MongoExcludeEnvironmentPostProcessor: Mongo enabled, skipping excludes");
             return;
         }
         String existing = environment.getProperty(EXCLUDE_PROP, "");
         String joined = String.join(",", MONGO_EXCLUDES);
         String merged = existing == null || existing.isBlank() ? joined : existing + "," + joined;
+        log.info("MongoExcludeEnvironmentPostProcessor: setting spring.autoconfigure.exclude={}", merged);
 
         Map<String, Object> map = new LinkedHashMap<>();
         map.put(EXCLUDE_PROP, merged);
         environment.getPropertySources().addFirst(new MapPropertySource("mongoConditionalExclude", map));
+    }
+
+    @Override
+    public int getOrder() {
+        return Ordered.LOWEST_PRECEDENCE;
     }
 }

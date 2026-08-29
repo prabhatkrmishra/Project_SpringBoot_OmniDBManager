@@ -43,7 +43,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
         "app.admin.username=admin",
-        "app.admin.password=admin"
+        "app.admin.password=admin",
+        "app.mongo.enabled=true"
 })
 class MongodbserverApplicationTests {
 
@@ -65,7 +66,6 @@ class MongodbserverApplicationTests {
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
-        registry.add("app.mongo.enabled", () -> "true");
         registry.add("spring.mongodb.uri", () -> "mongodb://root:root@"
                 + mongo.getHost() + ":" + mongo.getMappedPort(27017) + "/?authSource=admin");
     }
