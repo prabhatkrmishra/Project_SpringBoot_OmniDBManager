@@ -65,6 +65,7 @@ class MongodbserverApplicationTests {
 
     @DynamicPropertySource
     static void datasourceProperties(DynamicPropertyRegistry registry) {
+        registry.add("app.mongo.enabled", () -> "true");
         registry.add("spring.mongodb.uri", () -> "mongodb://root:root@"
                 + mongo.getHost() + ":" + mongo.getMappedPort(27017) + "/?authSource=admin");
     }

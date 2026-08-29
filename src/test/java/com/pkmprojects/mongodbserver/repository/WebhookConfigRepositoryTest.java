@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers(disabledWithoutDocker = true)
 @SpringBootTest
 @TestPropertySource(properties = {
+        "app.mongo.enabled=true",
         "app.admin.username=admin",
         "app.admin.password=admin"
 })
