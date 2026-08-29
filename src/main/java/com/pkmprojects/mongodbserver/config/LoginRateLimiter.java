@@ -66,6 +66,17 @@ public class LoginRateLimiter {
     }
 
     /**
+     * Clears the rate-limit window for {@code clientKey} (e.g. on successful login).
+     */
+    public void clear(String clientKey) {
+        attempts.remove(clientKey);
+    }
+
+    java.util.Set<String> snapshotKeys() {
+        return java.util.Set.copyOf(attempts.keySet());
+    }
+
+    /**
      * Drops every entry whose window has certainly elapsed by now, freeing the map
      * once it exceeds {@value #MAX_KEYS} keys. The linear scan only runs above the
      * cap, never on the hot path.

@@ -36,13 +36,21 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
+                                     FilterChain filterChain) throws ServletException, IOException {
         if (rateLimiter.isAllowed(clientKey(request), properties.maxAttempts(), properties.window())) {
             filterChain.doFilter(request, response);
             return;
         }
+        // Render login page with rate-limit banner instead of raw 429 text,
+        // so the user sees a proper UI and can retry after Retry-After.
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setHeader("Retry-After", String.valueOf(Math.max(1, properties.window().toSeconds())));
+        // If the request expects HTML (browser form POST), redirect to login with flag.
+        String accept = request.getHeader("Accept");
+        if (accept != null && accept.contains("text/html")) {
+            response.sendRedirect(request.getContextPath() + "/login?rateLimited");
+            return;
+        }
         response.setContentType("text/plain;charset=UTF-8");
         response.getWriter().write("Too many login attempts. Please try again later.");
     }

@@ -1,8 +1,11 @@
 package com.pkmprojects.mongodbserver.service;
 
+import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import org.springframework.stereotype.Component;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
 /**
@@ -10,31 +13,45 @@ import java.util.function.Supplier;
  * database's lifecycle or content (provisioning, restore, bulk import).
  *
  * <p>The guarded operations are check-then-act sequences spanning multiple
- * MongoDB commands, so two concurrent calls for the same name must not
- * interleave: concurrent {@code provision}/{@code delete} calls otherwise
- * produce orphaned metadata or a database whose user was already dropped,
- * concurrent {@code createUser} commands against a brand-new database can
- * lose the user insert entirely while still reporting success (MongoDB does
- * not serialize user creation on a not-yet-existing database), and a
- * {@code restore}/{@code import} racing a {@code delete} can resurrect a
- * just-dropped database as a zombie with no metadata or user. Different
- * database names are never blocked by each other.</p>
+ * commands, so two concurrent calls for the same name must not
+ * interleave. Different database names are never blocked by each other.</p>
  *
- * <p>Entries are intentionally never removed: the set of distinct names is
- * bounded by the databases an admin manages, and removing a lock after use
- * reintroduces a check-then-act race on the removal itself.</p>
+ * <p>Uses {@link ReentrantLock} instead of {@code synchronized} so virtual
+ * threads (used by StatisticsService fan-out) do not pin carrier threads
+ * (JDK 21+ pinning hazard). Locks are held with a bounded wait (30s) to
+ * avoid indefinite blocking when PG/MySQL hang.</p>
+ *
+ * <p>Entries are intentionally never removed eagerly: the set of distinct
+ * names is bounded by the databases an admin manages, and removing a lock
+ * after use reintroduces a check-then-act race on the removal itself.
+ * A background eviction could be added via Caffeine if churn grows.</p>
  */
 @Component
 public class DatabaseLockRegistry {
 
-    private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
+    private static final long LOCK_TIMEOUT_SECONDS = 30;
+
+    private final ConcurrentHashMap<String, ReentrantLock> locks = new ConcurrentHashMap<>();
 
     /**
      * Runs {@code action} while holding the lock for {@code dbName}.
      */
     public void withLock(String dbName, Runnable action) {
-        synchronized (locks.computeIfAbsent(dbName, key -> new Object())) {
+        ReentrantLock lock = locks.computeIfAbsent(dbName, key -> new ReentrantLock());
+        boolean acquired = false;
+        try {
+            acquired = lock.tryLock(LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ProvisioningException("Interrupted while waiting for lock on '" + dbName + "'", e);
+        }
+        if (!acquired) {
+            throw new ProvisioningException("Timed out waiting for lock on '" + dbName + "' — another operation is still in progress");
+        }
+        try {
             action.run();
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -42,8 +59,21 @@ public class DatabaseLockRegistry {
      * Runs {@code action} while holding the lock for {@code dbName}.
      */
     public <T> T withLock(String dbName, Supplier<T> action) {
-        synchronized (locks.computeIfAbsent(dbName, key -> new Object())) {
+        ReentrantLock lock = locks.computeIfAbsent(dbName, key -> new ReentrantLock());
+        boolean acquired = false;
+        try {
+            acquired = lock.tryLock(LOCK_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new ProvisioningException("Interrupted while waiting for lock on '" + dbName + "'", e);
+        }
+        if (!acquired) {
+            throw new ProvisioningException("Timed out waiting for lock on '" + dbName + "' — another operation is still in progress");
+        }
+        try {
             return action.get();
+        } finally {
+            lock.unlock();
         }
     }
 

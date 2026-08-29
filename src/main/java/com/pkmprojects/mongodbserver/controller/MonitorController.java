@@ -18,10 +18,13 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Live monitoring page (any authenticated user). The page subscribes to a
@@ -40,6 +43,7 @@ public class MonitorController {
     private final Optional<PostgresMonitorService> postgresMonitorService;
     private final Optional<MysqlMonitorService> mysqlMonitorService;
     private final ScheduledExecutorService scheduler;
+    private final ExecutorService tickExecutor;
 
     public MonitorController(@Autowired(required = false) MonitorService monitorService,
                              @Autowired(required = false) PostgresMonitorService postgresMonitorService,
@@ -47,11 +51,12 @@ public class MonitorController {
         this.monitorService = monitorService;
         this.postgresMonitorService = Optional.ofNullable(postgresMonitorService);
         this.mysqlMonitorService = Optional.ofNullable(mysqlMonitorService);
-        this.scheduler = Executors.newScheduledThreadPool(4, runnable -> {
+        this.scheduler = Executors.newScheduledThreadPool(2, runnable -> {
             Thread thread = new Thread(runnable, "monitor-sse");
             thread.setDaemon(true);
             return thread;
         });
+        this.tickExecutor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @GetMapping("/monitor")
@@ -73,11 +78,30 @@ public class MonitorController {
         if (eng.equals("mysql") && mysqlMonitorService.isEmpty()) eng = "mongo";
         if (!eng.equals("postgres") && !eng.equals("mysql")) eng = "mongo";
         String finalEng = eng;
-        SseEmitter emitter = new SseEmitter(0L);
+        SseEmitter emitter = new SseEmitter(30_000L);
+        // Heartbeat comment every 15s keeps proxies from buffering/closing idle SSE.
+        ScheduledFuture<?> heartbeat = scheduler.scheduleWithFixedDelay(() -> {
+            try {
+                emitter.send(SseEmitter.event().comment("keepalive"));
+            } catch (IOException ignored) {
+                // Client gone — onCompletion will cancel tick future.
+            }
+        }, 15, 15, TimeUnit.SECONDS);
         ScheduledFuture<?> future = scheduler.scheduleWithFixedDelay(() -> sendTick(emitter, finalEng),
                 0, TICK_MILLIS, TimeUnit.MILLISECONDS);
-        emitter.onCompletion(() -> future.cancel(true));
-        emitter.onTimeout(() -> future.cancel(true));
+        emitter.onCompletion(() -> {
+            future.cancel(true);
+            heartbeat.cancel(true);
+        });
+        emitter.onTimeout(() -> {
+            future.cancel(true);
+            heartbeat.cancel(true);
+            emitter.complete();
+        });
+        emitter.onError(e -> {
+            future.cancel(true);
+            heartbeat.cancel(true);
+        });
         return ResponseEntity.ok()
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache")
                 .header("X-Accel-Buffering", "no")
@@ -87,32 +111,52 @@ public class MonitorController {
 
     private void sendTick(SseEmitter emitter, String engine) {
         try {
-            String data;
-            if ("postgres".equals(engine)) {
-                var snapshot = postgresMonitorService.get().getSnapshot();
-                data = postgresMonitorService.get().serialize(snapshot);
-            } else if ("mysql".equals(engine)) {
-                var snapshot = mysqlMonitorService.get().getSnapshot();
-                data = mysqlMonitorService.get().serialize(snapshot);
-            } else {
-                if (monitorService == null) {
-                    throw new IllegalStateException("Mongo monitoring is not available");
+            // Offload blocking JDBC snapshot to virtual threads with hard timeout
+            // so scheduler threads never block on a hung PG/MySQL.
+            String data = CompletableFuture.supplyAsync(() -> {
+                if ("postgres".equals(engine)) {
+                    var snapshot = postgresMonitorService.get().getSnapshot();
+                    return postgresMonitorService.get().serialize(snapshot);
+                } else if ("mysql".equals(engine)) {
+                    var snapshot = mysqlMonitorService.get().getSnapshot();
+                    return mysqlMonitorService.get().serialize(snapshot);
+                } else {
+                    if (monitorService == null) {
+                        throw new IllegalStateException("Mongo monitoring is not available");
+                    }
+                    var snapshot = monitorService.getSnapshot();
+                    return monitorService.serialize(snapshot);
                 }
-                var snapshot = monitorService.getSnapshot();
-                data = monitorService.serialize(snapshot);
-            }
+            }, tickExecutor).orTimeout(3, TimeUnit.SECONDS).join();
             emitter.send(SseEmitter.event().name("tick").data(data));
+        } catch (java.util.concurrent.CompletionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof TimeoutException) {
+                log.warn("Monitor snapshot tick timed out for engine {}", engine);
+                try {
+                    emitter.send(SseEmitter.event().name("tick").data("{\"error\":\"snapshot timeout\"}"));
+                } catch (IOException ignored) {
+                    log.debug("Could not send timeout tick; client gone", ignored);
+                    throw new SseStreamClosed(new IOException("timeout tick send failed", ignored));
+                }
+                return;
+            }
+            if (cause instanceof RuntimeException re) throw re;
+            if (cause instanceof IOException ioe) {
+                log.debug("Monitor SSE client disconnected", ioe);
+                throw new SseStreamClosed(ioe);
+            }
+            log.warn("Monitor snapshot tick failed", cause != null ? cause : e);
+            try {
+                emitter.completeWithError(cause != null ? cause : e);
+            } catch (RuntimeException ignored) {
+                log.debug("Could not signal monitor SSE error; response already unusable", ignored);
+            }
+            throw new RuntimeException(cause != null ? cause : e);
         } catch (IOException e) {
-            // Client went away. The underlying response is already unusable, so
-            // do not complete() it (that throws AsyncRequestNotUsableException).
-            // Re-throwing ends the scheduled task so it does not keep ticking
-            // into the void; onCompletion cancels the future.
             log.debug("Monitor SSE client disconnected", e);
             throw new SseStreamClosed(e);
         } catch (RuntimeException e) {
-            // A snapshot failed. Best-effort signal the client, then stop the
-            // loop. If the response is already unusable (client gone), the
-            // signal is skipped rather than letting it cascade.
             log.warn("Monitor snapshot tick failed", e);
             try {
                 emitter.completeWithError(e);
@@ -126,6 +170,7 @@ public class MonitorController {
     @PreDestroy
     void shutdown() {
         scheduler.shutdown();
+        tickExecutor.shutdown();
     }
 
     private static class SseStreamClosed extends RuntimeException {
