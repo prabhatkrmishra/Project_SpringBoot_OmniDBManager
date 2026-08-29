@@ -34,7 +34,7 @@ class HealthControllerTest {
 
     @Test
     void healthPageRendersReachableServer() throws Exception {
-        when(healthService.getHealth()).thenReturn(new ServerHealth(true, "7.0.39", 90061L, 3, 3072L, 5, true, false, null, false));
+        when(healthService.getHealth()).thenReturn(new ServerHealth(true, "7.0.39", 90061L, 3, 3072L, 5, true, false, null, false, false, null, false, true));
 
         mockMvc.perform(get("/health").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -46,7 +46,7 @@ class HealthControllerTest {
 
     @Test
     void healthPageRendersUnreachableServer() throws Exception {
-        when(healthService.getHealth()).thenReturn(new ServerHealth(false, null, null, 0, null, null, false, false, null, false));
+        when(healthService.getHealth()).thenReturn(new ServerHealth(false, null, null, 0, null, null, false, false, null, false, false, null, false, true));
 
         mockMvc.perform(get("/health").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())

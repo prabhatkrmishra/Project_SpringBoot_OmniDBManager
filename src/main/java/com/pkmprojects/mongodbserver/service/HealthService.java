@@ -124,7 +124,7 @@ public class HealthService {
 
         return new ServerHealth(mongoReachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
                 mongoReachable, postgresReachable, postgresVersion, postgresEnabled,
-                mysqlReachable, mysqlVersion, mysqlEnabled);
+                mysqlReachable, mysqlVersion, mysqlEnabled, mongoEnabled);
     }
 
     private boolean pingMongo() {

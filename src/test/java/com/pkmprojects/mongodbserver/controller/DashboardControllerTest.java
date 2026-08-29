@@ -75,7 +75,7 @@ class DashboardControllerTest {
 
     @Test
     void dashboardListsDatabasesAndActivity() throws Exception {
-        when(healthService.getHealth()).thenReturn(new ServerHealth(true, "7.0.0", 100L, 1, 1024L, 1, true, false, null, false));
+        when(healthService.getHealth()).thenReturn(new ServerHealth(true, "7.0.0", 100L, 1, 1024L, 1, true, false, null, false, false, null, false, true));
         when(provisioningService.listDatabases(DatabaseEngineType.MONGO)).thenReturn(List.of(
                 new DatabaseInfo("myapp", DatabaseEngineType.MONGO, "appuser", List.of("readWrite:myapp"), 2L, NOW, NOW, null, true, null, 0L)));
         when(provisioningService.listDatabases(DatabaseEngineType.POSTGRES)).thenReturn(List.of());

@@ -29,16 +29,18 @@ public class DashboardController {
      */
     @GetMapping("/")
     public String dashboard(Model model) {
+        var health = healthService.getHealth();
         var mongoDbs = java.util.List.<com.pkmprojects.mongodbserver.dto.DatabaseInfo>of();
-        try {
-            mongoDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO);
-        } catch (Exception e) {
-            // Mongo down — dashboard still renders with empty list and unreachable dot
+        if (health.mongoEnabled()) {
+            try {
+                mongoDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO);
+            } catch (Exception e) {
+                // Mongo down — dashboard still renders with empty list
+            }
         }
         model.addAttribute("databases", mongoDbs);
         model.addAttribute("mongoDatabases", mongoDbs);
         model.addAttribute("mongoCount", mongoDbs.size());
-        var health = healthService.getHealth();
         if (health.postgresEnabled()) {
             try {
                 var pgDbs = provisioningService.listDatabases(com.pkmprojects.mongodbserver.model.DatabaseEngineType.POSTGRES);
