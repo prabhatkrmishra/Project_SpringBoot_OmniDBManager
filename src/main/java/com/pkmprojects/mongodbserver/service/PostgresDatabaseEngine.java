@@ -96,6 +96,22 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         postgresDatabaseRepository.grantPrivileges(dbName, userName);
     }
 
+    public boolean isVectorAvailable() {
+        return postgresDatabaseRepository.isVectorAvailable();
+    }
+
+    public boolean isVectorEnabled(String dbName) {
+        return postgresDatabaseRepository.isVectorEnabled(dbName);
+    }
+
+    public void enableVector(String dbName) {
+        postgresDatabaseRepository.enableVectorExtension(dbName);
+    }
+
+    public String vectorVersion(String dbName) {
+        return postgresDatabaseRepository.vectorVersion(dbName);
+    }
+
     @Override
     public String buildConnectionString(String userName, String password, String dbName) {
         String host = resolveHost();

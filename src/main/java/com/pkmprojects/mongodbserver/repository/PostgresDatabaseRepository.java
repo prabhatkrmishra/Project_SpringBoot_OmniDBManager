@@ -264,6 +264,41 @@ public class PostgresDatabaseRepository {
                 String.class, dbName);
     }
 
+    // ── pgvector ──────────────────────────────────────────────────────────
+
+    public boolean isVectorAvailable() {
+        try {
+            Integer c = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM pg_available_extensions WHERE name = 'vector'", Integer.class);
+            return c != null && c > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public boolean isVectorEnabled(String dbName) {
+        try {
+            Integer c = jdbcFor(dbName).queryForObject(
+                    "SELECT COUNT(*) FROM pg_extension WHERE extname = 'vector'", Integer.class);
+            return c != null && c > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public void enableVectorExtension(String dbName) {
+        jdbcFor(dbName).execute("CREATE EXTENSION IF NOT EXISTS vector");
+    }
+
+    public String vectorVersion(String dbName) {
+        try {
+            return jdbcFor(dbName).queryForObject(
+                    "SELECT extversion FROM pg_extension WHERE extname = 'vector'", String.class);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public List<String> listTables(String dbName) {
         JdbcTemplate target = jdbcFor(dbName);
         return target.queryForList(

@@ -547,6 +547,29 @@ public class ProvisioningService {
         if (!engineFor(engineType).databaseExists(dbName)) throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist in " + engineType);
     }
 
+    public void enableVector(DatabaseEngineType engineType, String dbName) {
+        if (engineType != DatabaseEngineType.POSTGRES) throw new ProvisioningException("pgvector is only available for PostgreSQL");
+        nameValidator.validatePostgresDatabaseName(dbName);
+        databaseLocks.withLock(lockKey(engineType, dbName), () -> {
+            requireDatabase(dbName, engineType);
+            PostgresDatabaseEngine pg = (PostgresDatabaseEngine) engineFor(engineType);
+            if (pg.isVectorEnabled(dbName)) return;
+            if (!pg.isVectorAvailable()) throw new ProvisioningException("pgvector extension not available on server — use pgvector/pgvector image or install postgresql-*-pgvector");
+            pg.enableVector(dbName);
+            audit(AuditEvent.VECTOR_ENABLED, dbName, engineType, null, clock.instant());
+            log.info("Enabled pgvector on database '{}'", dbName);
+        });
+    }
+
+    public boolean isVectorEnabled(DatabaseEngineType engineType, String dbName) {
+        if (engineType != DatabaseEngineType.POSTGRES) return false;
+        try { return ((PostgresDatabaseEngine) engineFor(engineType)).isVectorEnabled(dbName); } catch (Exception e) { return false; }
+    }
+
+    public boolean isVectorAvailable() {
+        try { return postgresEngine.isPresent() && postgresEngine.get().isVectorAvailable(); } catch (Exception e) { return false; }
+    }
+
     private void audit(String eventType, String dbName, DatabaseEngineType engineType, String userName, java.time.Instant performedAt) {
         AuditEvent event = new AuditEvent(eventType, dbName, engineType, userName, currentUsername(), performedAt);
         auditStore.save(event);

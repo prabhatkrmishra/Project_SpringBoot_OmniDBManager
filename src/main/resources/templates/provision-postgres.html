@@ -42,6 +42,16 @@
                                     <div class="form-hint form-hint--note">Leave blank to generate a strong password.</div>
                                     <div class="text-danger small mt-1" th:errors="*{password}" th:if="${#fields.hasErrors('password')}">Error</div>
                                 </div>
+                                <div class="mb-3 full" th:if="${vectorAvailable}">
+                                    <div class="form-check">
+                                        <input class="form-check-input" id="enableVector" name="enableVector" type="checkbox" value="true">
+                                        <label class="form-check-label" for="enableVector">Enable pgvector</label>
+                                    </div>
+                                    <div class="form-hint">Installs <code>CREATE EXTENSION vector</code> — enables <code>vector(1536)</code>, <code>halfvec</code>, HNSW/IVFFlat indexes in this database.</div>
+                                </div>
+                                <div class="mb-3 full" th:if="${vectorAvailable == null or !vectorAvailable}">
+                                    <div class="form-hint text-body-secondary">pgvector not available on server — use <code>pgvector/pgvector:pg18</code> image or install <code>postgresql-*-pgvector</code>.</div>
+                                </div>
                                 <div class="form-actions">
                                     <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg me-1"></i> Create database</button>
                                     <a class="btn btn-outline-secondary" th:href="@{/provision}"><i class="bi bi-arrow-left me-1"></i> Cancel</a>

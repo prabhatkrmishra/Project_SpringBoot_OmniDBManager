@@ -57,6 +57,7 @@ public class ProvisionController {
             model.addAttribute("form", new CreateDatabaseForm("", DatabaseEngineType.POSTGRES, "", ""));
         }
         model.addAttribute("engine", DatabaseEngineType.POSTGRES);
+        model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
         return "provision-postgres";
     }
 

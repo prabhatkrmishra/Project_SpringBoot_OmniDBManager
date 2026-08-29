@@ -76,16 +76,40 @@ public class PostgresController {
     @PostMapping("/databases")
     @PreAuthorize("hasRole('ADMIN')")
     public String provision(@Valid @ModelAttribute("form") CreateDatabaseForm form,
-                            BindingResult bindingResult, Model model, RedirectAttributes redirectAttributes) {
+                            BindingResult bindingResult,
+                            @RequestParam(value = "enableVector", required = false, defaultValue = "false") boolean enableVector,
+                            Model model, RedirectAttributes redirectAttributes) {
         if (bindingResult.hasErrors()) {
             model.addAttribute("engine", DatabaseEngineType.POSTGRES);
+            model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
             return "provision-postgres";
         }
         CreateDatabaseForm withEngine = new CreateDatabaseForm(form.dbName(), DatabaseEngineType.POSTGRES, form.userName(), form.password());
         DatabaseInfo created = provisioningService.provision(withEngine);
-        redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned");
+        if (enableVector) {
+            try {
+                provisioningService.enableVector(DatabaseEngineType.POSTGRES, created.dbName());
+                redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned with pgvector");
+            } catch (Exception e) {
+                redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned (pgvector failed: " + e.getMessage() + ")");
+            }
+        } else {
+            redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned");
+        }
         redirectAttributes.addFlashAttribute("newCredentials", created);
         return "redirect:/postgres/databases/" + created.dbName();
+    }
+
+    @PostMapping("/databases/{dbName}/vector")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String enableVector(@PathVariable String dbName, RedirectAttributes redirectAttributes) {
+        try {
+            provisioningService.enableVector(DatabaseEngineType.POSTGRES, dbName);
+            redirectAttributes.addFlashAttribute("flashSuccess", "pgvector enabled on '" + dbName + "'");
+        } catch (Exception e) {
+            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+        }
+        return "redirect:/postgres/databases/" + dbName;
     }
 
     @GetMapping("/databases/{dbName}")
@@ -102,6 +126,8 @@ public class PostgresController {
             model.addAttribute("tables", java.util.List.of());
         }
         model.addAttribute("engine", DatabaseEngineType.POSTGRES);
+        model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
+        model.addAttribute("vectorEnabled", provisioningService.isVectorEnabled(DatabaseEngineType.POSTGRES, dbName));
         if (!model.containsAttribute("resetForm")) model.addAttribute("resetForm", new ResetPasswordForm(""));
         return "database";
     }

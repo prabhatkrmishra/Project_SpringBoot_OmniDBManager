@@ -41,7 +41,12 @@
                             <span class="badge badge-soft-secondary ms-2"
                                   th:if="${!database.provisioned}">external</span>
                         </h2>
-                        <div class="d-flex gap-2">
+                        <div class="d-flex gap-2 align-items-center">
+                            <span class="badge badge-soft-info" th:if="${vectorEnabled}">pgvector</span>
+                            <form method="post" th:action="@{/postgres/databases/{name}/vector(name=${database.dbName})}" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorAvailable and !vectorEnabled and canWrite}">
+                                <button class="btn btn-sm btn-outline-success" type="submit"><i class="bi bi-braces"></i> Enable pgvector</button>
+                            </form>
+                            <span class="badge badge-soft-secondary" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorAvailable and !vectorEnabled and !canWrite}">pgvector available</span>
                             <a class="btn btn-sm btn-outline-info"
                                th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/stats(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/stats(name=${database.dbName})} : @{/databases/{name}/stats(name=${database.dbName})})">
                                 <i class="bi bi-bar-chart-line"></i> Statistics
