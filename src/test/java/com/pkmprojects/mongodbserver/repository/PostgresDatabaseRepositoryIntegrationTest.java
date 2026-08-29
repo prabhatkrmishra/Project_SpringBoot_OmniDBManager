@@ -33,6 +33,8 @@ class PostgresDatabaseRepositoryIntegrationTest {
 
     @DynamicPropertySource
     static void props(DynamicPropertyRegistry r) {
+        r.add("app.mongo.enabled", () -> "false");
+        r.add("app.mysql.enabled", () -> "false");
         r.add("app.postgres.enabled", () -> "true");
         r.add("app.postgres.uri", () -> "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getMappedPort(5432) + "/postgres");
         r.add("POSTGRES_ROOT_USER", () -> "root");
