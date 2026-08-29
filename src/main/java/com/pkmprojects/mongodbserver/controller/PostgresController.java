@@ -84,6 +84,12 @@ public class PostgresController {
             model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
             return "provision-postgres";
         }
+        if (enableVector && !provisioningService.isVectorAvailable()) {
+            bindingResult.rejectValue("dbName", "vector.unavailable", "pgvector not available on server — use pgvector/pgvector:0.8.6-pg18-trixie image");
+            model.addAttribute("engine", DatabaseEngineType.POSTGRES);
+            model.addAttribute("vectorAvailable", false);
+            return "provision-postgres";
+        }
         CreateDatabaseForm withEngine = new CreateDatabaseForm(form.dbName(), DatabaseEngineType.POSTGRES, form.userName(), form.password());
         DatabaseInfo created = provisioningService.provision(withEngine);
         if (enableVector) {
@@ -91,7 +97,7 @@ public class PostgresController {
                 provisioningService.enableVector(DatabaseEngineType.POSTGRES, created.dbName());
                 redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned with pgvector");
             } catch (Exception e) {
-                redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned (pgvector failed: " + e.getMessage() + ")");
+                redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned (pgvector failed: " + e.getMessage() + ") — retry via Enable pgvector on detail page");
             }
         } else {
             redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned");
@@ -128,6 +134,7 @@ public class PostgresController {
         model.addAttribute("engine", DatabaseEngineType.POSTGRES);
         model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
         model.addAttribute("vectorEnabled", provisioningService.isVectorEnabled(DatabaseEngineType.POSTGRES, dbName));
+        model.addAttribute("vectorVersion", provisioningService.vectorVersion(DatabaseEngineType.POSTGRES, dbName));
         if (!model.containsAttribute("resetForm")) model.addAttribute("resetForm", new ResetPasswordForm(""));
         return "database";
     }

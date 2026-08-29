@@ -42,11 +42,11 @@
                                   th:if="${!database.provisioned}">external</span>
                         </h2>
                         <div class="d-flex gap-2 align-items-center">
-                            <span class="badge badge-soft-info" th:if="${vectorEnabled}">pgvector</span>
-                            <form method="post" th:action="@{/postgres/databases/{name}/vector(name=${database.dbName})}" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorAvailable and !vectorEnabled and canWrite}">
+                            <span class="badge badge-soft-info" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorEnabled}" th:title="${vectorVersion != null ? 'pgvector ' + vectorVersion : 'pgvector'}">pgvector<span th:if="${vectorVersion != null}" th:text="' ' + ${vectorVersion}"></span></span>
+                            <form method="post" th:action="@{/postgres/databases/{name}/vector(name=${database.dbName})}" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorAvailable == true and vectorEnabled != true and canWrite}" th:attr="data-confirm='Enable pgvector on ' + ${database.dbName} + '?'">
                                 <button class="btn btn-sm btn-outline-success" type="submit"><i class="bi bi-braces"></i> Enable pgvector</button>
                             </form>
-                            <span class="badge badge-soft-secondary" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorAvailable and !vectorEnabled and !canWrite}">pgvector available</span>
+                            <span class="badge badge-soft-secondary" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorAvailable == true and vectorEnabled != true and !canWrite}">pgvector available</span>
                             <a class="btn btn-sm btn-outline-info"
                                th:href="${database.engineType != null and database.engineType.name() == 'POSTGRES'} ? @{/postgres/databases/{name}/stats(name=${database.dbName})} : (${database.engineType != null and database.engineType.name() == 'MYSQL'} ? @{/mysql/databases/{name}/stats(name=${database.dbName})} : @{/databases/{name}/stats(name=${database.dbName})})">
                                 <i class="bi bi-bar-chart-line"></i> Statistics

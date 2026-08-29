@@ -4,11 +4,12 @@
 #   docker compose up -d
 services:
   postgres:
-    image: pgvector/pgvector:pg18
+    image: pgvector/pgvector:0.8.6-pg18-trixie
     container_name: omnidb-postgres
     restart: unless-stopped
     ports:
       - "127.0.0.1:9813:5432"
+    shm_size: 1g
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -17,7 +18,7 @@ services:
     tmpfs:
       - /tmp
       - /run/postgresql
-    user: "70:70"
+    user: "999:999"
     # Enterprise hardening: scram-sha-256 is PG18 default; explicit command keeps it
     # pinned even if image defaults change.
     # TLS (verify-full with CA) — uncomment and provide certs:

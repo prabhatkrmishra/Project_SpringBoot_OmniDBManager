@@ -48,6 +48,13 @@ public class PostgresDatabaseRepository {
         perDbDataSources.clear();
     }
 
+    private void evictPool(String dbName) {
+        HikariDataSource ds = perDbDataSources.remove(dbName);
+        if (ds != null) {
+            try { ds.close(); } catch (Exception ignored) {}
+        }
+    }
+
     public static String quoteIdentifier(String identifier) {
         return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
@@ -135,15 +142,14 @@ public class PostgresDatabaseRepository {
             hds.setDriverClassName("org.postgresql.Driver");
             hds.setMaximumPoolSize(2);
             hds.setMinimumIdle(0);
-            hds.setConnectionTimeout(3000);
+            hds.setConnectionTimeout(10000);
             hds.setValidationTimeout(2000);
             hds.setIdleTimeout(30000);
             hds.setMaxLifetime(120000);
-            hds.setConnectionTestQuery("SELECT 1");
             return hds;
         });
         JdbcTemplate tpl = new JdbcTemplate(ds);
-        tpl.setQueryTimeout(5);
+        tpl.setQueryTimeout(10);
         return tpl;
     }
 
@@ -216,6 +222,7 @@ public class PostgresDatabaseRepository {
             jdbcTemplate.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()", (rs, rowNum) -> null, dbName);
         } catch (Exception ignored) {
         }
+        evictPool(dbName);
         jdbcTemplate.execute("DROP DATABASE IF EXISTS " + quoteIdentifier(dbName));
     }
 
@@ -272,6 +279,7 @@ public class PostgresDatabaseRepository {
                     "SELECT COUNT(*) FROM pg_available_extensions WHERE name = 'vector'", Integer.class);
             return c != null && c > 0;
         } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(PostgresDatabaseRepository.class).warn("isVectorAvailable failed", e);
             return false;
         }
     }
@@ -279,9 +287,10 @@ public class PostgresDatabaseRepository {
     public boolean isVectorEnabled(String dbName) {
         try {
             Integer c = jdbcFor(dbName).queryForObject(
-                    "SELECT COUNT(*) FROM pg_extension WHERE extname = 'vector'", Integer.class);
+                    "SELECT COUNT(*) FROM pg_catalog.pg_extension WHERE extname = 'vector'", Integer.class);
             return c != null && c > 0;
         } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(PostgresDatabaseRepository.class).debug("isVectorEnabled({}) failed", dbName, e);
             return false;
         }
     }
@@ -293,7 +302,7 @@ public class PostgresDatabaseRepository {
     public String vectorVersion(String dbName) {
         try {
             return jdbcFor(dbName).queryForObject(
-                    "SELECT extversion FROM pg_extension WHERE extname = 'vector'", String.class);
+                    "SELECT extversion FROM pg_catalog.pg_extension WHERE extname = 'vector'", String.class);
         } catch (Exception e) {
             return null;
         }

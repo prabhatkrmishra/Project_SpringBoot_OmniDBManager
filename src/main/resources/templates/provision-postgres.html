@@ -44,13 +44,13 @@
                                 </div>
                                 <div class="mb-3 full" th:if="${vectorAvailable}">
                                     <div class="form-check">
-                                        <input class="form-check-input" id="enableVector" name="enableVector" type="checkbox" value="true">
+                                        <input class="form-check-input" id="enableVector" name="enableVector" type="checkbox" value="true" th:checked="${param.enableVector != null}">
                                         <label class="form-check-label" for="enableVector">Enable pgvector</label>
                                     </div>
-                                    <div class="form-hint">Installs <code>CREATE EXTENSION vector</code> — enables <code>vector(1536)</code>, <code>halfvec</code>, HNSW/IVFFlat indexes in this database.</div>
+                                    <div class="form-hint">Installs <code>CREATE EXTENSION vector</code> — enables <code>vector(1536)</code>, <code>halfvec</code> (≤4000d), HNSW/IVFFlat indexes. See <a href="https://github.com/pgvector/pgvector#hnsw" target="_blank">pgvector docs</a>.</div>
                                 </div>
-                                <div class="mb-3 full" th:if="${vectorAvailable == null or !vectorAvailable}">
-                                    <div class="form-hint text-body-secondary">pgvector not available on server — use <code>pgvector/pgvector:pg18</code> image or install <code>postgresql-*-pgvector</code>.</div>
+                                <div class="mb-3 full" th:unless="${vectorAvailable}">
+                                    <div class="form-hint text-body-secondary">pgvector not available on server — use <code>pgvector/pgvector:0.8.6-pg18-trixie</code> image or install <code>postgresql-*-pgvector</code>.</div>
                                 </div>
                                 <div class="form-actions">
                                     <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg me-1"></i> Create database</button>
