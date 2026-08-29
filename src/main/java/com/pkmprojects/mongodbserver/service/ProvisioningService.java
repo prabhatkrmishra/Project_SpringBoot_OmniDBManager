@@ -479,6 +479,9 @@ public class ProvisioningService {
 
     public List<DatabaseInfo> listDatabases() {
         // Legacy: Mongo only for backward compat
+        if (mongoEngine.isEmpty()) {
+            return java.util.List.of();
+        }
         return listDatabases(DatabaseEngineType.MONGO);
     }
 
