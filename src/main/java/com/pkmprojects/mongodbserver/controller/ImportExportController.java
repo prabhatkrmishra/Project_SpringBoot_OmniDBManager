@@ -5,6 +5,7 @@ import com.pkmprojects.mongodbserver.service.ImportExportService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -24,6 +25,7 @@ import java.io.IOException;
  * are never destructive.
  */
 @Controller
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class ImportExportController {
 
     private final ImportExportService importExportService;

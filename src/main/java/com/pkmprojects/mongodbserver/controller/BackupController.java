@@ -5,6 +5,7 @@ import com.pkmprojects.mongodbserver.service.BackupService;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -27,6 +28,7 @@ import java.time.format.DateTimeFormatter;
  * checkbox, which the controller passes to {@link BackupService}.
  */
 @Controller
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class BackupController {
 
     private static final DateTimeFormatter FILENAME_TIMESTAMP =

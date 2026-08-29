@@ -39,6 +39,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @WebMvcTest(BackupController.class)
 @Import({SecurityConfig.class, BackupControllerTest.SecurityTestConfig.class})
+@org.springframework.test.context.TestPropertySource(properties = "app.mongo.enabled=true")
 class BackupControllerTest {
 
     @Autowired

@@ -39,6 +39,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  */
 @WebMvcTest(ImportExportController.class)
 @Import({SecurityConfig.class, ImportExportControllerTest.SecurityTestConfig.class})
+@org.springframework.test.context.TestPropertySource(properties = "app.mongo.enabled=true")
 class ImportExportControllerTest {
 
     @Autowired
