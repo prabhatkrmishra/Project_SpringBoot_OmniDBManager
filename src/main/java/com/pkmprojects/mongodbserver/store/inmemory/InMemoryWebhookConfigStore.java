@@ -56,6 +56,9 @@ public class InMemoryWebhookConfigStore implements WebhookConfigStore {
                 }
             } catch (Exception ignored) {}
         }
+        if (entity.getId() == null) {
+            throw new IllegalArgumentException("Webhook config id must not be null");
+        }
         byId.put(entity.getId(), entity);
         return entity;
     }

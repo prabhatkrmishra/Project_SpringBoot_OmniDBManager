@@ -6,6 +6,7 @@ import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
+import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter;
 import com.pkmprojects.mongodbserver.store.AuditStore;
@@ -223,7 +224,7 @@ public class BackupService {
         // per-database lock as the provisioning lifecycle so a concurrent
         // delete/provision cannot interleave (e.g. resurrecting a just-dropped
         // database as a zombie with no metadata or user).
-        return databaseLocks.withLock(dbName, () -> {
+        return databaseLocks.withLock(DatabaseEngineType.MONGO, dbName, () -> {
             try {
                 if (mongoDatabaseRepository.databaseExists(dbName)) {
                     for (String existing : mongoDatabaseRepository.listCollectionNames(dbName)) {

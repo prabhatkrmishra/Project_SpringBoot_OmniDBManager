@@ -6,6 +6,7 @@ import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
+import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter;
 import com.pkmprojects.mongodbserver.store.AuditStore;
@@ -205,7 +206,7 @@ public class ImportExportService {
         // the same per-database lock as the provisioning lifecycle so a
         // concurrent delete cannot drop the collection (or database) between
         // the check and the inserts.
-        return databaseLocks.withLock(dbName, () -> {
+        return databaseLocks.withLock(DatabaseEngineType.MONGO, dbName, () -> {
             requireCollection(dbName, collectionName);
             try {
                 for (int i = 0; i < documents.size(); i += INSERT_BATCH_SIZE) {
