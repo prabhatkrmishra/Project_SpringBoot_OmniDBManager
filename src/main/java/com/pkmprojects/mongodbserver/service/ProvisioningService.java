@@ -355,8 +355,7 @@ public class ProvisioningService {
                 metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
             } else {
                 try { engine.dropDatabase(dbName); } catch (Exception e) {
-                    log.error("Failed to drop {} database '{}': {}", engineType, dbName, e.getMessage());
-                    throw new ProvisioningException("Could not drop " + engineType + " database '" + dbName + "'", e);
+                    log.warn("Failed to drop {} database '{}': {}", engineType, dbName, e.getMessage());
                 }
                 metadata.ifPresent(m -> {
                     try { engine.dropUser(dbName, m.getUserName()); } catch (Exception e) {

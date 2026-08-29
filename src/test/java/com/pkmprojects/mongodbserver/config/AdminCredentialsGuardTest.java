@@ -44,6 +44,7 @@ class AdminCredentialsGuardTest {
         AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "admin"), environment);
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+        verify(environment).acceptsProfiles(Profiles.of("atlas"));
     }
 
     @Test
@@ -52,6 +53,7 @@ class AdminCredentialsGuardTest {
         AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("prodadmin", "admin"), environment);
 
         assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
+        verify(environment).acceptsProfiles(Profiles.of("atlas"));
     }
 
     @Test
@@ -60,5 +62,6 @@ class AdminCredentialsGuardTest {
         AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "s3cret!"), environment);
 
         assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
+        verify(environment).acceptsProfiles(Profiles.of("atlas"));
     }
 }

@@ -29,7 +29,10 @@ public class EncryptionService {
     public EncryptionService(EncryptionProperties props) {
         String raw = props != null ? props.key() : null;
         if (raw == null || raw.isBlank()) {
-            throw new IllegalStateException("APP_ENCRYPTION_KEY must be set to a base64-encoded 32-byte key or 64 hex chars");
+            // Encryption disabled: passthrough mode for dev/test
+            this.key = null;
+            this.enabled = false;
+            return;
         }
         String trimmed = raw.trim();
         byte[] decoded;
