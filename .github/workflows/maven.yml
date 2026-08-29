@@ -26,14 +26,14 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Verify Docker availability
+        run: docker info
+
       - name: Build with Maven
         env:
           MAVEN_OPTS: "-Xmx2048m -XX:+UseG1GC"
-          # Enable Testcontainers to use the host Docker daemon
           TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE: /var/run/docker.sock
-          # Disable Ryuk (test container cleanup sidecar) which can fail in CI
-          TESTCONTAINERS_RYUK_DISABLED: "true"
-        run: mvn -B clean package -DargLine=-Xmx1024m --file pom.xml
+        run: mvn -B clean package --file pom.xml
 
       # Uploads the full dependency graph to GitHub to improve the quality of
       # Dependabot alerts this repository can receive.

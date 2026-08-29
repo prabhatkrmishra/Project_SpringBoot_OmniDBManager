@@ -46,7 +46,7 @@ jobs:
         run: |
           VERSION="${{ steps.tag.outputs.version }}"
           mvn -B versions:set -DnewVersion="$VERSION" -DgenerateBackupPoms=false
-          mvn -B clean package -DskipTests -Dmaven.test.skip=true -DargLine=-Xmx1024m
+          mvn -B clean package --file pom.xml
         env:
           MAVEN_OPTS: "-Xmx2048m -XX:+UseG1GC"
 

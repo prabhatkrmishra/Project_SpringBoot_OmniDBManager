@@ -2,10 +2,10 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent>
+<parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>4.1.0</version>
+        <version>4.1.1</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.pkmprojects</groupId>
@@ -34,6 +34,8 @@
         <java.version>25</java.version>
         <postgresql.version>42.7.13</postgresql.version>
         <mockito.version>5.20.0</mockito.version>
+        <!-- Empty argLine property so Surefire's @{argLine} placeholder can be resolved safely -->
+        <argLine/>
     </properties>
     <dependencies>
         <dependency>
@@ -179,7 +181,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>-Xmx1024m -XX:+UseG1GC -XX:ReservedCodeCacheSize=256m -Xshare:off -Dnet.bytebuddy.experimental=true -javaagent:${org.mockito:mockito-core:jar}</argLine>
+                    <argLine>@{argLine} -Xmx1024m -XX:+UseG1GC -XX:ReservedCodeCacheSize=256m -Xshare:off -Dnet.bytebuddy.experimental=true --enable-native-access=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED -javaagent:${org.mockito:mockito-core:jar}</argLine>
                     <forkCount>1</forkCount>
                     <reuseForks>true</reuseForks>
                 </configuration>
