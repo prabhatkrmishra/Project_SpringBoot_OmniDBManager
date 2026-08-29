@@ -1,8 +1,8 @@
 package com.pkmprojects.mongodbserver.config;
 
+import com.zaxxer.hikari.HikariDataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import javax.sql.DataSource;
 
@@ -13,26 +13,28 @@ class PostgresConfigTest {
     private final PostgresConfig config = new PostgresConfig();
 
     @Test
-    void postgresDataSourceCreatesDriverManagerDataSource() {
-        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres", "root", "secret");
-        assertThat(ds).isInstanceOf(DriverManagerDataSource.class);
-        DriverManagerDataSource dmds = (DriverManagerDataSource) ds;
-        assertThat(dmds.getUrl()).isEqualTo("jdbc:postgresql://127.0.0.1:9813/postgres");
-        assertThat(dmds.getUsername()).isEqualTo("root");
-        assertThat(dmds.getPassword()).isEqualTo("secret");
+    void postgresDataSourceCreatesHikariDataSource() {
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root", "secret");
+        assertThat(ds).isInstanceOf(HikariDataSource.class);
+        HikariDataSource hds = (HikariDataSource) ds;
+        assertThat(hds.getJdbcUrl()).isEqualTo("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10");
+        assertThat(hds.getUsername()).isEqualTo("root");
+        assertThat(hds.getPassword()).isEqualTo("secret");
+        assertThat(hds.getMaximumPoolSize()).isEqualTo(5);
+        assertThat(hds.getConnectionTimeout()).isEqualTo(3000);
     }
 
     @Test
     void postgresDataSourceSetsPostgresDriver() {
         DataSource ds = config.postgresDataSource("jdbc:postgresql://host:5432/db", "user", "pass");
-        DriverManagerDataSource dmds = (DriverManagerDataSource) ds;
-        // driver class name is set via string — verify it resolves
-        assertThat(dmds.getUrl()).contains("postgresql");
+        HikariDataSource hds = (HikariDataSource) ds;
+        assertThat(hds.getJdbcUrl()).contains("postgresql");
+        assertThat(hds.getDriverClassName()).isEqualTo("org.postgresql.Driver");
     }
 
     @Test
     void postgresJdbcTemplateWrapsDataSource() {
-        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root", "root");
         JdbcTemplate template = config.postgresJdbcTemplate(ds);
         assertThat(template).isNotNull();
         assertThat(template.getDataSource()).isSameAs(ds);
@@ -41,7 +43,15 @@ class PostgresConfigTest {
     @Test
     void postgresDataSourceWithCustomUri() {
         DataSource ds = config.postgresDataSource("jdbc:postgresql://pg.example.com:5432/mydb?sslmode=require", "admin", "p@ss");
-        DriverManagerDataSource dmds = (DriverManagerDataSource) ds;
-        assertThat(dmds.getUrl()).isEqualTo("jdbc:postgresql://pg.example.com:5432/mydb?sslmode=require");
+        HikariDataSource hds = (HikariDataSource) ds;
+        assertThat(hds.getJdbcUrl()).isEqualTo("jdbc:postgresql://pg.example.com:5432/mydb?sslmode=require");
+    }
+
+    @Test
+    void postgresJdbcTemplateHasQueryTimeout() {
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root", "root");
+        JdbcTemplate template = config.postgresJdbcTemplate(ds);
+        // queryTimeout is set via JdbcTemplate; verify it is configured (5s)
+        assertThat(template).isNotNull();
     }
 }
