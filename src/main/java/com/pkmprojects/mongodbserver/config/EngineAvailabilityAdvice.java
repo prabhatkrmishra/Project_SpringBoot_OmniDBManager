@@ -6,11 +6,11 @@ import org.springframework.web.bind.annotation.ModelAttribute;
 
 /**
  * Exposes engine availability (.env controlled) to every Thymeleaf view.
- * Postgres/MySQL are optional and <strong>off by default</strong>
- * ({@code app.postgres.enabled=false}, {@code app.mysql.enabled=false});
- * they become visible only when {@code POSTGRES_ENABLED=true} /
- * {@code MYSQL_ENABLED=true} is set in {@code .env}. MongoDB is the
- * metadata store and always enabled. Views use
+ * All engines are optional and <strong>off by default</strong>
+ * ({@code app.mongo.enabled=false}, {@code app.postgres.enabled=false},
+ * {@code app.mysql.enabled=false}); they become visible only when
+ * {@code MONGO_ENABLED=true} / {@code POSTGRES_ENABLED=true} /
+ * {@code MYSQL_ENABLED=true} is set in {@code .env}. Views use
  * {@code postgresEnabled/mysqlEnabled/mongoEnabled} to hide cards,
  * sections and nav links for disabled engines; if all optional engines
  * are hidden the dashboard still renders correctly.
