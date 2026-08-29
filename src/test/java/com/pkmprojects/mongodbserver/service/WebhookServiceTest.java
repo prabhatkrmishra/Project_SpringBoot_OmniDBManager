@@ -137,6 +137,34 @@ class WebhookServiceTest {
     }
 
     @Test
+    void createWebhookRejectsBlockedHostLocalhost() {
+        assertThatThrownBy(() -> service.createWebhook(new WebhookForm("Slack", "http://localhost/hooks", null, List.of())))
+                .isInstanceOf(NameNotAllowedException.class)
+                .hasMessageContaining("blocked host");
+    }
+
+    @Test
+    void createWebhookRejectsBlockedHost127001() {
+        assertThatThrownBy(() -> service.createWebhook(new WebhookForm("Slack", "http://127.0.0.1/hooks", null, List.of())))
+                .isInstanceOf(NameNotAllowedException.class)
+                .hasMessageContaining("blocked host");
+    }
+
+    @Test
+    void createWebhookRejectsMetadataEndpoint() {
+        assertThatThrownBy(() -> service.createWebhook(new WebhookForm("Slack", "http://169.254.169.254/latest/meta-data/", null, List.of())))
+                .isInstanceOf(NameNotAllowedException.class)
+                .hasMessageContaining("blocked host");
+    }
+
+    @Test
+    void createWebhookRejectsPrivateIp() {
+        assertThatThrownBy(() -> service.createWebhook(new WebhookForm("Slack", "http://10.0.0.1/hooks", null, List.of())))
+                .isInstanceOf(NameNotAllowedException.class)
+                .hasMessageContaining("private/internal IP");
+    }
+
+    @Test
     void toggleWebhookEnablesAndAudits() {
         when(webhookConfigStore.findById("w1")).thenReturn(Optional.of(webhook("w1", "Slack", false)));
 

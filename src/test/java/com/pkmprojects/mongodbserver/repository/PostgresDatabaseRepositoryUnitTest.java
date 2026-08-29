@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 class PostgresDatabaseRepositoryUnitTest {
@@ -71,5 +72,32 @@ class PostgresDatabaseRepositoryUnitTest {
     void urlForWithDifferentHostAndPort() {
         assertThat(repo("jdbc:postgresql://db.example.com:5432/postgres").urlFor("myapp"))
                 .isEqualTo("jdbc:postgresql://db.example.com:5432/myapp");
+    }
+
+    // ── SQL injection defense ────────────────────────────────────────
+
+    @Test
+    void createUserEscapesSingleQuoteInPassword() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        repo.createUser("mydb", "bob", "it'sasecret");
+        org.mockito.Mockito.verify(jdbc).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.contains("'it''sasecret'")));
+    }
+
+    @Test
+    void createUserRejectsPasswordWithSemicolon() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        assertThatThrownBy(() -> repo.createUser("mydb", "bob", "pass;word"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disallowed SQL metacharacters");
+    }
+
+    @Test
+    void updateUserPasswordEscapesSingleQuote() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        repo.updateUserPassword("mydb", "bob", "new'pass");
+        org.mockito.Mockito.verify(jdbc).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.contains("'new''pass'")));
     }
 }
