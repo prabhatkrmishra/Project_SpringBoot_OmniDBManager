@@ -21,6 +21,7 @@ import com.pkmprojects.mongodbserver.service.ProvisioningService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
@@ -45,6 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @WebMvcTest(PostgresController.class)
 @Import({SecurityConfig.class, PostgresControllerTest.SecurityTestConfig.class})
+@TestPropertySource(properties = "app.postgres.enabled=true")
 class PostgresControllerTest {
 
     private static final Instant NOW = Instant.parse("2026-08-16T10:00:00Z");
