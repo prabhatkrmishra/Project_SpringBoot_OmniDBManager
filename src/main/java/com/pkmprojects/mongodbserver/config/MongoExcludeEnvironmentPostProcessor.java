@@ -20,6 +20,13 @@ import org.slf4j.LoggerFactory;
  * <p>Runs with {@link Ordered#LOWEST_PRECEDENCE} so it executes after
  * {@code springboot4-dotenv} and other environment post-processors that may
  * populate properties from {@code .env}.</p>
+ *
+ * <p>Only Mongo is handled here because Spring Boot auto-configures Mongo
+ * eagerly when the driver is on the classpath. Postgres and MySQL do not
+ * have equivalent auto-configuration; their {@code DataSource} beans are
+ * provided by explicit {@code @Configuration} classes gated with
+ * {@code @ConditionalOnProperty}, and the main class already excludes
+ * {@code DataSourceAutoConfiguration}.</p>
  */
 public class MongoExcludeEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 
