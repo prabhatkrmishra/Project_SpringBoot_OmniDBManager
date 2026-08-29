@@ -9,6 +9,15 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9813:5432"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /run/postgresql
+    user: "70:70"
     # Enterprise hardening: scram-sha-256 is PG18 default; explicit command keeps it
     # pinned even if image defaults change.
     # TLS (verify-full with CA) — uncomment and provide certs:
@@ -51,6 +60,13 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9815:8080"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     depends_on:

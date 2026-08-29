@@ -9,6 +9,15 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9816:3306"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /var/run/mysqld
+    user: "999:999"
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
     volumes:
@@ -27,6 +36,13 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9817:80"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
     environment:
       PMA_HOST: mysql
       PMA_PORT: 3306

@@ -39,6 +39,13 @@ server:
       # are async and do not hold request threads.
       max: 20
       min-spare: 2
+  servlet:
+    session:
+      cookie:
+        secure: true
+        http-only: true
+        same-site: strict
+      timeout: 15m
 
 management:
   endpoints:
@@ -47,8 +54,8 @@ management:
         include: health,info,metrics
   endpoint:
     health:
-      show-details: when-authorized
-      show-components: always
+      show-details: never
+      show-components: never
 
 # Web app admin account (from .env)
 app:

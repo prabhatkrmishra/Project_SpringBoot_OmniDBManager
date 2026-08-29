@@ -9,6 +9,14 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:9812:27017"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    user: "999:999"
     # Small-VPS guardrails (see README "Memory footprint"):
     # - WiredTiger cache pinned instead of the auto-tuned default, so mongod
     #   cannot grow into the JVM's share of RAM.
@@ -40,6 +48,13 @@ services:
     ports:
       # Loopback only: the UI is reachable through the admin app proxy at /mongo-express
       - "127.0.0.1:9814:8081"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
     environment:
       ME_CONFIG_MONGODB_URL: mongodb://${MONGODB_ROOT_USERNAME:-root}:${MONGODB_ROOT_PASSWORD:-root}@mongo:27017/?authSource=admin
       ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
