@@ -21,11 +21,13 @@ docker compose -f compose.mysql.yaml up -d
 
 ---
 
-## 1. App Login — Web UI `http://127.0.0.1:9811/login`
+## 1. App Login — Web UI `http://127.0.0.1:9811/login` or `https://your-domain.com/login`
+
+> **Access:** Local dev → `http://127.0.0.1:9811/login` (loopback, `SERVER_ADDRESS=127.0.0.1`). Public → `https://your-domain.com/login` via reverse proxy / Cloudflare Tunnel that forwards to `127.0.0.1:9811` (see §2 Condition B). The app itself always binds `127.0.0.1:9811`; public DNS is at the proxy, not the app.
 
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
-| `APP_ADMIN_USERNAME` | `admin` | **Yes** | `application.yml:app.admin.username` → `SecurityConfig.userDetailsService()` | Single admin login. Stored as `BCrypt` in-memory user. |
+| `APP_ADMIN_USERNAME` | `admin` | **Yes** | `application.yml:app.admin.username` → `SecurityConfig.userDetailsService()` | Single admin login. Stored as `BCrypt` in-memory user. Works for both local and public URL — same credentials. |
 | `APP_ADMIN_PASSWORD` | `change-me-now` | **Yes** | same | **Must change.** Anyone with this can provision/delete all databases. |
 
 ## 2. Network / HTTPS
