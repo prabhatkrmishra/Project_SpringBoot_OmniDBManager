@@ -1,8 +1,8 @@
 package com.pkmprojects.mongodbserver.controller;
 
-import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.service.HealthService;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
+import com.pkmprojects.mongodbserver.store.AuditStore;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,13 +14,13 @@ import org.springframework.web.bind.annotation.GetMapping;
 public class DashboardController {
 
     private final ProvisioningService provisioningService;
-    private final AuditLogRepository auditLogRepository;
+    private final AuditStore auditStore;
     private final HealthService healthService;
 
-    public DashboardController(ProvisioningService provisioningService, AuditLogRepository auditLogRepository,
+    public DashboardController(ProvisioningService provisioningService, AuditStore auditStore,
                                HealthService healthService) {
         this.provisioningService = provisioningService;
-        this.auditLogRepository = auditLogRepository;
+        this.auditStore = auditStore;
         this.healthService = healthService;
     }
 
@@ -70,7 +70,7 @@ public class DashboardController {
         model.addAttribute("postgresEnabled", health.postgresEnabled());
         model.addAttribute("mysqlReachable", health.mysqlReachable());
         model.addAttribute("mysqlEnabled", health.mysqlEnabled());
-        model.addAttribute("recentActivity", auditLogRepository.findTop10ByOrderByPerformedAtDesc());
+        model.addAttribute("recentActivity", auditStore.findTop10ByOrderByPerformedAtDesc());
         model.addAttribute("engine", null);
         return "index";
     }

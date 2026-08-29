@@ -5,8 +5,8 @@ import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
-import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
+import com.pkmprojects.mongodbserver.store.AuditStore;
 import org.bson.Document;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,7 +46,7 @@ class PostgresBackupServiceTest {
     @Mock
     private PostgresDatabaseRepository postgresRepository;
     @Mock
-    private AuditLogRepository auditLogRepository;
+    private AuditStore auditStore;
     @Mock
     private ApplicationEventPublisher publisher;
 
@@ -57,7 +57,7 @@ class PostgresBackupServiceTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         service = new PostgresBackupService(postgresRepository, new DatabaseNameValidator(),
-                auditLogRepository, publisher, new DatabaseLockRegistry(), Clock.fixed(NOW, ZoneOffset.UTC));
+                auditStore, publisher, new DatabaseLockRegistry(), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @AfterEach
@@ -126,7 +126,7 @@ class PostgresBackupServiceTest {
         assertThat(rows.get(0).getString("name")).isEqualTo("alice");
 
         ArgumentCaptor<AuditEvent> captor = ArgumentCaptor.forClass(AuditEvent.class);
-        verify(auditLogRepository).save(captor.capture());
+        verify(auditStore).save(captor.capture());
         assertThat(captor.getValue().getEventType()).isEqualTo(AuditEvent.BACKUP_CREATED);
         verify(publisher).publishEvent(any(AuditEventRecorded.class));
     }
@@ -269,7 +269,7 @@ class PostgresBackupServiceTest {
         verify(postgresRepository).executeInDatabase(eq("myapp"), contains("CREATE TABLE"));
         verify(postgresRepository).truncateTable("myapp", "users");
         verify(postgresRepository).insertRows(eq("myapp"), eq("users"), eq(List.of("name", "email")), anyList());
-        verify(auditLogRepository).save(any(AuditEvent.class));
+        verify(auditStore).save(any(AuditEvent.class));
     }
 
     @Test

@@ -6,8 +6,8 @@ import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
-import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
+import com.pkmprojects.mongodbserver.store.AuditStore;
 import com.pkmprojects.mongodbserver.util.Json;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -45,20 +45,20 @@ public class PostgresBackupService {
 
     private final PostgresDatabaseRepository postgresRepository;
     private final DatabaseNameValidator nameValidator;
-    private final AuditLogRepository auditLogRepository;
+    private final AuditStore auditStore;
     private final ApplicationEventPublisher publisher;
     private final DatabaseLockRegistry locks;
     private final Clock clock;
 
     public PostgresBackupService(@Autowired(required = false) PostgresDatabaseRepository postgresRepository,
                                  DatabaseNameValidator nameValidator,
-                                 AuditLogRepository auditLogRepository,
+                                 AuditStore auditStore,
                                  ApplicationEventPublisher publisher,
                                  DatabaseLockRegistry locks,
                                  Clock clock) {
         this.postgresRepository = postgresRepository;
         this.nameValidator = nameValidator;
-        this.auditLogRepository = auditLogRepository;
+        this.auditStore = auditStore;
         this.publisher = publisher;
         this.locks = locks;
         this.clock = clock;
@@ -285,7 +285,7 @@ public class PostgresBackupService {
 
     private void audit(String type, String dbName) {
         AuditEvent e = new AuditEvent(type, dbName, DatabaseEngineType.POSTGRES, null, currentUser(), clock.instant());
-        auditLogRepository.save(e);
+        auditStore.save(e);
         publisher.publishEvent(new AuditEventRecorded(e));
     }
 

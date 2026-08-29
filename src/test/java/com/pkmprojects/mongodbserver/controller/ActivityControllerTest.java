@@ -3,14 +3,13 @@ package com.pkmprojects.mongodbserver.controller;
 import com.pkmprojects.mongodbserver.config.AdminProperties;
 import com.pkmprojects.mongodbserver.config.SecurityConfig;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
+import com.pkmprojects.mongodbserver.store.AuditStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -19,7 +18,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -38,13 +37,18 @@ class ActivityControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private MongoTemplate mongoTemplate;
+    private AuditStore auditStore;
+
+    private void stubAudit(long count, List<AuditEvent> events) {
+        when(auditStore.countFiltered(any(), any(), any(), any(), any())).thenReturn(count);
+        when(auditStore.findFiltered(any(), any(), any(), any(), any(),
+                anyInt(), anyInt(), any())).thenReturn(events);
+    }
 
     @Test
     void activityPageRendersWithPagination() throws Exception {
         AuditEvent event = new AuditEvent(AuditEvent.PROVISION, "myapp", "appuser", "admin", NOW);
-        when(mongoTemplate.count(any(Query.class), eq(AuditEvent.class))).thenReturn(1L);
-        when(mongoTemplate.find(any(Query.class), eq(AuditEvent.class))).thenReturn(List.of(event));
+        stubAudit(1L, List.of(event));
 
         mockMvc.perform(get("/activity").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -56,8 +60,7 @@ class ActivityControllerTest {
 
     @Test
     void activityPageRendersForNonAdminReader() throws Exception {
-        when(mongoTemplate.count(any(Query.class), eq(AuditEvent.class))).thenReturn(0L);
-        when(mongoTemplate.find(any(Query.class), eq(AuditEvent.class))).thenReturn(List.of());
+        stubAudit(0L, List.of());
 
         mockMvc.perform(get("/activity").with(user("bob").roles("USER")))
                 .andExpect(status().isOk())
@@ -74,8 +77,7 @@ class ActivityControllerTest {
     @Test
     void filteredByEventTypeReturnsMatchingEvents() throws Exception {
         AuditEvent event = new AuditEvent(AuditEvent.DELETE, "myapp", "appuser", "admin", NOW);
-        when(mongoTemplate.count(any(Query.class), eq(AuditEvent.class))).thenReturn(1L);
-        when(mongoTemplate.find(any(Query.class), eq(AuditEvent.class))).thenReturn(List.of(event));
+        stubAudit(1L, List.of(event));
 
         mockMvc.perform(get("/activity").param("eventType", "DELETE").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -87,8 +89,7 @@ class ActivityControllerTest {
     @Test
     void filteredByDbNameReturnsMatchingEvents() throws Exception {
         AuditEvent event = new AuditEvent(AuditEvent.PROVISION, "myapp", "appuser", "admin", NOW);
-        when(mongoTemplate.count(any(Query.class), eq(AuditEvent.class))).thenReturn(1L);
-        when(mongoTemplate.find(any(Query.class), eq(AuditEvent.class))).thenReturn(List.of(event));
+        stubAudit(1L, List.of(event));
 
         mockMvc.perform(get("/activity").param("dbName", "myapp").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
@@ -98,8 +99,7 @@ class ActivityControllerTest {
 
     @Test
     void filterStatePersistedInFormInputs() throws Exception {
-        when(mongoTemplate.count(any(Query.class), eq(AuditEvent.class))).thenReturn(0L);
-        when(mongoTemplate.find(any(Query.class), eq(AuditEvent.class))).thenReturn(List.of());
+        stubAudit(0L, List.of());
 
         mockMvc.perform(get("/activity")
                         .param("eventType", "PROVISION")
@@ -116,8 +116,7 @@ class ActivityControllerTest {
 
     @Test
     void emptyFiltersShowAllEvents() throws Exception {
-        when(mongoTemplate.count(any(Query.class), eq(AuditEvent.class))).thenReturn(0L);
-        when(mongoTemplate.find(any(Query.class), eq(AuditEvent.class))).thenReturn(List.of());
+        stubAudit(0L, List.of());
 
         mockMvc.perform(get("/activity").with(user("admin").roles("ADMIN")))
                 .andExpect(status().isOk())
