@@ -88,13 +88,13 @@ app:
     password: ${MONGO_EXPRESS_PASSWORD:admin}
   postgres:
     enabled: ${POSTGRES_ENABLED:false}
-    uri: ${POSTGRES_URI:jdbc:postgresql://127.0.0.1:9813/postgres}
+    uri: ${POSTGRES_URI:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}
     public-host: ${POSTGRES_PUBLIC_HOST:}
     public-tls: ${POSTGRES_PUBLIC_TLS:false}
     public-sslmode: ${POSTGRES_PUBLIC_SSLMODE:require}
   mysql:
     enabled: ${MYSQL_ENABLED:false}
-    uri: ${MYSQL_URI:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    uri: ${MYSQL_URI:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000}
     public-host: ${MYSQL_PUBLIC_HOST:}
     public-tls: ${MYSQL_PUBLIC_TLS:false}
     public-sslmode: ${MYSQL_PUBLIC_SSLMODE:REQUIRED}

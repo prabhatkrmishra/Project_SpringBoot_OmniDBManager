@@ -1,14 +1,16 @@
 package com.pkmprojects.mongodbserver.repository;
 
+import com.zaxxer.hikari.HikariDataSource;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.stereotype.Repository;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Data-access gateway for PostgreSQL server administration via JDBC.
@@ -26,15 +28,24 @@ public class PostgresDatabaseRepository {
     private final String postgresUri;
     private final String username;
     private final String password;
+    private final ConcurrentHashMap<String, HikariDataSource> perDbDataSources = new ConcurrentHashMap<>();
 
     public PostgresDatabaseRepository(@org.springframework.beans.factory.annotation.Qualifier("postgresJdbcTemplate") JdbcTemplate jdbcTemplate,
-                                      @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String postgresUri,
+                                      @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}") String postgresUri,
                                       @Value("${POSTGRES_ROOT_USER:root}") String username,
                                       @Value("${POSTGRES_ROOT_PASSWORD:root}") String password) {
         this.jdbcTemplate = jdbcTemplate;
         this.postgresUri = postgresUri;
         this.username = username;
         this.password = password;
+    }
+
+    @PreDestroy
+    void closePerDbPools() {
+        for (HikariDataSource ds : perDbDataSources.values()) {
+            try { ds.close(); } catch (Exception ignored) {}
+        }
+        perDbDataSources.clear();
     }
 
     public static String quoteIdentifier(String identifier) {
@@ -116,13 +127,24 @@ public class PostgresDatabaseRepository {
     }
 
     private JdbcTemplate jdbcFor(String dbName) {
-        String url = urlFor(dbName);
-        DriverManagerDataSource ds = new DriverManagerDataSource();
-        ds.setDriverClassName("org.postgresql.Driver");
-        ds.setUrl(url);
-        ds.setUsername(username);
-        ds.setPassword(password);
-        return new JdbcTemplate(ds);
+        HikariDataSource ds = perDbDataSources.computeIfAbsent(dbName, key -> {
+            HikariDataSource hds = new HikariDataSource();
+            hds.setJdbcUrl(urlFor(key));
+            hds.setUsername(username);
+            hds.setPassword(password);
+            hds.setDriverClassName("org.postgresql.Driver");
+            hds.setMaximumPoolSize(2);
+            hds.setMinimumIdle(0);
+            hds.setConnectionTimeout(3000);
+            hds.setValidationTimeout(2000);
+            hds.setIdleTimeout(30000);
+            hds.setMaxLifetime(120000);
+            hds.setConnectionTestQuery("SELECT 1");
+            return hds;
+        });
+        JdbcTemplate tpl = new JdbcTemplate(ds);
+        tpl.setQueryTimeout(5);
+        return tpl;
     }
 
     String urlFor(String dbName) {
