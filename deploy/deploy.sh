@@ -13,7 +13,7 @@ SPRING_PROFILE="${SPRING_PROFILE:-}"
 # native overhead at this heap size), compact object headers (JDK 25+), and
 # capped metaspace / code cache / thread stacks. Override by exporting
 # JAVA_OPTS before running this script.
-JAVA_OPTS="${JAVA_OPTS:--Xms64m -Xmx256m -XX:+UseSerialGC -XX:+UseCompactObjectHeaders -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=96m -Xss512k}"
+JAVA_OPTS="${JAVA_OPTS:--Xms64m -Xmx256m -XX:+UseSerialGC -XX:+UseCompactObjectHeaders -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=96m -Xss512k -Djava.security.egd=file:/dev/./urandom}"
 
 # ─── Check latest release from GitHub ────────────────────────────────────────
 LATEST_TAG=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" \
