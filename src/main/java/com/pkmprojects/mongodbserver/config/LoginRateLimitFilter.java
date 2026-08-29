@@ -45,10 +45,9 @@ public class LoginRateLimitFilter extends OncePerRequestFilter {
         // so the user sees a proper UI and can retry after Retry-After.
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setHeader("Retry-After", String.valueOf(Math.max(1, properties.window().toSeconds())));
-        // Browser form POST always expects HTML — redirect to login with flag.
-        // Use 429 + Retry-After for API clients, redirect for browsers.
+        // Only redirect browsers that explicitly accept HTML; API/test clients get 429.
         String accept = request.getHeader("Accept");
-        boolean wantsHtml = accept == null || accept.contains("text/html") || accept.contains("*/*");
+        boolean wantsHtml = accept != null && accept.contains("text/html");
         if (wantsHtml) {
             response.sendRedirect(request.getContextPath() + "/login?rateLimited");
             return;
