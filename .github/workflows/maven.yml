@@ -29,6 +29,17 @@ jobs:
       - name: Verify Docker availability
         run: docker info
 
+      - name: Check for secrets in repo
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "ERROR: .env is tracked in git. Remove it immediately."
+            exit 1
+          fi
+          if [ -f .env ]; then
+            echo "ERROR: .env exists in workspace. Remove it before building."
+            exit 1
+          fi
+
       - name: Build with Maven
         env:
           MAVEN_OPTS: "-Xmx2048m -XX:+UseG1GC"

@@ -41,6 +41,18 @@ public class PostgresDatabaseRepository {
         return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
+    private static String escapePassword(String password) {
+        if (password == null) {
+            throw new IllegalArgumentException("Password must not be null");
+        }
+        // Defense-in-depth: reject passwords containing SQL metacharacters that could
+        // enable injection if the driver ever allows multi-statement execution.
+        if (password.contains(";") || password.contains("--") || password.contains("/*") || password.contains("*/")) {
+            throw new IllegalArgumentException("Password contains disallowed SQL metacharacters");
+        }
+        return password.replace("'", "''");
+    }
+
     public void executeInDatabase(String dbName, String sql) {
         jdbcFor(dbName).execute(sql);
     }
@@ -186,7 +198,7 @@ public class PostgresDatabaseRepository {
     }
 
     public void createUser(String dbName, String userName, String password) {
-        String escaped = password.replace("'", "''");
+        String escaped = escapePassword(password);
         jdbcTemplate.execute("CREATE ROLE " + quoteIdentifier(userName) + " WITH LOGIN PASSWORD '" + escaped + "'");
     }
 
@@ -205,7 +217,7 @@ public class PostgresDatabaseRepository {
     }
 
     public void updateUserPassword(String dbName, String userName, String newPassword) {
-        String escaped = newPassword.replace("'", "''");
+        String escaped = escapePassword(newPassword);
         jdbcTemplate.execute("ALTER ROLE " + quoteIdentifier(userName) + " WITH PASSWORD '" + escaped + "'");
     }
 

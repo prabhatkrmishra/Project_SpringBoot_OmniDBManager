@@ -29,11 +29,7 @@ public class EncryptionService {
     public EncryptionService(EncryptionProperties props) {
         String raw = props != null ? props.key() : null;
         if (raw == null || raw.isBlank()) {
-            this.key = null;
-            this.enabled = false;
-            org.slf4j.LoggerFactory.getLogger(EncryptionService.class)
-                    .warn("APP_ENCRYPTION_KEY not set - stored passwords will be plaintext (dev only)");
-            return;
+            throw new IllegalStateException("APP_ENCRYPTION_KEY must be set to a base64-encoded 32-byte key or 64 hex chars");
         }
         String trimmed = raw.trim();
         byte[] decoded;

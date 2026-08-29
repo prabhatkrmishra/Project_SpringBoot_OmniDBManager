@@ -16,7 +16,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -30,6 +32,11 @@ import java.util.List;
 public class WebhookService {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookService.class);
+
+    private static final String[] BLOCKED_HOSTS = {
+            "localhost", "127.0.0.1", "::1", "0.0.0.0", "0:0:0:0:0:0:0:0",
+            "169.254.169.254", "metadata.google.internal", "metadata.internal"
+    };
 
     private final WebhookConfigStore webhookConfigStore;
     private final AuditStore auditStore;
@@ -135,9 +142,33 @@ public class WebhookService {
                     || uri.getHost() == null) {
                 throw new NameNotAllowedException("Webhook URL must be a valid http(s) URL");
             }
+            String host = uri.getHost();
+            for (String blocked : BLOCKED_HOSTS) {
+                if (blocked.equalsIgnoreCase(host)) {
+                    throw new NameNotAllowedException("Webhook URL targets a blocked host: " + host);
+                }
+            }
+            if (isPrivateIp(host)) {
+                throw new NameNotAllowedException("Webhook URL resolves to a private/internal IP address");
+            }
         } catch (IllegalArgumentException e) {
             throw new NameNotAllowedException("Webhook URL must be a valid http(s) URL");
         }
+    }
+
+    private static boolean isPrivateIp(String host) {
+        try {
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            for (InetAddress addr : addresses) {
+                if (addr.isLoopbackAddress() || addr.isSiteLocalAddress() || addr.isLinkLocalAddress()
+                        || addr.isAnyLocalAddress()) {
+                    return true;
+                }
+            }
+        } catch (UnknownHostException e) {
+            // Cannot resolve yet; allow validation to proceed, delivery will fail later
+        }
+        return false;
     }
 
     private void audit(String eventType, String webhookName, Instant performedAt) {

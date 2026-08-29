@@ -42,6 +42,18 @@ public class MysqlDatabaseRepository {
         return "'" + userName.replace("'", "''") + "'@'%'";
     }
 
+    private static String escapePassword(String password) {
+        if (password == null) {
+            throw new IllegalArgumentException("Password must not be null");
+        }
+        // Defense-in-depth: reject passwords containing SQL metacharacters that could
+        // enable injection if the driver ever allows multi-statement execution.
+        if (password.contains(";") || password.contains("--") || password.contains("/*") || password.contains("*/")) {
+            throw new IllegalArgumentException("Password contains disallowed SQL metacharacters");
+        }
+        return password.replace("'", "''");
+    }
+
     public List<String> listDatabaseNames() {
         return jdbcTemplate.queryForList(
                 "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME NOT IN ('information_schema','mysql','performance_schema','sys') ORDER BY SCHEMA_NAME",
@@ -93,7 +105,7 @@ public class MysqlDatabaseRepository {
     }
 
     public void createUser(String dbName, String userName, String password) {
-        String escaped = password.replace("'", "''");
+        String escaped = escapePassword(password);
         jdbcTemplate.execute("CREATE USER " + quoteUser(userName) + " IDENTIFIED BY '" + escaped + "'");
     }
 
@@ -103,7 +115,7 @@ public class MysqlDatabaseRepository {
     }
 
     public void updateUserPassword(String dbName, String userName, String newPassword) {
-        String escaped = newPassword.replace("'", "''");
+        String escaped = escapePassword(newPassword);
         jdbcTemplate.execute("ALTER USER " + quoteUser(userName) + " IDENTIFIED BY '" + escaped + "'");
     }
 
