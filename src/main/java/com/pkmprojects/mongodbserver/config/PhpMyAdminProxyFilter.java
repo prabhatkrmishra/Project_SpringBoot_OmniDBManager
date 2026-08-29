@@ -33,9 +33,13 @@ public class PhpMyAdminProxyFilter extends OncePerRequestFilter {
     private final HttpClient http;
 
     public PhpMyAdminProxyFilter(@Value("${app.phpmyadmin.base-url:http://127.0.0.1:9817}") String baseUrl,
-                                 HttpClient httpClient) {
+                                 @org.springframework.beans.factory.annotation.Autowired(required = false) HttpClient httpClient) {
         this.targetBase = URI.create(baseUrl);
-        this.http = httpClient;
+        this.http = httpClient != null ? httpClient : HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .version(HttpClient.Version.HTTP_1_1)
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
     }
 
     @Override

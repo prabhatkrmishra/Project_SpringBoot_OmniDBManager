@@ -79,12 +79,16 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
     public MongoExpressProxyFilter(@Value("${app.mongo-express.base-url}") String baseUrl,
                                     @Value("${app.mongo-express.username}") String username,
                                     @Value("${app.mongo-express.password}") String password,
-                                    HttpClient httpClient) {
+                                    @org.springframework.beans.factory.annotation.Autowired(required = false) HttpClient httpClient) {
         this.targetBase = URI.create(baseUrl);
         String token = Base64.getEncoder().encodeToString(
                 (username + ":" + password).getBytes(StandardCharsets.UTF_8));
         this.authorization = "Basic " + token;
-        this.http = httpClient;
+        this.http = httpClient != null ? httpClient : HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .version(HttpClient.Version.HTTP_1_1)
+                .followRedirects(HttpClient.Redirect.NEVER)
+                .build();
     }
 
     /**
