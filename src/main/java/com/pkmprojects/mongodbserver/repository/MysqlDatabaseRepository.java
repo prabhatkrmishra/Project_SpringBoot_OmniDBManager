@@ -21,17 +21,11 @@ public class MysqlDatabaseRepository {
 
     private final JdbcTemplate jdbcTemplate;
     private final String mysqlUri;
-    private final String username;
-    private final String password;
 
     public MysqlDatabaseRepository(@org.springframework.beans.factory.annotation.Qualifier("mysqlJdbcTemplate") JdbcTemplate mysqlJdbcTemplate,
-                                   @Value("${app.mysql.uri:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}") String mysqlUri,
-                                   @Value("${MYSQL_ROOT_USER:root}") String username,
-                                   @Value("${MYSQL_ROOT_PASSWORD:root}") String password) {
+                                   @Value("${app.mysql.uri:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}") String mysqlUri) {
         this.jdbcTemplate = mysqlJdbcTemplate;
         this.mysqlUri = mysqlUri;
-        this.username = username;
-        this.password = password;
     }
 
     public static String quoteIdentifier(String identifier) {

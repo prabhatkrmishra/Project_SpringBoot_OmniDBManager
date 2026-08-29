@@ -59,7 +59,12 @@ public class MysqlStatisticsService {
         }
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<CompletableFuture<TableStats>> futures = tableNames.stream()
-                    .map(name -> CompletableFuture.supplyAsync(() -> tableStats(dbName, name), executor))
+                    .map(name -> CompletableFuture.supplyAsync(() -> tableStats(dbName, name), executor)
+                            .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                            .exceptionally(ex -> {
+                                log.warn("Timed out reading stats for MySQL {}.{}", dbName, name, ex);
+                                return new TableStats(name, 0, 0, 0, 0, null, null);
+                            }))
                     .toList();
             return futures.stream().map(MysqlStatisticsService::joinUnwrapping).toList();
         }

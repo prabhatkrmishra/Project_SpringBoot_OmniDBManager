@@ -39,6 +39,14 @@ server:
       # are async and do not hold request threads.
       max: 20
       min-spare: 2
+    # Timeouts to prevent thread starvation when PG/MySQL hang (Phase 2).
+    # connection-timeout is socket read timeout for HTTP; async timeout for SSE.
+    connection-timeout: 10s
+    accept-count: 100
+    max-connections: 100
+  mvc:
+    async:
+      request-timeout: 30s
   servlet:
     session:
       cookie:

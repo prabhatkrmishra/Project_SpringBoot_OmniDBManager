@@ -83,7 +83,12 @@ public class StatisticsService {
         }
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             List<CompletableFuture<CollectionStats>> futures = collectionNames.stream()
-                    .map(name -> CompletableFuture.supplyAsync(() -> collectionStats(dbName, name), executor))
+                    .map(name -> CompletableFuture.supplyAsync(() -> collectionStats(dbName, name), executor)
+                            .orTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                            .exceptionally(ex -> {
+                                log.warn("Timed out reading collStats for {}.{}", dbName, name, ex);
+                                throw new ProvisioningException("Timed out reading statistics for collection '" + name + "'", ex);
+                            }))
                     .toList();
             return futures.stream().map(StatisticsService::joinUnwrapping).toList();
         }
