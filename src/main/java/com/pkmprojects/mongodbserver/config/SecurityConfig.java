@@ -16,6 +16,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.header.writers.XContentTypeOptionsHeaderWriter;
 import org.springframework.security.web.header.writers.XXssProtectionHeaderWriter;
+import org.springframework.security.web.session.HttpSessionEventPublisher;
 
 /**
  * Form-login security: every page requires authentication, database provisioning
@@ -72,9 +73,16 @@ public class SecurityConfig {
                                 .preload(true)))
                 .sessionManagement(session -> session
                         .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
+                        .invalidSessionUrl("/login?expired")
                         .maximumSessions(1)
-                        .maxSessionsPreventsLogin(true));
+                        .maxSessionsPreventsLogin(false)
+                        .expiredUrl("/login?expired"));
         return http.build();
+    }
+
+    @Bean
+    HttpSessionEventPublisher httpSessionEventPublisher() {
+        return new HttpSessionEventPublisher();
     }
 
     /**

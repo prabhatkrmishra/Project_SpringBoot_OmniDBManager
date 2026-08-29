@@ -50,9 +50,10 @@ server:
   servlet:
     session:
       cookie:
-        secure: ${SERVER_COOKIE_SECURE:true}
+        # Default false for local http (127.0.0.1:9811); set SERVER_COOKIE_SECURE=true behind TLS proxy.
+        secure: ${SERVER_COOKIE_SECURE:false}
         http-only: true
-        same-site: ${SERVER_COOKIE_SAME_SITE:strict}
+        same-site: ${SERVER_COOKIE_SAME_SITE:lax}
       timeout: 15m
 
 management:

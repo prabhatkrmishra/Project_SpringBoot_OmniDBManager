@@ -14,19 +14,22 @@ import org.springframework.stereotype.Service;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Assembles server health metrics for the health dashboard.
  *
- * <p>Mongo reachability comes from {@code ping}; Postgres reachability from
- * {@code SELECT 1} when {@code app.postgres.enabled=true}. Version/uptime/
- * connections require {@code serverStatus} and degrade to {@code null} when
- * unavailable.</p>
+ * <p>Mongo reachability comes from {@code ping}; Postgres/MySQL reachability from
+ * {@code SELECT 1} when enabled. Version/uptime/connections degrade to {@code null}
+ * when unavailable. All pings run in parallel with a 3s timeout so a hung
+ * PG/MySQL never blocks the dashboard (Phase 5).</p>
  */
 @Service
 public class HealthService {
 
     private static final Logger log = LoggerFactory.getLogger(HealthService.class);
+    private static final long PING_TIMEOUT_SECONDS = 3;
 
     private final Optional<MongoDatabaseRepository> mongoDatabaseRepository;
     private final boolean mongoEnabled;
@@ -58,7 +61,29 @@ public class HealthService {
     }
 
     public ServerHealth getHealth() {
-        boolean mongoReachable = mongoEnabled && pingMongo();
+        // Parallel pings with hard timeout — never block dashboard >3s per engine
+        CompletableFuture<Boolean> mongoFuture = CompletableFuture.supplyAsync(this::pingMongo)
+                .orTimeout(PING_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    log.warn("MongoDB ping timed out or failed", e);
+                    return false;
+                });
+        CompletableFuture<Boolean> pgFuture = CompletableFuture.supplyAsync(this::pingPostgres)
+                .orTimeout(PING_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    log.warn("Postgres ping timed out or failed", e);
+                    return false;
+                });
+        CompletableFuture<Boolean> mysqlFuture = CompletableFuture.supplyAsync(this::pingMysql)
+                .orTimeout(PING_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    log.warn("MySQL ping timed out or failed", e);
+                    return false;
+                });
+
+        boolean mongoReachable = joinBool(mongoFuture);
+        boolean postgresReachable = joinBool(pgFuture);
+        boolean mysqlReachable = joinBool(mysqlFuture);
 
         String version = null;
         Long uptimeSeconds = null;
@@ -90,41 +115,49 @@ public class HealthService {
             }
         }
 
-        boolean postgresReachable = false;
         String postgresVersion = null;
-        if (postgresEnabled && postgresRepository.isPresent()) {
+        if (postgresReachable) {
             try {
-                postgresRepository.get().ping();
-                postgresReachable = true;
-                try {
-                    postgresVersion = postgresRepository.get().getVersion();
-                } catch (Exception e) {
-                    log.debug("Could not read Postgres version", e);
-                }
+                postgresVersion = postgresRepository.get().getVersion();
             } catch (Exception e) {
-                log.warn("Postgres ping failed", e);
+                log.debug("Could not read Postgres version", e);
             }
         }
 
-        boolean mysqlReachable = false;
         String mysqlVersion = null;
-        if (mysqlEnabled && mysqlRepository.isPresent()) {
+        if (mysqlReachable) {
             try {
-                mysqlRepository.get().ping();
-                mysqlReachable = true;
-                try {
-                    mysqlVersion = mysqlRepository.get().getVersion();
-                } catch (Exception e) {
-                    log.debug("Could not read MySQL version", e);
-                }
+                mysqlVersion = mysqlRepository.get().getVersion();
             } catch (Exception e) {
-                log.warn("MySQL ping failed", e);
+                log.debug("Could not read MySQL version", e);
             }
         }
 
         return new ServerHealth(mongoReachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
                 mongoReachable, postgresReachable, postgresVersion, postgresEnabled,
                 mysqlReachable, mysqlVersion, mysqlEnabled, mongoEnabled);
+    }
+
+    private boolean pingPostgres() {
+        if (!postgresEnabled || postgresRepository.isEmpty()) return false;
+        try {
+            postgresRepository.get().ping();
+            return true;
+        } catch (Exception e) {
+            log.warn("Postgres ping failed", e);
+            return false;
+        }
+    }
+
+    private boolean pingMysql() {
+        if (!mysqlEnabled || mysqlRepository.isEmpty()) return false;
+        try {
+            mysqlRepository.get().ping();
+            return true;
+        } catch (Exception e) {
+            log.warn("MySQL ping failed", e);
+            return false;
+        }
     }
 
     private boolean pingMongo() {
@@ -134,6 +167,14 @@ public class HealthService {
             return true;
         } catch (Exception e) {
             log.warn("MongoDB ping failed", e);
+            return false;
+        }
+    }
+
+    private static boolean joinBool(CompletableFuture<Boolean> f) {
+        try {
+            return f.join();
+        } catch (Exception e) {
             return false;
         }
     }
