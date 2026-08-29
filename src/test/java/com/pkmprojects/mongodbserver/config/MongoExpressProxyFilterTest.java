@@ -15,7 +15,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MongoExpressProxyFilterTest {
 
     private final MongoExpressProxyFilter filter =
-            new MongoExpressProxyFilter("http://127.0.0.1:9814/mongo-express", "admin", "admin");
+            new MongoExpressProxyFilter("http://127.0.0.1:9814/mongo-express", "admin", "admin",
+                    java.net.http.HttpClient.newHttpClient());
 
     @Test
     void rejectsUnparseableRequestPathWith400() throws Exception {

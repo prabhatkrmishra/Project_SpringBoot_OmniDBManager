@@ -32,12 +32,10 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
     private final URI targetBase;
     private final HttpClient http;
 
-    public AdminerProxyFilter(@Value("${app.adminer.base-url:http://127.0.0.1:9815}") String baseUrl) {
+    public AdminerProxyFilter(@Value("${app.adminer.base-url:http://127.0.0.1:9815}") String baseUrl,
+                              HttpClient httpClient) {
         this.targetBase = URI.create(baseUrl);
-        this.http = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
+        this.http = httpClient;
     }
 
     @Override

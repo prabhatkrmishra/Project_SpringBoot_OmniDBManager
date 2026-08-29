@@ -32,12 +32,10 @@ public class PhpMyAdminProxyFilter extends OncePerRequestFilter {
     private final URI targetBase;
     private final HttpClient http;
 
-    public PhpMyAdminProxyFilter(@Value("${app.phpmyadmin.base-url:http://127.0.0.1:9817}") String baseUrl) {
+    public PhpMyAdminProxyFilter(@Value("${app.phpmyadmin.base-url:http://127.0.0.1:9817}") String baseUrl,
+                                 HttpClient httpClient) {
         this.targetBase = URI.create(baseUrl);
-        this.http = HttpClient.newBuilder()
-                .followRedirects(HttpClient.Redirect.NEVER)
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
+        this.http = httpClient;
     }
 
     @Override
