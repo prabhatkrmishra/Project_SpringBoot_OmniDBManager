@@ -30,7 +30,7 @@ public class DatabaseController {
 
     public DatabaseController(ProvisioningService provisioningService,
                               @Autowired(required = false) ExplorationService explorationService,
-                              StatisticsService statisticsService) {
+                              @Autowired(required = false) StatisticsService statisticsService) {
         this.provisioningService = provisioningService;
         this.explorationService = explorationService;
         this.statisticsService = statisticsService;
@@ -144,7 +144,11 @@ public class DatabaseController {
     @GetMapping("/databases/{dbName}/stats")
     public String stats(@PathVariable String dbName, Model model) {
         model.addAttribute("database", provisioningService.getDatabase(dbName));
-        model.addAttribute("stats", statisticsService.getDatabaseStats(dbName));
+        if (statisticsService != null) {
+            model.addAttribute("stats", statisticsService.getDatabaseStats(dbName));
+        } else {
+            model.addAttribute("stats", null);
+        }
         return "stats";
     }
 

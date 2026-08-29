@@ -41,7 +41,7 @@ public class MonitorController {
     private final Optional<MysqlMonitorService> mysqlMonitorService;
     private final ScheduledExecutorService scheduler;
 
-    public MonitorController(MonitorService monitorService,
+    public MonitorController(@Autowired(required = false) MonitorService monitorService,
                              @Autowired(required = false) PostgresMonitorService postgresMonitorService,
                              @Autowired(required = false) MysqlMonitorService mysqlMonitorService) {
         this.monitorService = monitorService;
@@ -95,6 +95,9 @@ public class MonitorController {
                 var snapshot = mysqlMonitorService.get().getSnapshot();
                 data = mysqlMonitorService.get().serialize(snapshot);
             } else {
+                if (monitorService == null) {
+                    throw new IllegalStateException("Mongo monitoring is not available");
+                }
                 var snapshot = monitorService.getSnapshot();
                 data = monitorService.serialize(snapshot);
             }
