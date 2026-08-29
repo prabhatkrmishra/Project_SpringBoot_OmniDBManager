@@ -42,9 +42,9 @@ server:
   servlet:
     session:
       cookie:
-        secure: true
+        secure: ${SERVER_COOKIE_SECURE:true}
         http-only: true
-        same-site: strict
+        same-site: ${SERVER_COOKIE_SAME_SITE:strict}
       timeout: 15m
 
 management:
