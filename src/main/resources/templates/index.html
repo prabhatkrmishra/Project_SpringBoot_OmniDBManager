@@ -20,7 +20,7 @@
                 </div>
 
                 <div class="row g-3 mb-4">
-                    <div class="col-sm-6 col-xl-3">
+                    <div class="col-sm-6 col-xl-3" th:if="${mongoEnabled}">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
                                 <div class="stat-icon stat-icon-violet"><i class="bi bi-database"></i></div>
@@ -34,7 +34,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-sm-6 col-xl-3">
+                    <div class="col-sm-6 col-xl-3" th:if="${postgresEnabled}">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
                                 <div class="stat-icon" style="background: rgb(51 103 145 / 0.12); color:#336791"><i class="bi bi-server"></i></div>
@@ -42,14 +42,13 @@
                                     <div class="d-flex align-items-center gap-2">
                                         <div class="stat-value mb-0" th:text="${postgresCount}">0</div>
                                         <span th:class="${postgresReachable} ? 'live-dot' : 'live-dot-off'" th:title="${postgresReachable} ? 'reachable' : 'unreachable'"></span>
-                                        <span class="badge badge-soft-secondary" style="font-size:0.6rem" th:if="${postgresEnabled == false}">disabled</span>
                                     </div>
                                     <div class="stat-label">PostgreSQL</div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="col-sm-6 col-xl-3">
+                    <div class="col-sm-6 col-xl-3" th:if="${mysqlEnabled}">
                         <div class="card stat-card h-100">
                             <div class="card-body d-flex align-items-center gap-3">
                                 <div class="stat-icon" style="background: rgb(0 117 143 / 0.12); color:#00758F"><i class="bi bi-hdd-stack"></i></div>
@@ -57,7 +56,6 @@
                                     <div class="d-flex align-items-center gap-2">
                                         <div class="stat-value mb-0" th:text="${mysqlCount}">0</div>
                                         <span th:class="${mysqlReachable} ? 'live-dot' : 'live-dot-off'" th:title="${mysqlReachable} ? 'reachable' : 'unreachable'"></span>
-                                        <span class="badge badge-soft-secondary" style="font-size:0.6rem" th:if="${mysqlEnabled == false}">disabled</span>
                                     </div>
                                     <div class="stat-label">MySQL</div>
                                 </div>
@@ -78,7 +76,7 @@
                 </div>
 
                 <!-- MongoDB list -->
-                <section class="card shadow-sm mb-4">
+                <section class="card shadow-sm mb-4" th:if="${mongoEnabled}">
                     <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
                         <h2 class="h5 mb-0"><i class="bi bi-database text-primary me-2"></i> MongoDB Databases</h2>
                         <a class="btn btn-sm btn-outline-primary" th:href="@{/mongo}">View all</a>
@@ -115,7 +113,7 @@
                 </section>
 
                 <!-- PostgreSQL list -->
-                <section class="card shadow-sm mb-4">
+                <section class="card shadow-sm mb-4" th:if="${postgresEnabled}">
                     <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
                         <h2 class="h5 mb-0"><i class="bi bi-server me-2" style="color:#336791"></i> PostgreSQL Databases</h2>
                         <a class="btn btn-sm btn-outline-primary" th:href="@{/postgres}">View all</a>
@@ -151,7 +149,7 @@
                 </section>
 
                 <!-- MySQL list -->
-                <section class="card shadow-sm mb-4">
+                <section class="card shadow-sm mb-4" th:if="${mysqlEnabled}">
                     <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
                         <h2 class="h5 mb-0"><i class="bi bi-hdd-stack me-2" style="color:#00758F"></i> MySQL Databases</h2>
                         <a class="btn btn-sm btn-outline-primary" th:href="@{/mysql}">View all</a>

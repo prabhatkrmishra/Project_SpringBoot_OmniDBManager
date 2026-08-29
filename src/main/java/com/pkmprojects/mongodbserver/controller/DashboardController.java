@@ -58,6 +58,7 @@ public class DashboardController {
         model.addAttribute("mysqlDatabases", mysqlDbs);
         model.addAttribute("mysqlCount", mysqlDbs.size());
 
+        model.addAttribute("mongoEnabled", health.mongoEnabled());
         model.addAttribute("mongoReachable", health.mongoReachable());
         model.addAttribute("postgresReachable", health.postgresReachable());
         model.addAttribute("postgresEnabled", health.postgresEnabled());

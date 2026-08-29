@@ -56,20 +56,20 @@
                     <i class="bi bi-plus-circle"></i> Provision
                 </a>
                 <div class="d-flex gap-2 px-1 mt-1">
-                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/mongo}" th:if="${canWrite}">MongoDB</a>
-                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/postgres}" th:if="${canWrite}">PostgreSQL</a>
-                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/mysql}" th:if="${canWrite}">MySQL</a>
+                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/mongo}" th:if="${canWrite and mongoEnabled}">MongoDB</a>
+                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/postgres}" th:if="${canWrite and postgresEnabled}">PostgreSQL</a>
+                    <a class="btn btn-sm btn-outline-light flex-fill" th:href="@{/provision/mysql}" th:if="${canWrite and mysqlEnabled}">MySQL</a>
                 </div>
 
                 <div class="sidebar-section-label mt-3">Databases</div>
-                <a class="sidebar-link" th:href="@{/mongo}"><i class="bi bi-database"></i> MongoDB</a>
-                <a class="sidebar-link" th:href="@{/postgres}"><i class="bi bi-server"></i> PostgreSQL</a>
-                <a class="sidebar-link" th:href="@{/mysql}"><i class="bi bi-hdd-stack"></i> MySQL</a>
+                <a class="sidebar-link" th:href="@{/mongo}" th:if="${mongoEnabled}"><i class="bi bi-database"></i> MongoDB</a>
+                <a class="sidebar-link" th:href="@{/postgres}" th:if="${postgresEnabled}"><i class="bi bi-server"></i> PostgreSQL</a>
+                <a class="sidebar-link" th:href="@{/mysql}" th:if="${mysqlEnabled}"><i class="bi bi-hdd-stack"></i> MySQL</a>
 
                 <div class="sidebar-section-label mt-3">Explorers</div>
-                <a class="sidebar-link" th:href="@{/mongo-express}"><i class="bi bi-box-arrow-up-right"></i> Mongo Express</a>
-                <a class="sidebar-link" th:href="@{/adminer}"><i class="bi bi-box-arrow-up-right"></i> Adminer</a>
-                <a class="sidebar-link" th:href="@{/phpmyadmin}"><i class="bi bi-box-arrow-up-right"></i> phpMyAdmin</a>
+                <a class="sidebar-link" th:href="@{/mongo-express}" th:if="${mongoEnabled}"><i class="bi bi-box-arrow-up-right"></i> Mongo Express</a>
+                <a class="sidebar-link" th:href="@{/adminer}" th:if="${postgresEnabled}"><i class="bi bi-box-arrow-up-right"></i> Adminer</a>
+                <a class="sidebar-link" th:href="@{/phpmyadmin}" th:if="${mysqlEnabled}"><i class="bi bi-box-arrow-up-right"></i> phpMyAdmin</a>
             </div>
 
             <!-- Engine-scoped nav -->

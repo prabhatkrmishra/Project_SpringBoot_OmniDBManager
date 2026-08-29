@@ -12,7 +12,7 @@
                     <p class="text-body-secondary">Choose an engine to provision a new database.</p>
                 </div>
                 <div class="row g-4">
-                    <div class="col-md-4">
+                    <div class="col-md-4" th:if="${mongoEnabled}">
                         <div class="card provision-card h-100">
                             <div class="card-body">
                                 <h5><i class="bi bi-database text-primary me-2"></i>MongoDB</h5>
@@ -23,7 +23,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-4" th:if="${postgresEnabled}">
                         <div class="card provision-card provision-card-pg h-100">
                             <div class="card-body">
                                 <h5><i class="bi bi-server me-2" style="color:#336791"></i>PostgreSQL</h5>
@@ -34,7 +34,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-4" th:if="${mysqlEnabled}">
                         <div class="card provision-card provision-card-mysql h-100">
                             <div class="card-body">
                                 <h5><i class="bi bi-hdd-stack me-2" style="color:#00758F"></i>MySQL</h5>
