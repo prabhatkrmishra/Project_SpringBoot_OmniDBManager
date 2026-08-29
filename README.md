@@ -32,9 +32,9 @@ Most teams run MongoDB *and* PostgreSQL *and* MySQL. OmniDB Manager unifies them
 
 ## Stack
 
-- **Java 25**, **Spring Boot 4.1.0** (`spring-boot-starter-webmvc`, `data-mongodb`, `jdbc`, `security`, `validation`, `actuator`, `micrometer`)
+- **Java 25**, **Spring Boot 4.1.1** (`spring-boot-starter-webmvc`, `data-mongodb`, `jdbc`, `security`, `validation`, `actuator`, `micrometer`)
 - **MongoDB 8** + **PostgreSQL 18.6-alpine** + **MySQL 8.4** + **Adminer 6.0.1-standalone** + **phpMyAdmin 5.2**
-- **PostgreSQL driver 42.7.5** + **MySQL Connector/J 9.4**, **HikariCP** (via `spring-boot-starter-jdbc`)
+- **PostgreSQL driver 42.7.13** + **MySQL Connector/J 9.4**, **HikariCP** (via `spring-boot-starter-jdbc`)
 - **Thymeleaf** + **Bootstrap 5.3.8** + **Bootstrap Icons 1.13.1**
 - **Docker Compose** for local stack; **Testcontainers** for integration tests
 
