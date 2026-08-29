@@ -39,7 +39,7 @@ class MysqlDatabaseRepositoryUnitTest {
     @Test
     void createUserEscapesSingleQuoteInPassword() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
-        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC", "root", "root");
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
         repo.createUser("mydb", "bob", "it'sasecret");
         verify(jdbc).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.contains("'it''sasecret'")));
     }
@@ -47,7 +47,7 @@ class MysqlDatabaseRepositoryUnitTest {
     @Test
     void createUserRejectsPasswordWithSemicolon() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
-        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC", "root", "root");
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
         assertThatThrownBy(() -> repo.createUser("mydb", "bob", "pass;word"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("disallowed SQL metacharacters");
@@ -56,7 +56,7 @@ class MysqlDatabaseRepositoryUnitTest {
     @Test
     void updateUserPasswordEscapesSingleQuote() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
-        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC", "root", "root");
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
         repo.updateUserPassword("mydb", "bob", "new'pass");
         verify(jdbc).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.contains("'new''pass'")));
     }
