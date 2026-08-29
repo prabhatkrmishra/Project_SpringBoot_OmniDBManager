@@ -78,7 +78,7 @@ public class MonitorController {
         if (eng.equals("mysql") && mysqlMonitorService.isEmpty()) eng = "mongo";
         if (!eng.equals("postgres") && !eng.equals("mysql")) eng = "mongo";
         String finalEng = eng;
-        SseEmitter emitter = new SseEmitter(30_000L);
+        SseEmitter emitter = new SseEmitter(60_000L);
         // Heartbeat comment every 15s keeps proxies from buffering/closing idle SSE.
         ScheduledFuture<?> heartbeat = scheduler.scheduleWithFixedDelay(() -> {
             try {

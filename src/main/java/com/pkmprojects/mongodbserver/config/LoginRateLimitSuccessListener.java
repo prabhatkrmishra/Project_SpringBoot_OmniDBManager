@@ -13,11 +13,9 @@ import org.springframework.stereotype.Component;
 public class LoginRateLimitSuccessListener {
 
     private final LoginRateLimiter rateLimiter;
-    private final LoginRateLimitProperties properties;
 
-    public LoginRateLimitSuccessListener(LoginRateLimiter rateLimiter, LoginRateLimitProperties properties) {
+    public LoginRateLimitSuccessListener(LoginRateLimiter rateLimiter) {
         this.rateLimiter = rateLimiter;
-        this.properties = properties;
     }
 
     @EventListener
