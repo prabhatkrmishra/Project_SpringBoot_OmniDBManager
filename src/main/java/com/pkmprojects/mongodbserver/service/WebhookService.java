@@ -6,8 +6,8 @@ import com.pkmprojects.mongodbserver.error.WebhookNotFoundException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
-import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
-import com.pkmprojects.mongodbserver.repository.WebhookConfigRepository;
+import com.pkmprojects.mongodbserver.store.AuditStore;
+import com.pkmprojects.mongodbserver.store.WebhookConfigStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -31,16 +31,16 @@ public class WebhookService {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookService.class);
 
-    private final WebhookConfigRepository webhookConfigRepository;
-    private final AuditLogRepository auditLogRepository;
+    private final WebhookConfigStore webhookConfigStore;
+    private final AuditStore auditStore;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final Clock clock;
 
-    public WebhookService(WebhookConfigRepository webhookConfigRepository,
-                          AuditLogRepository auditLogRepository,
+    public WebhookService(WebhookConfigStore webhookConfigStore,
+                          AuditStore auditStore,
                           ApplicationEventPublisher applicationEventPublisher, Clock clock) {
-        this.webhookConfigRepository = webhookConfigRepository;
-        this.auditLogRepository = auditLogRepository;
+        this.webhookConfigStore = webhookConfigStore;
+        this.auditStore = auditStore;
         this.applicationEventPublisher = applicationEventPublisher;
         this.clock = clock;
     }
@@ -49,7 +49,7 @@ public class WebhookService {
      * @return all webhook endpoints, oldest first
      */
     public List<WebhookConfig> listWebhooks() {
-        return webhookConfigRepository.findAll(Sort.by(Sort.Direction.ASC, "createdAt"));
+        return webhookConfigStore.findAll(Sort.by(Sort.Direction.ASC, "createdAt"));
     }
 
     /**
@@ -63,7 +63,7 @@ public class WebhookService {
         String secret = normalizeSecret(form.secret());
         WebhookConfig webhook = new WebhookConfig(
                 form.name().trim(), form.url().trim(), secret, eventTypes, true, clock.instant());
-        WebhookConfig saved = webhookConfigRepository.save(webhook);
+        WebhookConfig saved = webhookConfigStore.save(webhook);
         audit(AuditEvent.WEBHOOK_CREATED, saved.getName(), clock.instant());
         log.info("Created webhook '{}'", saved.getName());
         return saved;
@@ -77,7 +77,7 @@ public class WebhookService {
     public void toggleWebhook(String id) {
         WebhookConfig webhook = requireWebhook(id);
         webhook.setEnabled(!webhook.isEnabled());
-        webhookConfigRepository.save(webhook);
+        webhookConfigStore.save(webhook);
         audit(AuditEvent.WEBHOOK_UPDATED, webhook.getName(), clock.instant());
         log.info("{} webhook '{}'", webhook.isEnabled() ? "Enabled" : "Disabled", webhook.getName());
     }
@@ -89,13 +89,13 @@ public class WebhookService {
      */
     public void deleteWebhook(String id) {
         WebhookConfig webhook = requireWebhook(id);
-        webhookConfigRepository.deleteById(id);
+        webhookConfigStore.deleteById(id);
         audit(AuditEvent.WEBHOOK_DELETED, webhook.getName(), clock.instant());
         log.info("Deleted webhook '{}'", webhook.getName());
     }
 
     private WebhookConfig requireWebhook(String id) {
-        return webhookConfigRepository.findById(id)
+        return webhookConfigStore.findById(id)
                 .orElseThrow(() -> new WebhookNotFoundException("Webhook not found"));
     }
 
@@ -142,7 +142,7 @@ public class WebhookService {
 
     private void audit(String eventType, String webhookName, Instant performedAt) {
         AuditEvent event = new AuditEvent(eventType, null, webhookName, currentUsername(), performedAt);
-        auditLogRepository.save(event);
+        auditStore.save(event);
         // Publish like every other audit writer so webhooks subscribed to the
         // WEBHOOK_* event types actually receive them (WebhookNotifier listens
         // for AuditEventRecorded).

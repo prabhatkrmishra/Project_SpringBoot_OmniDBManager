@@ -13,12 +13,14 @@ import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
+import com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter;
 import org.bson.Document;
 import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
+import com.pkmprojects.mongodbserver.store.AuditStore;
 import org.bson.BsonDocument;
 import org.bson.BsonInt32;
 import org.bson.BsonString;
@@ -79,11 +81,12 @@ class ProvisioningServiceTest {
         lenient().when(environment.getProperty("app.mongo-public-tls", Boolean.class, false)).thenReturn(false);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
+        AuditStore auditStore = new AuditLogRepositoryAdapter(auditLogRepository);
         MongoDatabaseEngine mongoEngine = new MongoDatabaseEngine(mongoDatabaseRepository, environment);
         service = new ProvisioningService(mongoDatabaseRepository, managedDatabaseRepository,
-                auditLogRepository, new DatabaseNameValidator(), passwordGenerator,
+                auditStore, new DatabaseNameValidator(), passwordGenerator,
                 Clock.fixed(NOW, ZoneOffset.UTC), environment, applicationEventPublisher,
-                new DatabaseLockRegistry(), mongoEngine, null, null);
+                new DatabaseLockRegistry(), mongoEngine, null, null, null, null, null);
     }
 
     @AfterEach

@@ -15,6 +15,7 @@ import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
+import com.pkmprojects.mongodbserver.store.AuditStore;
 import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
@@ -44,16 +45,16 @@ public class ProvisioningService {
     private static final int MONGO_CODE_NAMESPACE_NOT_FOUND = 26;
     private static final int MONGO_CODE_USER_ALREADY_EXISTS = 51003;
 
-    private final MongoDatabaseRepository mongoDatabaseRepository;
+    private final Optional<MongoDatabaseRepository> mongoDatabaseRepository;
     private final ManagedDatabaseRepository managedDatabaseRepository;
-    private final AuditLogRepository auditLogRepository;
+    private final AuditStore auditStore;
     private final DatabaseNameValidator nameValidator;
     private final PasswordGenerator passwordGenerator;
     private final java.time.Clock clock;
     private final Environment environment;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final DatabaseLockRegistry databaseLocks;
-    private final MongoDatabaseEngine mongoEngine;
+    private final Optional<MongoDatabaseEngine> mongoEngine;
     private final Optional<PostgresDatabaseEngine> postgresEngine;
     private final Optional<PostgresDatabaseRepository> postgresRepository;
     private final Optional<MysqlDatabaseEngine> mysqlEngine;
@@ -61,31 +62,31 @@ public class ProvisioningService {
     private final EncryptionService encryptionService;
 
     @Autowired
-    public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
+    public ProvisioningService(@Autowired(required = false) MongoDatabaseRepository mongoDatabaseRepository,
                                ManagedDatabaseRepository managedDatabaseRepository,
-                               AuditLogRepository auditLogRepository,
+                               AuditStore auditStore,
                                DatabaseNameValidator nameValidator,
                                PasswordGenerator passwordGenerator,
                                java.time.Clock clock,
                                Environment environment,
                                ApplicationEventPublisher applicationEventPublisher,
                                DatabaseLockRegistry databaseLocks,
-                               MongoDatabaseEngine mongoEngine,
+                               @Autowired(required = false) MongoDatabaseEngine mongoEngine,
                                @Autowired(required = false) PostgresDatabaseEngine postgresEngine,
                                @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
                                @Autowired(required = false) MysqlDatabaseEngine mysqlEngine,
                                @Autowired(required = false) MysqlDatabaseRepository mysqlRepository,
                                @Autowired(required = false) EncryptionService encryptionService) {
-        this.mongoDatabaseRepository = mongoDatabaseRepository;
+        this.mongoDatabaseRepository = Optional.ofNullable(mongoDatabaseRepository);
         this.managedDatabaseRepository = managedDatabaseRepository;
-        this.auditLogRepository = auditLogRepository;
+        this.auditStore = auditStore;
         this.nameValidator = nameValidator;
         this.passwordGenerator = passwordGenerator;
         this.clock = clock;
         this.environment = environment;
         this.applicationEventPublisher = applicationEventPublisher;
         this.databaseLocks = databaseLocks;
-        this.mongoEngine = mongoEngine;
+        this.mongoEngine = Optional.ofNullable(mongoEngine);
         this.postgresEngine = Optional.ofNullable(postgresEngine);
         this.postgresRepository = Optional.ofNullable(postgresRepository);
         this.mysqlEngine = Optional.ofNullable(mysqlEngine);
@@ -106,7 +107,8 @@ public class ProvisioningService {
                                MongoDatabaseEngine mongoEngine,
                                PostgresDatabaseEngine postgresEngine,
                                PostgresDatabaseRepository postgresRepository) {
-        this(mongoDatabaseRepository, managedDatabaseRepository, auditLogRepository, nameValidator,
+        this(mongoDatabaseRepository, managedDatabaseRepository,
+                new com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter(auditLogRepository), nameValidator,
                 passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
                 mongoEngine, postgresEngine, postgresRepository, null, null, null);
     }
@@ -125,7 +127,8 @@ public class ProvisioningService {
                                PostgresDatabaseEngine postgresEngine,
                                PostgresDatabaseRepository postgresRepository,
                                EncryptionService encryptionService) {
-        this(mongoDatabaseRepository, managedDatabaseRepository, auditLogRepository, nameValidator,
+        this(mongoDatabaseRepository, managedDatabaseRepository,
+                new com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter(auditLogRepository), nameValidator,
                 passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
                 mongoEngine, postgresEngine, postgresRepository, null, null, encryptionService);
     }
@@ -148,7 +151,11 @@ public class ProvisioningService {
         if (type == DatabaseEngineType.MYSQL) {
             return mysqlEngine.orElseThrow(() -> new ProvisioningException("MySQL is not enabled"));
         }
-        return mongoEngine;
+        return mongoEngine.orElseThrow(() -> new ProvisioningException("Mongo is not enabled"));
+    }
+
+    private MongoDatabaseRepository requireMongoRepository() {
+        return mongoDatabaseRepository.orElseThrow(() -> new ProvisioningException("Mongo is not enabled"));
     }
 
     private String lockKey(DatabaseEngineType engine, String dbName) {
@@ -310,7 +317,7 @@ public class ProvisioningService {
             return;
         }
         // Not provisioned: try Mongo then Postgres then MySQL
-        if (mongoEngine.databaseExists(dbName)) {
+        if (mongoEngine.isPresent() && mongoEngine.get().databaseExists(dbName)) {
             delete(DatabaseEngineType.MONGO, dbName);
         } else if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) {
             delete(DatabaseEngineType.POSTGRES, dbName);
@@ -365,12 +372,13 @@ public class ProvisioningService {
     public void createCollection(String dbName, String collectionName) {
         nameValidator.validateDatabaseName(dbName);
         nameValidator.validateCollectionName(collectionName);
+        MongoDatabaseRepository repo = requireMongoRepository();
         databaseLocks.withLock(lockKey(DatabaseEngineType.MONGO, dbName), () -> {
             requireDatabase(dbName, DatabaseEngineType.MONGO);
-            if (mongoDatabaseRepository.collectionExists(dbName, collectionName)) {
+            if (repo.collectionExists(dbName, collectionName)) {
                 throw new DatabaseAlreadyExistsException("Collection '" + collectionName + "' already exists");
             }
-            try { mongoDatabaseRepository.createCollection(dbName, collectionName); } catch (MongoCommandException e) {
+            try { repo.createCollection(dbName, collectionName); } catch (MongoCommandException e) {
                 log.error("Failed to create collection {}.{}", dbName, collectionName, e);
                 throw new ProvisioningException("Could not create collection '" + collectionName + "'", e);
             }
@@ -380,12 +388,13 @@ public class ProvisioningService {
     public void dropCollection(String dbName, String collectionName) {
         nameValidator.validateDatabaseName(dbName);
         nameValidator.validateCollectionName(collectionName);
+        MongoDatabaseRepository repo = requireMongoRepository();
         databaseLocks.withLock(lockKey(DatabaseEngineType.MONGO, dbName), () -> {
             requireDatabase(dbName, DatabaseEngineType.MONGO);
-            if (!mongoDatabaseRepository.collectionExists(dbName, collectionName)) {
+            if (!repo.collectionExists(dbName, collectionName)) {
                 throw new DatabaseNotFoundException("Collection '" + collectionName + "' does not exist");
             }
-            try { mongoDatabaseRepository.dropCollection(dbName, collectionName); } catch (MongoCommandException e) {
+            try { repo.dropCollection(dbName, collectionName); } catch (MongoCommandException e) {
                 if (isMongoCode(e, MONGO_CODE_NAMESPACE_NOT_FOUND)) throw new DatabaseNotFoundException("Collection '" + collectionName + "' does not exist");
                 log.error("Failed to drop collection {}.{}", dbName, collectionName, e);
                 throw new ProvisioningException("Could not drop collection '" + collectionName + "'", e);
@@ -414,7 +423,7 @@ public class ProvisioningService {
                     .map(u -> new DatabaseUser(u, List.of("ALL:" + dbName), dbName))
                     .toList();
         }
-        return mongoDatabaseRepository.getUsers(dbName).stream()
+        return requireMongoRepository().getUsers(dbName).stream()
                 .map(doc -> new DatabaseUser(doc.getString("user"), roleNamesOf(doc), doc.getString("db")))
                 .toList();
     }
@@ -456,9 +465,9 @@ public class ProvisioningService {
                 log.info("Revoked MySQL user '{}' from database '{}'", userName, dbName);
                 return;
             }
-            List<Document> users = mongoDatabaseRepository.getUsers(dbName);
+            List<Document> users = requireMongoRepository().getUsers(dbName);
             if (users.size() <= 1) throw new DatabaseAlreadyExistsException("Cannot revoke the last user of database '" + dbName + "'. Delete the database instead.");
-            try { mongoDatabaseRepository.dropUser(dbName, userName); } catch (MongoCommandException e) {
+            try { requireMongoRepository().dropUser(dbName, userName); } catch (MongoCommandException e) {
                 if (isMongoCode(e, MONGO_CODE_USER_NOT_FOUND)) throw new DatabaseNotFoundException("User '" + userName + "' does not exist in database '" + dbName + "'");
                 log.error("Failed to revoke user '{}' from database '{}'", userName, dbName, e);
                 throw new ProvisioningException("Could not revoke user '" + userName + "'", e);
@@ -504,7 +513,7 @@ public class ProvisioningService {
         // Try Mongo first, then Postgres, then MySQL
         ManagedDatabase md = managedDatabaseRepository.findByDbName(dbName).orElse(null);
         if (md != null) return getDatabase(md.getEngineType(), dbName);
-        if (mongoEngine.databaseExists(dbName)) return getDatabase(DatabaseEngineType.MONGO, dbName);
+        if (mongoEngine.isPresent() && mongoEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.MONGO, dbName);
         if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.POSTGRES, dbName);
         if (mysqlEngine.isPresent() && mysqlEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.MYSQL, dbName);
         throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
@@ -527,7 +536,9 @@ public class ProvisioningService {
         return toInfo(dbName, engineType, md, collectionCount(dbName, engineType), connectionString, size);
     }
 
-    String resolveConnectionHost() { return mongoEngine.resolveConnectionHost(); }
+    String resolveConnectionHost() {
+        return mongoEngine.map(MongoDatabaseEngine::resolveConnectionHost).orElse("127.0.0.1:9812");
+    }
 
     private void requireDatabase(String dbName, DatabaseEngineType engineType) {
         if (!engineFor(engineType).databaseExists(dbName)) throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist in " + engineType);
@@ -535,7 +546,7 @@ public class ProvisioningService {
 
     private void audit(String eventType, String dbName, DatabaseEngineType engineType, String userName, java.time.Instant performedAt) {
         AuditEvent event = new AuditEvent(eventType, dbName, engineType, userName, currentUsername(), performedAt);
-        auditLogRepository.save(event);
+        auditStore.save(event);
         applicationEventPublisher.publishEvent(new AuditEventRecorded(event));
     }
 
@@ -550,7 +561,7 @@ public class ProvisioningService {
 
     private Long collectionCount(String dbName, DatabaseEngineType engineType) {
         if (engineType == DatabaseEngineType.POSTGRES || engineType == DatabaseEngineType.MYSQL) return null;
-        try { return (long) mongoDatabaseRepository.listCollectionNames(dbName).size(); } catch (MongoException e) {
+        try { return (long) requireMongoRepository().listCollectionNames(dbName).size(); } catch (MongoException e) {
             log.warn("Could not count collections of {}; leaving count blank", dbName, e);
             return null;
         }
@@ -559,7 +570,7 @@ public class ProvisioningService {
     private Long collectionCount(String dbName) { return collectionCount(dbName, DatabaseEngineType.MONGO); }
 
     private Map<String, Long> readDatabaseSizes() {
-        try { return mongoDatabaseRepository.getDatabaseSizes(); } catch (MongoException e) {
+        try { return requireMongoRepository().getDatabaseSizes(); } catch (MongoException e) {
             log.error("Could not read database sizes from the MongoDB server", e);
             throw new ProvisioningException("Could not read database sizes", e);
         }

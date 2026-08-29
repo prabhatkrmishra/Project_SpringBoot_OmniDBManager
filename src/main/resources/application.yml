@@ -55,6 +55,8 @@ app:
   admin:
     username: ${APP_ADMIN_USERNAME:admin}
     password: ${APP_ADMIN_PASSWORD:admin}
+  mongo:
+    enabled: ${MONGO_ENABLED:false}
   # Public Mongo host used in the connection strings shown in the UI (set when
   # Mongo is reachable via a domain name, e.g. behind a reverse proxy/tunnel).
   # Add ":port" only if clients must reach a non-default port (drivers default

@@ -6,8 +6,8 @@ import com.pkmprojects.mongodbserver.error.WebhookNotFoundException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
-import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
-import com.pkmprojects.mongodbserver.repository.WebhookConfigRepository;
+import com.pkmprojects.mongodbserver.store.AuditStore;
+import com.pkmprojects.mongodbserver.store.WebhookConfigStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,9 +40,9 @@ class WebhookServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-18T10:00:00Z");
 
     @Mock
-    private WebhookConfigRepository webhookConfigRepository;
+    private WebhookConfigStore webhookConfigStore;
     @Mock
-    private AuditLogRepository auditLogRepository;
+    private AuditStore auditStore;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
 
@@ -52,11 +52,11 @@ class WebhookServiceTest {
     void setUp() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
-        service = new WebhookService(webhookConfigRepository, auditLogRepository, applicationEventPublisher,
+        service = new WebhookService(webhookConfigStore, auditStore, applicationEventPublisher,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         // Only the create tests read the returned config; the toggle/delete tests
         // also call save() but ignore the result.
-        lenient().when(webhookConfigRepository.save(any(WebhookConfig.class)))
+        lenient().when(webhookConfigStore.save(any(WebhookConfig.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -74,7 +74,7 @@ class WebhookServiceTest {
         WebhookConfig saved = service.createWebhook(new WebhookForm("Slack", "https://example.com/hooks", "secret", List.of()));
 
         ArgumentCaptor<WebhookConfig> captor = ArgumentCaptor.forClass(WebhookConfig.class);
-        verify(webhookConfigRepository).save(captor.capture());
+        verify(webhookConfigStore).save(captor.capture());
         assertThat(captor.getValue().getName()).isEqualTo("Slack");
         assertThat(captor.getValue().getUrl()).isEqualTo("https://example.com/hooks");
         assertThat(captor.getValue().getSecret()).isEqualTo("secret");
@@ -84,7 +84,7 @@ class WebhookServiceTest {
         assertThat(saved.isEnabled()).isTrue();
 
         ArgumentCaptor<AuditEvent> auditCaptor = ArgumentCaptor.forClass(AuditEvent.class);
-        verify(auditLogRepository).save(auditCaptor.capture());
+        verify(auditStore).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getEventType()).isEqualTo(AuditEvent.WEBHOOK_CREATED);
         assertThat(auditCaptor.getValue().getUserName()).isEqualTo("Slack");
         assertThat(auditCaptor.getValue().getPerformedBy()).isEqualTo("admin");
@@ -102,7 +102,7 @@ class WebhookServiceTest {
                 List.of(AuditEvent.PROVISION, AuditEvent.DELETE)));
 
         ArgumentCaptor<WebhookConfig> captor = ArgumentCaptor.forClass(WebhookConfig.class);
-        verify(webhookConfigRepository).save(captor.capture());
+        verify(webhookConfigStore).save(captor.capture());
         assertThat(captor.getValue().getEventTypes()).containsExactly(AuditEvent.PROVISION, AuditEvent.DELETE);
     }
 
@@ -112,7 +112,7 @@ class WebhookServiceTest {
         service.createWebhook(new WebhookForm("Ding", "https://example.com/hooks", "   ", List.of()));
 
         ArgumentCaptor<WebhookConfig> captor = ArgumentCaptor.forClass(WebhookConfig.class);
-        verify(webhookConfigRepository, times(2)).save(captor.capture());
+        verify(webhookConfigStore, times(2)).save(captor.capture());
         assertThat(captor.getAllValues().get(0).getSecret()).isEqualTo("hunter2");
         assertThat(captor.getAllValues().get(1).getSecret()).isNull();
     }
@@ -138,22 +138,22 @@ class WebhookServiceTest {
 
     @Test
     void toggleWebhookEnablesAndAudits() {
-        when(webhookConfigRepository.findById("w1")).thenReturn(Optional.of(webhook("w1", "Slack", false)));
+        when(webhookConfigStore.findById("w1")).thenReturn(Optional.of(webhook("w1", "Slack", false)));
 
         service.toggleWebhook("w1");
 
         ArgumentCaptor<WebhookConfig> captor = ArgumentCaptor.forClass(WebhookConfig.class);
-        verify(webhookConfigRepository).save(captor.capture());
+        verify(webhookConfigStore).save(captor.capture());
         assertThat(captor.getValue().isEnabled()).isTrue();
         ArgumentCaptor<AuditEvent> auditCaptor = ArgumentCaptor.forClass(AuditEvent.class);
-        verify(auditLogRepository).save(auditCaptor.capture());
+        verify(auditStore).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getEventType()).isEqualTo(AuditEvent.WEBHOOK_UPDATED);
         assertThat(auditCaptor.getValue().getUserName()).isEqualTo("Slack");
     }
 
     @Test
     void toggleMissingWebhookThrowsNotFound() {
-        when(webhookConfigRepository.findById("missing")).thenReturn(Optional.empty());
+        when(webhookConfigStore.findById("missing")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.toggleWebhook("missing"))
                 .isInstanceOf(WebhookNotFoundException.class);
@@ -161,13 +161,13 @@ class WebhookServiceTest {
 
     @Test
     void deleteWebhookRemovesAndAudits() {
-        when(webhookConfigRepository.findById("w1")).thenReturn(Optional.of(webhook("w1", "Slack", true)));
+        when(webhookConfigStore.findById("w1")).thenReturn(Optional.of(webhook("w1", "Slack", true)));
 
         service.deleteWebhook("w1");
 
-        verify(webhookConfigRepository).deleteById("w1");
+        verify(webhookConfigStore).deleteById("w1");
         ArgumentCaptor<AuditEvent> auditCaptor = ArgumentCaptor.forClass(AuditEvent.class);
-        verify(auditLogRepository).save(auditCaptor.capture());
+        verify(auditStore).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getEventType()).isEqualTo(AuditEvent.WEBHOOK_DELETED);
     }
 }

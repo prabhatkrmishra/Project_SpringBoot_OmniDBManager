@@ -3,6 +3,7 @@ package com.pkmprojects.mongodbserver.repository;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.model.IndexOptions;
 import org.bson.Document;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
@@ -16,9 +17,11 @@ import java.util.function.Consumer;
  * database/collection listing, user management, and paginated document reads.
  *
  * <p>Contains no business rules - only driver calls. All operations are bounded
- * (pagination via skip/limit, no unbounded materialization).</p>
+ * (pagination via skip/limit, no unbounded materialization). Only loaded when
+ * {@code app.mongo.enabled=true}.</p>
  */
 @Repository
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class MongoDatabaseRepository {
 
     private final MongoClient mongoClient;

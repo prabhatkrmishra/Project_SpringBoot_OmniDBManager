@@ -32,6 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @WebMvcTest(CollectionController.class)
 @Import({SecurityConfig.class, CollectionControllerTest.SecurityTestConfig.class})
+@org.springframework.test.context.TestPropertySource(properties = "app.mongo.enabled=true")
 class CollectionControllerTest {
 
     @Autowired

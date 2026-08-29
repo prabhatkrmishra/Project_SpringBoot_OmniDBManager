@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
@@ -14,9 +15,10 @@ import org.springframework.stereotype.Component;
  * Creates the descending index backing the audit-trail queries
  * ({@code findTop10ByOrderByPerformedAtDesc}, the activity page) so the trail
  * stays fast as it grows. Idempotent: MongoDB treats re-creating an identical
- * index as a no-op.
+ * index as a no-op. Only loaded when {@code app.mongo.enabled=true}.
  */
 @Component
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class MongoIndexInitializer implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(MongoIndexInitializer.class);

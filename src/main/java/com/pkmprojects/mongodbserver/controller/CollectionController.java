@@ -5,6 +5,7 @@ import com.pkmprojects.mongodbserver.dto.DocumentPage;
 import com.pkmprojects.mongodbserver.service.ExplorationService;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
 import jakarta.validation.Valid;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -18,9 +19,11 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 /**
  * Collection management (admin-only writes) and the paginated document explorer.
  * All writes go through {@link ProvisioningService} so existence and name rules
- * are enforced before touching MongoDB.
+ * are enforced before touching MongoDB. Only loaded when
+ * {@code app.mongo.enabled=true}.
  */
 @Controller
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class CollectionController {
 
     private final ExplorationService explorationService;

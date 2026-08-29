@@ -3,7 +3,7 @@ package com.pkmprojects.mongodbserver.service;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
-import com.pkmprojects.mongodbserver.repository.WebhookConfigRepository;
+import com.pkmprojects.mongodbserver.store.WebhookConfigStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,7 +36,7 @@ class WebhookNotifierTest {
     private static final Instant NOW = Instant.parse("2026-08-18T10:00:00Z");
 
     @Mock
-    private WebhookConfigRepository webhookConfigRepository;
+    private WebhookConfigStore WebhookConfigStore;
     @Mock
     private HttpClient httpClient;
     @Mock
@@ -52,7 +52,7 @@ class WebhookNotifierTest {
             ((Runnable) invocation.getArgument(0)).run();
             return null;
         }).when(executor).submit(any(Runnable.class));
-        notifier = new WebhookNotifier(webhookConfigRepository, httpClient, executor);
+        notifier = new WebhookNotifier(WebhookConfigStore, httpClient, executor);
     }
 
     private WebhookConfig webhook(String name, String url, String secret, List<String> eventTypes, boolean enabled) {
@@ -109,7 +109,7 @@ class WebhookNotifierTest {
     @Test
     void onAuditEventPostsMatchingWebhook() throws Exception {
         HttpResponse<String> ok = response(200);
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null,
                         List.of(AuditEvent.PROVISION, AuditEvent.DELETE), true)));
         when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
@@ -133,7 +133,7 @@ class WebhookNotifierTest {
 
     @Test
     void onAuditEventSkipsWebhookWithNonMatchingEventType() {
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null,
                         List.of(AuditEvent.DELETE), true)));
 
@@ -144,7 +144,7 @@ class WebhookNotifierTest {
 
     @Test
     void onAuditEventSkipsDisabledWebhook() {
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null, List.of(AuditEvent.PROVISION), false)));
 
         notifier.onAuditEvent(event());
@@ -154,7 +154,7 @@ class WebhookNotifierTest {
 
     @Test
     void onAuditEventSurvivesWebhookQueryFailure() {
-        when(webhookConfigRepository.findByEnabledTrue())
+        when(WebhookConfigStore.findByEnabledTrue())
                 .thenThrow(new IllegalStateException("webhook_configs unavailable"));
 
         // Must not throw: a webhook-infrastructure failure must never fail the
@@ -167,7 +167,7 @@ class WebhookNotifierTest {
 
     @Test
     void onAuditEventSurvivesRejectedSubmitDuringShutdown() {
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
         doThrow(new java.util.concurrent.RejectedExecutionException("executor shut down"))
                 .when(executor).submit(any(Runnable.class));
@@ -179,7 +179,7 @@ class WebhookNotifierTest {
     @Test
     void webhookWithoutEventTypesReceivesAllEvents() throws Exception {
         HttpResponse<String> ok = response(200);
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
         when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(ok);
@@ -192,7 +192,7 @@ class WebhookNotifierTest {
     @Test
     void secretWebhookSignsPayloadWithHmacSha256() throws Exception {
         HttpResponse<String> ok = response(200);
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", "hunter2", List.of(), true)));
         when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(ok);
@@ -212,7 +212,7 @@ class WebhookNotifierTest {
     @Test
     void transientFailureIsRetriedUpToThreeTimes() throws Exception {
         HttpResponse<String> failure = response(500);
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
         when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(failure);
@@ -226,7 +226,7 @@ class WebhookNotifierTest {
     @Test
     void permanentClientErrorIsNotRetried() throws Exception {
         HttpResponse<String> badRequest = response(400);
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
         when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(badRequest);
@@ -240,7 +240,7 @@ class WebhookNotifierTest {
     void successAfterRetryStopsRetrying() throws Exception {
         HttpResponse<String> failure = response(500);
         HttpResponse<String> ok = response(200);
-        when(webhookConfigRepository.findByEnabledTrue()).thenReturn(List.of(
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
                 webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
         when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
                 .thenReturn(failure, ok);

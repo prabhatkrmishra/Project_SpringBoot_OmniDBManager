@@ -3,6 +3,7 @@ package com.pkmprojects.mongodbserver.service;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import org.bson.Document;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
@@ -12,6 +13,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class MongoDatabaseEngine implements DatabaseEngine {
 
     private final MongoDatabaseRepository mongoDatabaseRepository;

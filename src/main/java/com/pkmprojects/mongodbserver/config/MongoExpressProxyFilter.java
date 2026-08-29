@@ -18,6 +18,7 @@ import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -30,9 +31,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * auth injected from {@code app.mongo-express.username} / {@code app.mongo-express.password}.
  * Because this filter runs inside the authenticated web context, mongo-express is only
  * reachable through a signed-in admin session; its own basic auth stays on as a second
- * layer, and the container port is bound to loopback only.</p>
+ * layer, and the container port is bound to loopback only. Only loaded when
+ * {@code app.mongo.enabled=true}.</p>
  */
 @Component
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class MongoExpressProxyFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(MongoExpressProxyFilter.class);

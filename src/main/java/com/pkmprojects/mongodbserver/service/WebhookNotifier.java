@@ -3,7 +3,7 @@ package com.pkmprojects.mongodbserver.service;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
-import com.pkmprojects.mongodbserver.repository.WebhookConfigRepository;
+import com.pkmprojects.mongodbserver.store.WebhookConfigStore;
 import com.pkmprojects.mongodbserver.util.Json;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,13 +51,13 @@ public class WebhookNotifier {
     private static final int MAX_QUEUED_DELIVERIES = 128;
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
 
-    private final WebhookConfigRepository webhookConfigRepository;
+    private final WebhookConfigStore webhookConfigStore;
     private final HttpClient httpClient;
     private final ExecutorService executor;
 
     @Autowired
-    public WebhookNotifier(WebhookConfigRepository webhookConfigRepository, HttpClient httpClient) {
-        this(webhookConfigRepository, httpClient, new ThreadPoolExecutor(
+    public WebhookNotifier(WebhookConfigStore webhookConfigStore, HttpClient httpClient) {
+        this(webhookConfigStore, httpClient, new ThreadPoolExecutor(
                 MAX_CONCURRENT_DELIVERIES, MAX_CONCURRENT_DELIVERIES, 0L, TimeUnit.MILLISECONDS,
                 // Bound the pending queue so a burst of events cannot grow memory
                 // without limit. Saturation rejects the submit, which onAuditEvent
@@ -66,9 +66,9 @@ public class WebhookNotifier {
                 new ThreadPoolExecutor.AbortPolicy()));
     }
 
-    WebhookNotifier(WebhookConfigRepository webhookConfigRepository, HttpClient httpClient,
+    WebhookNotifier(WebhookConfigStore webhookConfigStore, HttpClient httpClient,
                     ExecutorService executor) {
-        this.webhookConfigRepository = webhookConfigRepository;
+        this.webhookConfigStore = webhookConfigStore;
         this.httpClient = httpClient;
         this.executor = executor;
     }
@@ -82,7 +82,7 @@ public class WebhookNotifier {
     public void onAuditEvent(AuditEventRecorded recorded) {
         AuditEvent event = recorded.event();
         try {
-            List<WebhookConfig> matching = webhookConfigRepository.findByEnabledTrue().stream()
+            List<WebhookConfig> matching = webhookConfigStore.findByEnabledTrue().stream()
                     .filter(WebhookConfig::isEnabled)
                     .filter(webhook -> webhook.getEventTypes() == null || webhook.getEventTypes().isEmpty()
                             || webhook.getEventTypes().contains(event.getEventType()))

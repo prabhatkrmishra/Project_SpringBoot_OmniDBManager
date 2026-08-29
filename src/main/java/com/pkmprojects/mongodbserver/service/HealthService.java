@@ -28,19 +28,22 @@ public class HealthService {
 
     private static final Logger log = LoggerFactory.getLogger(HealthService.class);
 
-    private final MongoDatabaseRepository mongoDatabaseRepository;
+    private final Optional<MongoDatabaseRepository> mongoDatabaseRepository;
+    private final boolean mongoEnabled;
     private final Optional<PostgresDatabaseRepository> postgresRepository;
     private final boolean postgresEnabled;
     private final Optional<MysqlDatabaseRepository> mysqlRepository;
     private final boolean mysqlEnabled;
 
     @Autowired
-    public HealthService(MongoDatabaseRepository mongoDatabaseRepository,
+    public HealthService(@Autowired(required = false) MongoDatabaseRepository mongoDatabaseRepository,
+                         @Value("${app.mongo.enabled:false}") boolean mongoEnabled,
                          @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
                          @Value("${app.postgres.enabled:false}") boolean postgresEnabled,
                          @Autowired(required = false) MysqlDatabaseRepository mysqlRepository,
                          @Value("${app.mysql.enabled:false}") boolean mysqlEnabled) {
-        this.mongoDatabaseRepository = mongoDatabaseRepository;
+        this.mongoDatabaseRepository = Optional.ofNullable(mongoDatabaseRepository);
+        this.mongoEnabled = mongoEnabled;
         this.postgresRepository = Optional.ofNullable(postgresRepository);
         this.postgresEnabled = postgresEnabled;
         this.mysqlRepository = Optional.ofNullable(mysqlRepository);
@@ -51,18 +54,18 @@ public class HealthService {
     public HealthService(MongoDatabaseRepository mongoDatabaseRepository,
                          PostgresDatabaseRepository postgresRepository,
                          boolean postgresEnabled) {
-        this(mongoDatabaseRepository, postgresRepository, postgresEnabled, null, false);
+        this(mongoDatabaseRepository, true, postgresRepository, postgresEnabled, null, false);
     }
 
     public ServerHealth getHealth() {
-        boolean mongoReachable = pingMongo();
+        boolean mongoReachable = mongoEnabled && pingMongo();
 
         String version = null;
         Long uptimeSeconds = null;
         Integer connectionCount = null;
         if (mongoReachable) {
             try {
-                Document status = mongoDatabaseRepository.getServerStatus();
+                Document status = mongoDatabaseRepository.orElseThrow().getServerStatus();
                 version = status.getString("version");
                 uptimeSeconds = toLong(status.get("uptime"));
                 Document connections = status.get("connections", Document.class);
@@ -79,7 +82,7 @@ public class HealthService {
         Long totalStorageBytes = null;
         if (mongoReachable) {
             try {
-                Map<String, Long> sizes = mongoDatabaseRepository.getDatabaseSizes();
+                Map<String, Long> sizes = mongoDatabaseRepository.orElseThrow().getDatabaseSizes();
                 databaseCount = sizes.size();
                 totalStorageBytes = sizes.values().stream().mapToLong(Long::longValue).sum();
             } catch (MongoException e) {
@@ -125,8 +128,9 @@ public class HealthService {
     }
 
     private boolean pingMongo() {
+        if (!mongoEnabled || mongoDatabaseRepository.isEmpty()) return false;
         try {
-            mongoDatabaseRepository.ping();
+            mongoDatabaseRepository.get().ping();
             return true;
         } catch (Exception e) {
             log.warn("MongoDB ping failed", e);

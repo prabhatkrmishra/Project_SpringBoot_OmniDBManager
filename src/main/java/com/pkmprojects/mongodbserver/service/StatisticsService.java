@@ -9,6 +9,7 @@ import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -25,6 +26,7 @@ import java.util.concurrent.Executors;
  * serialize into N sequential round trips.
  */
 @Service
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class StatisticsService {
 
     private static final Logger log = LoggerFactory.getLogger(StatisticsService.class);

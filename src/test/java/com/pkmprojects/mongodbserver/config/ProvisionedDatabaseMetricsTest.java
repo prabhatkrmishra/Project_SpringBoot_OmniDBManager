@@ -1,7 +1,7 @@
 package com.pkmprojects.mongodbserver.config;
 
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
-import com.pkmprojects.mongodbserver.repository.ManagedDatabaseRepository;
+import com.pkmprojects.mongodbserver.store.ManagedDatabaseStore;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 class ProvisionedDatabaseMetricsTest {
 
     @Mock
-    private ManagedDatabaseRepository repository;
+    private ManagedDatabaseStore repository;
 
     @Test
     void registersGaugesPerEngineAndTotal() {

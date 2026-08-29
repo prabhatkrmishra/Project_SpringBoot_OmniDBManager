@@ -7,6 +7,8 @@ import com.pkmprojects.mongodbserver.error.ProvisioningException;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
+import com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter;
+import com.pkmprojects.mongodbserver.store.AuditStore;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.util.Json;
 import org.bson.Document;
@@ -14,6 +16,7 @@ import org.bson.json.JsonMode;
 import org.bson.json.JsonWriterSettings;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,7 +34,7 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
- * Creates and restores per-database backups.
+ * Creates and restores per-database backups. Only loaded when {@code app.mongo.enabled=true}.
  *
  * <p>Backup format: a gzip'd JSON document
  * {@code {formatVersion: 1, database, backedUpAt, collections: [{name, indexes, documents}]}}.
@@ -46,6 +49,7 @@ import java.util.zip.GZIPOutputStream;
  * confirmed this on the restore form, and the service re-checks the flag.</p>
  */
 @Service
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class BackupService {
 
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
@@ -59,23 +63,38 @@ public class BackupService {
 
     private final MongoDatabaseRepository mongoDatabaseRepository;
     private final MongoNameValidator nameValidator;
-    private final AuditLogRepository auditLogRepository;
+    private final AuditStore auditStore;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final DatabaseLockRegistry databaseLocks;
     private final Clock clock;
 
     public BackupService(MongoDatabaseRepository mongoDatabaseRepository,
                          MongoNameValidator nameValidator,
-                         AuditLogRepository auditLogRepository,
+                         AuditStore auditStore,
                          ApplicationEventPublisher applicationEventPublisher,
                          DatabaseLockRegistry databaseLocks,
                          Clock clock) {
         this.mongoDatabaseRepository = mongoDatabaseRepository;
         this.nameValidator = nameValidator;
-        this.auditLogRepository = auditLogRepository;
+        this.auditStore = auditStore;
         this.applicationEventPublisher = applicationEventPublisher;
         this.databaseLocks = databaseLocks;
         this.clock = clock;
+    }
+
+    /**
+     * Legacy constructor used by unit tests that pass an
+     * {@link AuditLogRepository} directly. Delegates to the store-based
+     * constructor via {@link AuditLogRepositoryAdapter}.
+     */
+    public BackupService(MongoDatabaseRepository mongoDatabaseRepository,
+                         MongoNameValidator nameValidator,
+                         AuditLogRepository auditLogRepository,
+                         ApplicationEventPublisher applicationEventPublisher,
+                         DatabaseLockRegistry databaseLocks,
+                         Clock clock) {
+        this(mongoDatabaseRepository, nameValidator, new AuditLogRepositoryAdapter(auditLogRepository),
+                applicationEventPublisher, databaseLocks, clock);
     }
 
     /**
@@ -327,7 +346,7 @@ public class BackupService {
 
     private void audit(String eventType, String dbName, Instant performedAt) {
         AuditEvent event = new AuditEvent(eventType, dbName, com.pkmprojects.mongodbserver.model.DatabaseEngineType.MONGO, null, currentUsername(), performedAt);
-        auditLogRepository.save(event);
+        auditStore.save(event);
         applicationEventPublisher.publishEvent(new AuditEventRecorded(event));
     }
 

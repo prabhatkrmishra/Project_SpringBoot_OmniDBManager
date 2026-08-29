@@ -2,9 +2,11 @@ package com.pkmprojects.mongodbserver.repository;
 
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.model.ManagedDatabase;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Optional;
 
 /**
@@ -13,6 +15,7 @@ import java.util.Optional;
  * name can exist in both engines. Legacy {@code findByDbName} methods remain for
  * backward compat and legacy redirects.
  */
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public interface ManagedDatabaseRepository extends MongoRepository<ManagedDatabase, String> {
 
     /**

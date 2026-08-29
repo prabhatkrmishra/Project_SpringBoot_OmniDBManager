@@ -7,6 +7,7 @@ import com.pkmprojects.mongodbserver.util.Json;
 import org.bson.Document;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
@@ -26,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * privileges, while reachability and database sizes keep working.</p>
  */
 @Service
+@ConditionalOnProperty(name = "app.mongo.enabled", havingValue = "true")
 public class MonitorService {
 
     private static final Logger log = LoggerFactory.getLogger(MonitorService.class);
