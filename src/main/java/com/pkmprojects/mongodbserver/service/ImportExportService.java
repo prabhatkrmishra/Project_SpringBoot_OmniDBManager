@@ -16,6 +16,7 @@ import org.bson.json.JsonWriterSettings;
 import org.bson.types.ObjectId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.core.Authentication;
@@ -69,6 +70,7 @@ public class ImportExportService {
     private final DatabaseLockRegistry databaseLocks;
     private final Clock clock;
 
+    @Autowired
     public ImportExportService(MongoDatabaseRepository mongoDatabaseRepository,
                                MongoNameValidator nameValidator,
                                AuditStore auditStore,
