@@ -100,7 +100,19 @@ public class MysqlDatabaseRepository {
 
     public void createUser(String dbName, String userName, String password) {
         String escaped = escapePassword(password);
-        jdbcTemplate.execute("CREATE USER " + quoteUser(userName) + " IDENTIFIED BY '" + escaped + "'");
+        String quoted = quoteUser(userName);
+        // Idempotent provisioning: MySQL users are server-wide, so a user can outlive
+        // the database it was created for (e.g. a prior provisioning whose database
+        // was dropped without the user). If the account already exists, update its
+        // password rather than failing on CREATE USER — this lets a re-provision
+        // succeed when the database is gone but the user lingers.
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM mysql.user WHERE user = ? AND host = '%'", Integer.class, userName);
+        if (exists != null && exists > 0) {
+            jdbcTemplate.execute("ALTER USER " + quoted + " IDENTIFIED BY '" + escaped + "'");
+        } else {
+            jdbcTemplate.execute("CREATE USER " + quoted + " IDENTIFIED BY '" + escaped + "'");
+        }
     }
 
     public void grantPrivileges(String dbName, String userName) {
