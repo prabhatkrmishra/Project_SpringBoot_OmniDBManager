@@ -153,6 +153,19 @@ class WebhookNotifierTest {
     }
 
     @Test
+    void onAuditEventSkipsWebhookTargetingBlockedHostAtDelivery() {
+        // Enabled and matching, but the target is a reserved/loopback host. The
+        // delivery-time re-check must refuse to dial it even though it was
+        // configured (an SSRF guard, not just a creation-time validation).
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
+                webhook("internal", "http://127.0.0.1:8080/hook", null, List.of(), true)));
+
+        notifier.onAuditEvent(event());
+
+        verifyNoInteractions(httpClient);
+    }
+
+    @Test
     void onAuditEventSurvivesWebhookQueryFailure() {
         when(WebhookConfigStore.findByEnabledTrue())
                 .thenThrow(new IllegalStateException("webhook_configs unavailable"));

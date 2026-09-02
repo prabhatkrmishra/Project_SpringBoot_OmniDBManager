@@ -143,10 +143,8 @@ public class WebhookService {
                 throw new NameNotAllowedException("Webhook URL must be a valid http(s) URL");
             }
             String host = uri.getHost();
-            for (String blocked : BLOCKED_HOSTS) {
-                if (blocked.equalsIgnoreCase(host)) {
-                    throw new NameNotAllowedException("Webhook URL targets a blocked host: " + host);
-                }
+            if (isBlockedHost(host)) {
+                throw new NameNotAllowedException("Webhook URL targets a blocked host: " + host);
             }
             if (isPrivateIp(host)) {
                 throw new NameNotAllowedException("Webhook URL resolves to a private/internal IP address");
@@ -154,6 +152,25 @@ public class WebhookService {
         } catch (IllegalArgumentException e) {
             throw new NameNotAllowedException("Webhook URL must be a valid http(s) URL");
         }
+    }
+
+    private static boolean isBlockedHost(String host) {
+        for (String blocked : BLOCKED_HOSTS) {
+            if (blocked.equalsIgnoreCase(host)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when a host must never be dialed: it is on the reserved/blocked list
+     * or resolves to a private/internal address. Shared by URL validation and by
+     * the notifier's delivery-time re-check, so a webhook whose DNS changes to a
+     * private address after creation is still refused at send time.
+     */
+    static boolean isBlockedDeliveryHost(String host) {
+        return isBlockedHost(host) || isPrivateIp(host);
     }
 
     private static boolean isPrivateIp(String host) {

@@ -104,6 +104,16 @@ public class WebhookNotifier {
      */
     void deliver(WebhookConfig webhook, AuditEvent event) {
         try {
+            // Re-check the target at send time, not just at creation: a webhook
+            // URL that was public when configured could later resolve to a
+            // private/internal address (DNS rebinding), which would otherwise
+            // turn delivery into an SSRF probe of the internal network.
+            String host = URI.create(webhook.getUrl()).getHost();
+            if (host != null && WebhookService.isBlockedDeliveryHost(host)) {
+                log.warn("Skipping delivery to webhook '{}': target host '{}' is blocked (private/internal or reserved)",
+                        webhook.getName(), host);
+                return;
+            }
             String payload = toJson(event);
             HttpRequest request = buildRequest(webhook, payload);
             for (int attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
