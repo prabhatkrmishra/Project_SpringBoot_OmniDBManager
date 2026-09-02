@@ -87,6 +87,31 @@ class PostgresDatabaseRepositoryUnitTest {
     }
 
     @Test
+    void createUserCreatesRoleWhenNotPresent() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(0);
+        repo.createUser("mydb", "bob", "secret123");
+        org.mockito.Mockito.verify(jdbc).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.startsWith("CREATE ROLE \"bob\"")));
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.startsWith("ALTER ROLE")));
+    }
+
+    @Test
+    void createUserAltersExistingRoleInsteadOfFailing() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        // Role already exists (orphaned from a prior provisioning whose database was dropped)
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(1);
+        repo.createUser("mydb", "bob", "secret123");
+        org.mockito.Mockito.verify(jdbc).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.startsWith("ALTER ROLE \"bob\"") && sql.contains("'secret123'")));
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.startsWith("CREATE ROLE")));
+    }
+
+    @Test
     void createUserRejectsPasswordWithSemicolon() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
         var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");

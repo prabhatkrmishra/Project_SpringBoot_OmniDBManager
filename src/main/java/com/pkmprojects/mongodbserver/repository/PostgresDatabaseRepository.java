@@ -276,7 +276,19 @@ public class PostgresDatabaseRepository {
 
     public void createUser(String dbName, String userName, String password) {
         String escaped = escapePassword(password);
-        jdbcTemplate.execute("CREATE ROLE " + quoteIdentifier(userName) + " WITH LOGIN PASSWORD '" + escaped + "'");
+        String quoted = quoteIdentifier(userName);
+        // Idempotent provisioning: PG roles are cluster-wide, so a role can outlive
+        // the database it was created for (e.g. a prior provisioning whose database
+        // was dropped without the role). If the role already exists, update its
+        // password and ensure LOGIN rather than failing on CREATE ROLE — this lets a
+        // re-provision succeed when the database is gone but the role lingers.
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_roles WHERE rolname = ?", Integer.class, userName);
+        if (exists != null && exists > 0) {
+            jdbcTemplate.execute("ALTER ROLE " + quoted + " WITH LOGIN PASSWORD '" + escaped + "'");
+        } else {
+            jdbcTemplate.execute("CREATE ROLE " + quoted + " WITH LOGIN PASSWORD '" + escaped + "'");
+        }
     }
 
     public void grantPrivileges(String dbName, String userName) {

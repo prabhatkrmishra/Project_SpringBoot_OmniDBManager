@@ -89,6 +89,26 @@ class PostgresDatabaseRepositoryIntegrationTest {
     }
 
     @Test
+    void createUserIsIdempotentWhenRoleOrphaned() {
+        // Simulate a prior provisioning whose database was dropped without the role:
+        // PG roles are cluster-wide, so the role survives the DROP DATABASE.
+        repo.createDatabase("testdb", "root");
+        repo.createUser("testdb", "testuser", "firstpass1");
+        repo.grantPrivileges("testdb", "testuser");
+        repo.dropDatabase("testdb"); // DB gone, but role "testuser" lingers
+
+        // Re-provisioning must not fail on CREATE ROLE — it should ALTER the existing
+        // role (update password, ensure LOGIN) instead of throwing "role already exists".
+        repo.createUser("testdb", "testuser", "secondpass2");
+        repo.createDatabase("testdb", "root");
+        repo.grantPrivileges("testdb", "testuser");
+        assertThat(repo.getUsers("testdb")).contains("testuser");
+
+        repo.dropDatabase("testdb");
+        repo.dropUser("testdb", "testuser");
+    }
+
+    @Test
     void updateUserPassword() {
         repo.createDatabase("testdb", "root");
         repo.createUser("testdb", "testuser", "firstpass1");
