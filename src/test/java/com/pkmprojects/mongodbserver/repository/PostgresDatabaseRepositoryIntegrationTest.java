@@ -127,7 +127,9 @@ class PostgresDatabaseRepositoryIntegrationTest {
         // on ALTER ROLE for a missing role.
         repo.createDatabase("testdb", "root");
         repo.createUser("testdb", "testuser", "firstpass1");
-        repo.grantPrivileges("testdb", "testuser");
+        // Drop the role while the database still exists. Granting privileges first
+        // would leave ALTER DEFAULT PRIVILEGES dependencies that PostgreSQL refuses
+        // to drop against a live database, so the role is dropped before granting.
         repo.dropUser("testdb", "testuser"); // role gone, database remains
 
         repo.updateUserPassword("testdb", "testuser", "secondpass2");
