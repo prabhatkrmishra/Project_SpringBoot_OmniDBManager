@@ -41,14 +41,16 @@ public class AdminCredentialsGuard implements ApplicationRunner {
         // One or both are default — enforce only under the atlas profile
         boolean isAtlasProfile = environment.acceptsProfiles(Profiles.of("atlas"));
         if (isAtlasProfile) {
+            // Never embed the password value in the message — it would land in
+            // startup failure logs and crash reports.
             throw new IllegalStateException(
                     "Refusing to start with default admin credentials "
-                            + "(username='" + adminProperties.username() + "', password='" + (defaultPassword ? DEFAULT_PASSWORD : "****") + "'). "
+                            + "(username='" + adminProperties.username() + "', password='****'). "
                             + "Set APP_ADMIN_USERNAME and APP_ADMIN_PASSWORD in .env.");
         }
 
-        log.warn("Starting with default admin credentials (username='{}', password='{}'). "
+        log.warn("Starting with default admin credentials (username='{}'). "
                 + "Consider setting APP_ADMIN_USERNAME and APP_ADMIN_PASSWORD in .env for production.",
-                adminProperties.username(), defaultPassword ? "admin" : "custom");
+                adminProperties.username());
     }
 }

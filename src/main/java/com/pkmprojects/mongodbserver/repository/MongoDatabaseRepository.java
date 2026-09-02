@@ -1,5 +1,6 @@
 package com.pkmprojects.mongodbserver.repository;
 
+import com.mongodb.MongoCommandException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.model.IndexOptions;
 import org.bson.Document;
@@ -103,10 +104,24 @@ public class MongoDatabaseRepository {
 
     /**
      * Rotates a Mongo user's password, preserving its existing roles.
+     *
+     * <p>Self-healing: if the user was dropped out-of-band (e.g. a manual cleanup,
+     * or a partial provisioning), {@code updateUser} fails with "user not found"
+     * (code 11). In that case the user is recreated with the standard readWrite
+     * role for {@code dbName} so a password reset always succeeds — mirroring the
+     * recreate-if-missing behaviour of the Postgres and MySQL repositories.
      */
     public void updateUserPassword(String dbName, String userName, String newPassword) {
-        Document command = new Document("updateUser", userName).append("pwd", newPassword);
-        mongoClient.getDatabase(dbName).runCommand(command);
+        try {
+            Document command = new Document("updateUser", userName).append("pwd", newPassword);
+            mongoClient.getDatabase(dbName).runCommand(command);
+        } catch (MongoCommandException e) {
+            if (e.getErrorCode() == 11) {
+                createUser(dbName, userName, newPassword);
+                return;
+            }
+            throw e;
+        }
     }
 
     /**

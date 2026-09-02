@@ -118,6 +118,21 @@ class MongoDatabaseRepositoryTest {
     }
 
     @Test
+    void updateUserPasswordRecreatesUserWhenDropped() {
+        repository.createDatabase("testapp");
+        repository.createUser("testapp", "testapp_user", "firstsecret123");
+        repository.dropUser("testapp", "testapp_user");
+
+        // Self-healing: a dropped user is recreated rather than failing on updateUser.
+        repository.updateUserPassword("testapp", "testapp_user", "secondsecret456");
+
+        try (MongoClient newClient = MongoClients.create("mongodb://testapp_user:secondsecret456@"
+                + mongo.getHost() + ":" + mongo.getMappedPort(27017) + "/testapp")) {
+            assertThat(newClient.getDatabase("testapp").getCollection("items").countDocuments()).isZero();
+        }
+    }
+
+    @Test
     void dropDatabaseAndUser() {
         repository.createDatabase("testapp");
         repository.createUser("testapp", "testapp_user", "firstsecret123");
