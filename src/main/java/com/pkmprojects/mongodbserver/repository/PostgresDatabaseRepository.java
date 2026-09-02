@@ -2,11 +2,14 @@ package com.pkmprojects.mongodbserver.repository;
 
 import com.zaxxer.hikari.HikariDataSource;
 import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Repository
 @ConditionalOnProperty(name = "app.postgres.enabled", havingValue = "true")
 public class PostgresDatabaseRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(PostgresDatabaseRepository.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final String postgresUri;
@@ -166,18 +171,24 @@ public class PostgresDatabaseRepository {
         if (schemeEnd < 0) {
             throw new IllegalArgumentException("Invalid JDBC URI — no scheme (://): " + uri);
         }
+        String encoded = encodePathSegment(dbName);
         int slash = uri.indexOf('/', schemeEnd + 3);
         int q = uri.indexOf('?', schemeEnd + 3);
         if (slash < 0) {
             // No slash: host[:port][?query] -> insert /dbName before query
             if (q >= 0) {
-                return uri.substring(0, q) + "/" + dbName + uri.substring(q);
+                return uri.substring(0, q) + "/" + encoded + uri.substring(q);
             }
-            return uri + "/" + dbName;
+            return uri + "/" + encoded;
         }
         String prefix = uri.substring(0, slash + 1);
         String suffix = q >= 0 ? uri.substring(q) : "";
-        return prefix + dbName + suffix;
+        return prefix + encoded + suffix;
+    }
+
+    /** Percent-encode a value for use as a URL path segment (spaces as %20, not +). */
+    private static String encodePathSegment(String value) {
+        return java.net.URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     public List<String> listDatabaseNames() {
@@ -280,37 +291,30 @@ public class PostgresDatabaseRepository {
     // ── pgvector ──────────────────────────────────────────────────────────
 
     public boolean isVectorAvailable() {
-        try {
-            Integer c = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM pg_available_extensions WHERE name = 'vector'", Integer.class);
-            return c != null && c > 0;
-        } catch (Exception e) {
-            org.slf4j.LoggerFactory.getLogger(PostgresDatabaseRepository.class).warn("isVectorAvailable failed", e);
-            return false;
-        }
+        Integer c = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_available_extensions WHERE name = 'vector'", Integer.class);
+        return c != null && c > 0;
     }
 
     public boolean isVectorEnabled(String dbName) {
-        try {
-            Integer c = jdbcFor(dbName).queryForObject(
-                    "SELECT COUNT(*) FROM pg_catalog.pg_extension WHERE extname = 'vector'", Integer.class);
-            return c != null && c > 0;
-        } catch (Exception e) {
-            org.slf4j.LoggerFactory.getLogger(PostgresDatabaseRepository.class).debug("isVectorEnabled({}) failed", dbName, e);
-            return false;
-        }
+        Integer c = jdbcFor(dbName).queryForObject(
+                "SELECT COUNT(*) FROM pg_catalog.pg_extension WHERE extname = 'vector'", Integer.class);
+        return c != null && c > 0;
     }
 
     public void enableVectorExtension(String dbName) {
-        jdbcFor(dbName).execute("CREATE EXTENSION IF NOT EXISTS vector");
+        // SCHEMA public: with a superuser whose search_path starts with "$user",
+        // an unqualified CREATE EXTENSION could land in a $user schema if one
+        // exists, leaving public.vector missing for tenant queries.
+        jdbcFor(dbName).execute("CREATE EXTENSION IF NOT EXISTS vector SCHEMA public");
     }
 
     public String vectorVersion(String dbName) {
         try {
             return jdbcFor(dbName).queryForObject(
                     "SELECT extversion FROM pg_catalog.pg_extension WHERE extname = 'vector'", String.class);
-        } catch (Exception e) {
-            return null;
+        } catch (org.springframework.dao.EmptyResultDataAccessException e) {
+            return null; // extension not installed in this database
         }
     }
 
