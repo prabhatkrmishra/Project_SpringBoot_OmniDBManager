@@ -38,9 +38,10 @@ public class AdminCredentialsGuard implements ApplicationRunner {
             return;  // Both are custom, OK
         }
 
-        // One or both are default — enforce only under the atlas profile
+        // One or both are default — enforce under the atlas profile, or always
+        // when the operator has explicitly opted into strict enforcement.
         boolean isAtlasProfile = environment.acceptsProfiles(Profiles.of("atlas"));
-        if (isAtlasProfile) {
+        if (isAtlasProfile || adminProperties.enforceStrongCredentials()) {
             // Never embed the password value in the message — it would land in
             // startup failure logs and crash reports.
             throw new IllegalStateException(

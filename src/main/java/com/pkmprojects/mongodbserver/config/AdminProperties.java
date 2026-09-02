@@ -8,7 +8,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *
  * @param username admin login name
  * @param password admin login password (plaintext source of truth; BCrypt-encoded in memory)
+ * @param enforceStrongCredentials when true, refuse to start with default admin credentials
+ *                                 regardless of the active profile (defaults to false)
  */
 @ConfigurationProperties(prefix = "app.admin")
-public record AdminProperties(String username, String password) {
+public record AdminProperties(String username, String password, boolean enforceStrongCredentials) {
 }

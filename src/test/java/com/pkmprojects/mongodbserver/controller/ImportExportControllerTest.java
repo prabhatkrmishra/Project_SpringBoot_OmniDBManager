@@ -227,7 +227,7 @@ class ImportExportControllerTest {
     static class SecurityTestConfig {
         @Bean
         AdminProperties adminProperties() {
-            return new AdminProperties("admin", "admin");
+            return new AdminProperties("admin", "admin", false);
         }
 
         @Bean

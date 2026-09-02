@@ -71,6 +71,9 @@ app:
   admin:
     username: ${APP_ADMIN_USERNAME:admin}
     password: ${APP_ADMIN_PASSWORD:admin}
+    # When true, refuse to start with the default admin credentials even outside
+    # the atlas profile (e.g. a hardened local/CI deployment).
+    enforce-strong-credentials: ${APP_ADMIN_ENFORCE_STRONG:false}
   mongo:
     enabled: ${MONGO_ENABLED:false}
   # Public Mongo host used in the connection strings shown in the UI (set when

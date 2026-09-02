@@ -591,7 +591,7 @@ class PostgresControllerTest {
 
     @TestConfiguration(proxyBeanMethods = false)
     static class SecurityTestConfig {
-        @Bean AdminProperties adminProperties() { return new AdminProperties("admin", "admin"); }
+        @Bean AdminProperties adminProperties() { return new AdminProperties("admin", "admin", false); }
         @Bean Clock clock() { return Clock.fixed(Instant.parse("2026-08-18T10:00:00Z"), ZoneOffset.UTC); }
     }
 }

@@ -24,7 +24,7 @@ class AdminCredentialsGuardTest {
 
     @Test
     void nonDefaultCredentialsAreAccepted() {
-        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("bob", "s3cret!"), environment);
+        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("bob", "s3cret!", false), environment);
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
     }
@@ -32,7 +32,7 @@ class AdminCredentialsGuardTest {
     @Test
     void defaultCredentialsFailFastUnderAtlasProfile() {
         when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(true);
-        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "admin"), environment);
+        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "admin", false), environment);
 
         assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
         verify(environment).acceptsProfiles(Profiles.of("atlas"));
@@ -41,7 +41,7 @@ class AdminCredentialsGuardTest {
     @Test
     void defaultCredentialsWarnButStartWithoutAtlasProfile() {
         when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(false);
-        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "admin"), environment);
+        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "admin", false), environment);
 
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
         verify(environment).acceptsProfiles(Profiles.of("atlas"));
@@ -50,7 +50,7 @@ class AdminCredentialsGuardTest {
     @Test
     void loneDefaultPasswordIsStillGuardedUnderAtlasProfile() {
         when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(true);
-        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("prodadmin", "admin"), environment);
+        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("prodadmin", "admin", false), environment);
 
         assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
         verify(environment).acceptsProfiles(Profiles.of("atlas"));
@@ -59,9 +59,25 @@ class AdminCredentialsGuardTest {
     @Test
     void loneDefaultUsernameIsStillGuardedUnderAtlasProfile() {
         when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(true);
-        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "s3cret!"), environment);
+        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "s3cret!", false), environment);
 
         assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
         verify(environment).acceptsProfiles(Profiles.of("atlas"));
+    }
+
+    @Test
+    void defaultCredentialsFailFastWhenEnforcementIsForcedWithoutAtlasProfile() {
+        when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(false);
+        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("admin", "admin", true), environment);
+
+        assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
+        verify(environment).acceptsProfiles(Profiles.of("atlas"));
+    }
+
+    @Test
+    void customCredentialsAreAcceptedEvenWhenEnforcementIsForced() {
+        AdminCredentialsGuard guard = new AdminCredentialsGuard(new AdminProperties("bob", "s3cret!", true), environment);
+
+        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
     }
 }
