@@ -337,6 +337,128 @@ ss -tlnp | grep -E "443|8443|5432|9811|80"
 # → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443, 127.0.0.1:5432, 127.0.0.1:9811
 ```
 
+## 11. Docker Container Postgres (pgvector) with TLS
+
+> **Alternative to sections 3/6/9.** Instead of the system `postgresql-16`, run Postgres as a Docker container (`pgvector/pgvector`) on `127.0.0.1:9813` — this is what the repo ships (`compose.postgres.yaml`) and what the pgvector extension requires. TLS uses a self-generated CA + server cert (not Let's Encrypt), and the nginx stream `default` route points at the container port, not the system `5432`.
+
+### 11.1 Generate CA + server certs
+
+```bash
+cd ~/omnidb
+mkdir -p certs && cd certs
+
+# CA
+openssl genrsa -out ca.key 2048
+openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 \
+  -subj "/CN=OmniDB PostgreSQL CA" -out ca.crt
+
+# Server key + CSR (SAN covers the public host + localhost)
+openssl genrsa -out server.key 2048
+chmod 600 server.key
+openssl req -new -key server.key -subj "/CN=<YOUR_DOMAIN>" -out server.csr
+
+cat > san.cnf <<'EOF'
+[req]
+distinguished_name = dn
+req_extensions = v3_req
+[dn]
+[v3_req]
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = <YOUR_DOMAIN>
+DNS.2 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
+  -out server.crt -days 3650 -sha256 -extfile san.cnf -extensions v3_req
+
+# Container runs as UID 999 (postgres) and is read-only — chown so it can read the certs
+sudo chown -R 999:999 ~/omnidb/certs
+sudo chmod 600 ~/omnidb/certs/server.key
+```
+
+### 11.2 Enable SSL in compose.postgres.yaml
+
+The `postgres` service must set `ssl=on` and mount the certs read-only:
+
+```yaml
+    command: ["postgres",
+      "-c", "password_encryption=scram-sha-256",
+      "-c", "ssl=on",
+      "-c", "ssl_cert_file=/var/lib/postgresql/server.crt",
+      "-c", "ssl_key_file=/var/lib/postgresql/server.key",
+      "-c", "ssl_ca_file=/var/lib/postgresql/ca.crt"]
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./certs/server.crt:/var/lib/postgresql/server.crt:ro
+      - ./certs/server.key:/var/lib/postgresql/server.key:ro
+      - ./certs/ca.crt:/var/lib/postgresql/ca.crt:ro
+```
+
+### 11.3 Require SSL in pg_hba.conf
+
+Change the catch-all TCP rule from `host` to `hostssl` so non-TLS connections are rejected:
+
+```bash
+sudo docker exec omnidb-postgres sed -i \
+  's/^host all all all scram-sha-256$/hostssl all all all scram-sha-256/' \
+  /var/lib/postgresql/18/docker/pg_hba.conf
+```
+
+### 11.4 Point nginx stream at the container
+
+The stream `default` route must target the container port `9813`, not the system `5432`:
+
+```nginx
+stream {
+    map $ssl_preread_alpn_protocols $upstream {
+        ~\bh2\b 127.0.0.1:8443;
+        ~\bhttp/1\.1\b 127.0.0.1:8443;
+        default 127.0.0.1:9813;   # container postgres, not 5432
+    }
+    server {
+        listen 443;
+        ssl_preread on;
+        proxy_pass $upstream;
+        proxy_timeout 1h;
+        proxy_connect_timeout 10s;
+    }
+}
+```
+
+### 11.5 Update .env
+
+```bash
+# App's own connection must now use TLS (container requires hostssl)
+POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?user=postgres&password=<POSTGRES_PASSWORD>&sslmode=require&connectTimeout=5&socketTimeout=10
+# Issued per-DB strings carry sslmode=require
+POSTGRES_PUBLIC_TLS=true
+POSTGRES_PUBLIC_SSLMODE=require
+```
+
+### 11.6 Recreate container + restart app
+
+```bash
+cd ~/omnidb
+sudo docker compose -f compose.postgres.yaml up -d postgres   # recreates with SSL on, preserves data volume
+sudo docker exec omnidb-postgres psql -U postgres -d postgres -tAc 'SHOW ssl;'   # → on
+sudo systemctl restart omnidb
+```
+
+### 11.7 Verify
+
+```bash
+# SSL connection succeeds
+PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=require&application_name=omnidb" \
+  -c "SELECT ssl, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
+# → t | TLS_AES_256_GCM_SHA384
+
+# Non-SSL connection is rejected (proves SSL enforced)
+PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=disable" -c "SELECT 1;"
+# → FATAL: no pg_hba.conf entry ... no encryption
+```
+
 ## Connection Strings
 
 **Manager → Postgres (local, never public DNS):**
@@ -370,6 +492,7 @@ https://<YOUR_DOMAIN>/login
 | `omnidb: UnsupportedClassVersionError class file version 69.0` | Jar needs Java 25, VPS has 21 | `apt install openjdk-25-jdk`, `update-alternatives --config java` |
 | `omnidb: Unrecognized option: --sun-misc-unsafe-memory-access=allow` | Flag only on Java 25, service used Java 21 | Remove flag or use Java 25 |
 | `<YOUR_DOMAIN>:5432` timeout | Only `443` is public, `5432` closed | Use `<YOUR_DOMAIN>:443` with `sslmode=require` |
+| `FATAL: no pg_hba.conf entry ... no encryption` | SSL is enforced (`hostssl`), client connected without TLS | Use `sslmode=require` (or `verify-full`) in the connection string; never `sslmode=disable` |
 | `Unable to determine zone_id for <YOUR_DOMAIN>` | Cloudflare token for wrong zone | Use `webroot` with port 80, or create token for correct zone |
 
 ## Renewal
@@ -386,7 +509,7 @@ sudo certbot renew --dry-run
 ## Files Changed on VPS
 
 - `/etc/nginx/nginx.conf` — added `include /etc/nginx/stream.conf;` before `http {`
-- `/etc/nginx/stream.conf` — new, ALPN multiplex `443` → `8443`/`5432`
+- `/etc/nginx/stream.conf` — new, ALPN multiplex `443` → `8443`/`5432` (or `9813` for the Docker container path, section 11)
 - `/etc/nginx/sites-available/<YOUR_DOMAIN>` — new, `80` + `127.0.0.1:8443`
 - Other sites' configs — `443` → `127.0.0.1:8443` (to free `443` for stream)
 - `/etc/postgresql/16/main/postgresql.conf` — `ssl_cert_file/key_file` → `/etc/postgresql/certs/server.crt/key`
@@ -395,3 +518,9 @@ sudo certbot renew --dry-run
 - `~/omnidb/.env` — `POSTGRES_ROOT_USER=postgres`, `POSTGRES_PUBLIC_HOST=<YOUR_DOMAIN>:443`, `POSTGRES_URI=127.0.0.1:5432`
 - `/etc/letsencrypt/live/<YOUR_DOMAIN>/` — new cert
 - `iptables` — `INPUT` allow `80`, `443`
+
+**Docker container path (section 11) additionally:**
+- `~/omnidb/compose.postgres.yaml` — `ssl=on` + cert mounts on the `postgres` service
+- `~/omnidb/certs/` — `ca.key`, `ca.crt`, `server.key`, `server.crt` (chowned to UID 999)
+- Container `pg_hba.conf` (`/var/lib/postgresql/18/docker/pg_hba.conf`) — `host` → `hostssl` catch-all rule
+- `~/omnidb/.env` — `POSTGRES_URI` → `127.0.0.1:9813` with `sslmode=require`, `POSTGRES_PUBLIC_TLS=true`
