@@ -85,4 +85,29 @@ class MysqlDatabaseRepositoryUnitTest {
         repo.updateUserPassword("mydb", "bob", "new'pass");
         verify(jdbc).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.contains("'new''pass'")));
     }
+
+    @Test
+    void updateUserPasswordAltersExistingUser() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(1);
+        repo.updateUserPassword("mydb", "bob", "secret123");
+        verify(jdbc).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("ALTER USER 'bob'@'%'") && sql.contains("'secret123'")));
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("CREATE USER")));
+    }
+
+    @Test
+    void updateUserPasswordRecreatesUserWhenMissing() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+        // User dropped out-of-band (e.g. manual cleanup) — reset should recreate it
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(0);
+        repo.updateUserPassword("mydb", "bob", "secret123");
+        verify(jdbc).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("CREATE USER 'bob'@'%'") && sql.contains("'secret123'")));
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("ALTER USER")));
+    }
 }

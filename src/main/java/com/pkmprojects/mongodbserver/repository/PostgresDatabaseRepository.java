@@ -307,7 +307,17 @@ public class PostgresDatabaseRepository {
 
     public void updateUserPassword(String dbName, String userName, String newPassword) {
         String escaped = escapePassword(newPassword);
-        jdbcTemplate.execute("ALTER ROLE " + quoteIdentifier(userName) + " WITH PASSWORD '" + escaped + "'");
+        String quoted = quoteIdentifier(userName);
+        // Self-healing password reset: if the role was dropped out-of-band (e.g. a
+        // manual cleanup, or a role orphaned from a provisioning whose database was
+        // removed), recreate it rather than failing on ALTER ROLE for a missing role.
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_roles WHERE rolname = ?", Integer.class, userName);
+        if (exists != null && exists > 0) {
+            jdbcTemplate.execute("ALTER ROLE " + quoted + " WITH PASSWORD '" + escaped + "'");
+        } else {
+            jdbcTemplate.execute("CREATE ROLE " + quoted + " WITH LOGIN PASSWORD '" + escaped + "'");
+        }
     }
 
     public void dropUser(String dbName, String userName) {

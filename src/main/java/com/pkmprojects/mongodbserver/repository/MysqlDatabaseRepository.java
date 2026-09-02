@@ -122,7 +122,17 @@ public class MysqlDatabaseRepository {
 
     public void updateUserPassword(String dbName, String userName, String newPassword) {
         String escaped = escapePassword(newPassword);
-        jdbcTemplate.execute("ALTER USER " + quoteUser(userName) + " IDENTIFIED BY '" + escaped + "'");
+        String quoted = quoteUser(userName);
+        // Self-healing password reset: if the account was dropped out-of-band (e.g. a
+        // manual cleanup, or a user orphaned from a provisioning whose database was
+        // removed), recreate it rather than failing on ALTER USER for a missing account.
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM mysql.user WHERE user = ? AND host = '%'", Integer.class, userName);
+        if (exists != null && exists > 0) {
+            jdbcTemplate.execute("ALTER USER " + quoted + " IDENTIFIED BY '" + escaped + "'");
+        } else {
+            jdbcTemplate.execute("CREATE USER " + quoted + " IDENTIFIED BY '" + escaped + "'");
+        }
     }
 
     public void dropUser(String dbName, String userName) {

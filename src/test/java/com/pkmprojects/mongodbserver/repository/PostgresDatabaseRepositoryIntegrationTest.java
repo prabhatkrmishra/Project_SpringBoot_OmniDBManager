@@ -121,6 +121,23 @@ class PostgresDatabaseRepositoryIntegrationTest {
     }
 
     @Test
+    void updateUserPasswordRecreatesRoleWhenDropped() {
+        // Simulate a password reset on a database whose role was removed out-of-band
+        // (e.g. manual cleanup). The reset must recreate the role instead of failing
+        // on ALTER ROLE for a missing role.
+        repo.createDatabase("testdb", "root");
+        repo.createUser("testdb", "testuser", "firstpass1");
+        repo.grantPrivileges("testdb", "testuser");
+        repo.dropUser("testdb", "testuser"); // role gone, database remains
+
+        repo.updateUserPassword("testdb", "testuser", "secondpass2");
+        assertThat(repo.getUsers("testdb")).contains("testuser");
+
+        repo.dropDatabase("testdb");
+        repo.dropUser("testdb", "testuser");
+    }
+
+    @Test
     void tableLifecycle() {
         repo.createDatabase("testdb", "root");
         repo.createUser("testdb", "testuser", "secret1234");
