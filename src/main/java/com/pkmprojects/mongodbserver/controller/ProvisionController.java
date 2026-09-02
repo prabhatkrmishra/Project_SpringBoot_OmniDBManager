@@ -3,18 +3,29 @@ package com.pkmprojects.mongodbserver.controller;
 import com.pkmprojects.mongodbserver.dto.CreateDatabaseForm;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 @Controller
 public class ProvisionController {
 
     private final ProvisioningService provisioningService;
+    private final boolean mongoEnabled;
+    private final boolean postgresEnabled;
+    private final boolean mysqlEnabled;
 
-    public ProvisionController(ProvisioningService provisioningService) {
+    public ProvisionController(ProvisioningService provisioningService,
+                               @Value("${app.mongo.enabled:false}") boolean mongoEnabled,
+                               @Value("${app.postgres.enabled:false}") boolean postgresEnabled,
+                               @Value("${app.mysql.enabled:false}") boolean mysqlEnabled) {
         this.provisioningService = provisioningService;
+        this.mongoEnabled = mongoEnabled;
+        this.postgresEnabled = postgresEnabled;
+        this.mysqlEnabled = mysqlEnabled;
     }
 
     @GetMapping("/provision")
@@ -42,7 +53,11 @@ public class ProvisionController {
 
     @GetMapping("/provision/mongo")
     @PreAuthorize("hasRole('ADMIN')")
-    public String mongoForm(Model model) {
+    public String mongoForm(Model model, RedirectAttributes redirectAttributes) {
+        if (!mongoEnabled) {
+            redirectAttributes.addFlashAttribute("flashError", "MongoDB is not enabled");
+            return "redirect:/provision";
+        }
         if (!model.containsAttribute("form")) {
             model.addAttribute("form", new CreateDatabaseForm("", DatabaseEngineType.MONGO, "", ""));
         }
@@ -52,7 +67,11 @@ public class ProvisionController {
 
     @GetMapping("/provision/postgres")
     @PreAuthorize("hasRole('ADMIN')")
-    public String postgresForm(Model model) {
+    public String postgresForm(Model model, RedirectAttributes redirectAttributes) {
+        if (!postgresEnabled) {
+            redirectAttributes.addFlashAttribute("flashError", "PostgreSQL is not enabled");
+            return "redirect:/provision";
+        }
         if (!model.containsAttribute("form")) {
             model.addAttribute("form", new CreateDatabaseForm("", DatabaseEngineType.POSTGRES, "", ""));
         }
@@ -63,7 +82,11 @@ public class ProvisionController {
 
     @GetMapping("/provision/mysql")
     @PreAuthorize("hasRole('ADMIN')")
-    public String mysqlForm(Model model) {
+    public String mysqlForm(Model model, RedirectAttributes redirectAttributes) {
+        if (!mysqlEnabled) {
+            redirectAttributes.addFlashAttribute("flashError", "MySQL is not enabled");
+            return "redirect:/provision";
+        }
         if (!model.containsAttribute("form")) {
             model.addAttribute("form", new CreateDatabaseForm("", DatabaseEngineType.MYSQL, "", ""));
         }

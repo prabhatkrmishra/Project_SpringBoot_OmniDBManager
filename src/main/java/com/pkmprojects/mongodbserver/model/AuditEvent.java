@@ -94,10 +94,15 @@ public class AuditEvent {
     /**
      * Records one admin action on the provisioning lifecycle.
      *
-     * @param eventType   one of {@link #PROVISION}, {@link #RESET_PASSWORD}, {@link #DELETE}, {@link #REVOKE_USER}
+     * @param eventType   one of {@link #PROVISION}, {@link #RESET_PASSWORD}, {@link #DELETE},
+     *                    {@link #REVOKE_USER}, {@link #WEBHOOK_CREATED}, {@link #WEBHOOK_UPDATED},
+     *                    {@link #WEBHOOK_DELETED}, {@link #BACKUP_CREATED}, {@link #BACKUP_RESTORED},
+     *                    {@link #IMPORT}, {@link #TABLE_CREATED}, {@link #TABLE_DROPPED},
+     *                    {@link #TABLE_TRUNCATED}, {@link #ROW_INSERTED}, {@link #ROW_DELETED},
+     *                    {@link #VECTOR_ENABLED}
      * @param dbName      affected database
      * @param userName    affected database user, or {@code null} (e.g. delete of a
-     *                    database that was never provisioned)
+     *                    database that was never provisioned, or vector operations)
      * @param performedBy admin username from the security context
      * @param performedAt action timestamp
      */

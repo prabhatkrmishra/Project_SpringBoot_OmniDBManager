@@ -64,8 +64,10 @@ class PostgresDatabaseRepositoryUnitTest {
     }
 
     @Test
-    void urlForWithNoSchemeReturnsAsIs() {
-        assertThat(repo("not-a-uri").urlFor("myapp")).isEqualTo("not-a-uri");
+    void urlForWithNoSchemeThrows() {
+        assertThatThrownBy(() -> repo("not-a-uri").urlFor("myapp"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Invalid JDBC URI");
     }
 
     @Test

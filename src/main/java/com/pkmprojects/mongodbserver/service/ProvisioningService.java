@@ -549,22 +549,23 @@ public class ProvisioningService {
 
     public void enableVector(DatabaseEngineType engineType, String dbName) {
         if (engineType != DatabaseEngineType.POSTGRES) throw new ProvisioningException("pgvector is only available for PostgreSQL");
-        nameValidator.validatePostgresDatabaseName(dbName);
-        databaseLocks.withLock(lockKey(engineType, dbName), () -> {
-            requireDatabase(dbName, engineType);
+        String n = dbName.trim();
+        nameValidator.validatePostgresDatabaseName(n);
+        databaseLocks.withLock(lockKey(engineType, n), () -> {
+            requireDatabase(n, engineType);
             PostgresDatabaseEngine pg = (PostgresDatabaseEngine) engineFor(engineType);
-            if (pg.isVectorEnabled(dbName)) {
-                log.debug("pgvector already enabled on '{}'", dbName);
+            if (pg.isVectorEnabled(n)) {
+                log.info("pgvector already enabled on '{}' — skipping", n);
                 return;
             }
             if (!pg.isVectorAvailable()) throw new ProvisioningException("pgvector extension not available on server — use pgvector/pgvector:0.8.6-pg18-trixie image or install postgresql-*-pgvector");
             try {
-                pg.enableVector(dbName);
+                pg.enableVector(n);
             } catch (org.springframework.dao.DataAccessException e) {
-                throw new ProvisioningException("Could not enable pgvector on '" + dbName + "': " + e.getMostSpecificCause().getMessage(), e);
+                throw new ProvisioningException("Could not enable pgvector on '" + n + "': " + e.getMostSpecificCause().getMessage(), e);
             }
-            audit(AuditEvent.VECTOR_ENABLED, dbName, engineType, null, clock.instant());
-            log.info("Enabled pgvector on database '{}'", dbName);
+            audit(AuditEvent.VECTOR_ENABLED, n, engineType, null, clock.instant());
+            log.info("Enabled pgvector on database '{}'", n);
         });
     }
 

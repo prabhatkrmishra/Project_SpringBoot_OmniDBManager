@@ -10,6 +10,8 @@ import com.pkmprojects.mongodbserver.service.PostgresExplorationService;
 import com.pkmprojects.mongodbserver.service.PostgresStatisticsService;
 import com.pkmprojects.mongodbserver.service.ProvisioningService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -40,6 +42,7 @@ import java.util.Optional;
 @RequestMapping("/postgres")
 public class PostgresController {
 
+    private static final Logger log = LoggerFactory.getLogger(PostgresController.class);
     private static final DateTimeFormatter FILENAME_TIMESTAMP =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
 
@@ -82,12 +85,14 @@ public class PostgresController {
         if (bindingResult.hasErrors()) {
             model.addAttribute("engine", DatabaseEngineType.POSTGRES);
             model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
+            model.addAttribute("enableVector", enableVector);
             return "provision-postgres";
         }
         if (enableVector && !provisioningService.isVectorAvailable()) {
-            bindingResult.rejectValue("dbName", "vector.unavailable", "pgvector not available on server — use pgvector/pgvector:0.8.6-pg18-trixie image");
+            bindingResult.reject("vector.unavailable", "pgvector not available on server — use pgvector/pgvector:0.8.6-pg18-trixie image");
             model.addAttribute("engine", DatabaseEngineType.POSTGRES);
             model.addAttribute("vectorAvailable", false);
+            model.addAttribute("enableVector", true);
             return "provision-postgres";
         }
         CreateDatabaseForm withEngine = new CreateDatabaseForm(form.dbName(), DatabaseEngineType.POSTGRES, form.userName(), form.password());
@@ -97,7 +102,8 @@ public class PostgresController {
                 provisioningService.enableVector(DatabaseEngineType.POSTGRES, created.dbName());
                 redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned with pgvector");
             } catch (Exception e) {
-                redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned (pgvector failed: " + e.getMessage() + ") — retry via Enable pgvector on detail page");
+                log.warn("enableVector failed for '{}' during provision", created.dbName(), e);
+                redirectAttributes.addFlashAttribute("flashError", "Database '" + created.dbName() + "' provisioned but pgvector could not be enabled — retry on detail page");
             }
         } else {
             redirectAttributes.addFlashAttribute("flashSuccess", "Database '" + created.dbName() + "' provisioned");
@@ -113,7 +119,8 @@ public class PostgresController {
             provisioningService.enableVector(DatabaseEngineType.POSTGRES, dbName);
             redirectAttributes.addFlashAttribute("flashSuccess", "pgvector enabled on '" + dbName + "'");
         } catch (Exception e) {
-            redirectAttributes.addFlashAttribute("flashError", e.getMessage());
+            log.warn("enableVector failed for '{}'", dbName, e);
+            redirectAttributes.addFlashAttribute("flashError", "Could not enable pgvector on '" + dbName + "'");
         }
         return "redirect:/postgres/databases/" + dbName;
     }

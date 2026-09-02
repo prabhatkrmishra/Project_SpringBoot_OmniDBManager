@@ -56,6 +56,9 @@ public class PostgresDatabaseRepository {
     }
 
     public static String quoteIdentifier(String identifier) {
+        if (identifier == null || identifier.isEmpty()) {
+            throw new IllegalArgumentException("Identifier must not be null or empty");
+        }
         return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
@@ -134,6 +137,9 @@ public class PostgresDatabaseRepository {
     }
 
     private JdbcTemplate jdbcFor(String dbName) {
+        if (dbName == null || dbName.isEmpty()) {
+            throw new IllegalArgumentException("dbName must not be null or empty");
+        }
         HikariDataSource ds = perDbDataSources.computeIfAbsent(dbName, key -> {
             HikariDataSource hds = new HikariDataSource();
             hds.setJdbcUrl(urlFor(key));
@@ -158,7 +164,7 @@ public class PostgresDatabaseRepository {
         String uri = postgresUri;
         int schemeEnd = uri.indexOf("://");
         if (schemeEnd < 0) {
-            return uri;
+            throw new IllegalArgumentException("Invalid JDBC URI — no scheme (://): " + uri);
         }
         int slash = uri.indexOf('/', schemeEnd + 3);
         int q = uri.indexOf('?', schemeEnd + 3);

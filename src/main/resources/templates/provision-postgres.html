@@ -42,14 +42,15 @@
                                     <div class="form-hint form-hint--note">Leave blank to generate a strong password.</div>
                                     <div class="text-danger small mt-1" th:errors="*{password}" th:if="${#fields.hasErrors('password')}">Error</div>
                                 </div>
-                                <div class="mb-3 full" th:if="${vectorAvailable}">
+                                <div class="text-danger small mt-1" th:if="${#fields.hasGlobalErrors()}" th:errors="*{global}">Error</div>
+                                <div class="mb-3 full" th:if="${vectorAvailable == true}">
                                     <div class="form-check">
-                                        <input class="form-check-input" id="enableVector" name="enableVector" type="checkbox" value="true" th:checked="${param.enableVector != null}">
+                                        <input class="form-check-input" id="enableVector" name="enableVector" type="checkbox" value="true" th:checked="${enableVector}">
                                         <label class="form-check-label" for="enableVector">Enable pgvector</label>
                                     </div>
                                     <div class="form-hint">Installs <code>CREATE EXTENSION vector</code> — enables <code>vector(1536)</code>, <code>halfvec</code> (≤4000d), HNSW/IVFFlat indexes. See <a href="https://github.com/pgvector/pgvector#hnsw" target="_blank">pgvector docs</a>.</div>
                                 </div>
-                                <div class="mb-3 full" th:unless="${vectorAvailable}">
+                                <div class="mb-3 full" th:if="${vectorAvailable != true}">
                                     <div class="form-hint text-body-secondary">pgvector not available on server — use <code>pgvector/pgvector:0.8.6-pg18-trixie</code> image or install <code>postgresql-*-pgvector</code>.</div>
                                 </div>
                                 <div class="form-actions">
