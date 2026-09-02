@@ -49,12 +49,17 @@ public class PostgresDatabaseRepository {
 
     @PreDestroy
     void closePerDbPools() {
-        // Drain atomically: snapshot the pools, clear the map, then close. The
-        // old values()-then-clear() could lose a pool added concurrently between
-        // the two calls, leaking it without close.
-        java.util.List<HikariDataSource> pools = new java.util.ArrayList<>(perDbDataSources.values());
-        perDbDataSources.clear();
-        for (HikariDataSource ds : pools) {
+        // Drain atomically: repeatedly remove-and-close entries until the map is
+        // empty. A snapshot-then-clear() could lose a pool added concurrently
+        // between the two calls (e.g. a jdbcFor() racing shutdown), leaking it
+        // without close. Any pool added mid-drain is picked up by a later pass.
+        while (!perDbDataSources.isEmpty()) {
+            java.util.Iterator<Map.Entry<String, HikariDataSource>> it = perDbDataSources.entrySet().iterator();
+            if (!it.hasNext()) {
+                break;
+            }
+            HikariDataSource ds = it.next().getValue();
+            it.remove();
             try { ds.close(); } catch (Exception ignored) {}
         }
     }
