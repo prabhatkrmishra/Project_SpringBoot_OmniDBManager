@@ -60,6 +60,10 @@ public class AuditEvent {
     public static final String ROW_INSERTED = "ROW_INSERTED";
     public static final String ROW_DELETED = "ROW_DELETED";
     public static final String VECTOR_ENABLED = "VECTOR_ENABLED";
+    /**
+     * Event type: an attempt to enable pgvector failed.
+     */
+    public static final String VECTOR_ENABLE_FAILED = "VECTOR_ENABLE_FAILED";
 
     /**
      * Every event type, in display order. Used by the activity filter and the
@@ -70,7 +74,7 @@ public class AuditEvent {
             WEBHOOK_CREATED, WEBHOOK_UPDATED, WEBHOOK_DELETED,
             BACKUP_CREATED, BACKUP_RESTORED, IMPORT,
             TABLE_CREATED, TABLE_DROPPED, TABLE_TRUNCATED, ROW_INSERTED, ROW_DELETED,
-            VECTOR_ENABLED);
+            VECTOR_ENABLED, VECTOR_ENABLE_FAILED);
 
     @Id
     private String id;
@@ -99,7 +103,7 @@ public class AuditEvent {
      *                    {@link #WEBHOOK_DELETED}, {@link #BACKUP_CREATED}, {@link #BACKUP_RESTORED},
      *                    {@link #IMPORT}, {@link #TABLE_CREATED}, {@link #TABLE_DROPPED},
      *                    {@link #TABLE_TRUNCATED}, {@link #ROW_INSERTED}, {@link #ROW_DELETED},
-     *                    {@link #VECTOR_ENABLED}
+     *                    {@link #VECTOR_ENABLED}, {@link #VECTOR_ENABLE_FAILED}
      * @param dbName      affected database
      * @param userName    affected database user, or {@code null} (e.g. delete of a
      *                    database that was never provisioned, or vector operations)

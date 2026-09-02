@@ -558,13 +558,23 @@ public class ProvisioningService {
                 log.info("pgvector already enabled on '{}' — skipping", n);
                 return;
             }
-            if (!pg.isVectorAvailable()) throw new ProvisioningException("pgvector extension not available on server — use pgvector/pgvector:0.8.6-pg18-trixie image or install postgresql-*-pgvector");
+            if (!pg.isVectorAvailable()) {
+                audit(AuditEvent.VECTOR_ENABLE_FAILED, n, engineType, null, clock.instant());
+                throw new ProvisioningException("pgvector extension not available on server — use pgvector/pgvector:0.8.6-pg18-trixie image or install postgresql-*-pgvector");
+            }
             try {
                 pg.enableVector(n);
             } catch (Exception e) {
                 String detail = e instanceof org.springframework.dao.DataAccessException dae
                         ? safeMessage(dae.getMostSpecificCause())
                         : safeMessage(e);
+                // Record the failure without masking the original exception: if the
+                // audit store is unavailable, log it and still surface the real cause.
+                try {
+                    audit(AuditEvent.VECTOR_ENABLE_FAILED, n, engineType, null, clock.instant());
+                } catch (Exception auditEx) {
+                    log.warn("Could not record VECTOR_ENABLE_FAILED audit for '{}'", n, auditEx);
+                }
                 throw new ProvisioningException("Could not enable pgvector on '" + n + "': " + detail, e);
             }
             audit(AuditEvent.VECTOR_ENABLED, n, engineType, null, clock.instant());
