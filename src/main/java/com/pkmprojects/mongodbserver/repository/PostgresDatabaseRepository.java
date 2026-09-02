@@ -34,6 +34,8 @@ public class PostgresDatabaseRepository {
     private final String username;
     private final String password;
     private final ConcurrentHashMap<String, HikariDataSource> perDbDataSources = new ConcurrentHashMap<>();
+    /** Databases currently being dropped — jdbcFor refuses to create a pool for these (P1 race). */
+    private final java.util.Set<String> deletingDatabases = ConcurrentHashMap.newKeySet();
 
     public PostgresDatabaseRepository(@org.springframework.beans.factory.annotation.Qualifier("postgresJdbcTemplate") JdbcTemplate jdbcTemplate,
                                       @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}") String postgresUri,
@@ -47,10 +49,14 @@ public class PostgresDatabaseRepository {
 
     @PreDestroy
     void closePerDbPools() {
-        for (HikariDataSource ds : perDbDataSources.values()) {
+        // Drain atomically: snapshot the pools, clear the map, then close. The
+        // old values()-then-clear() could lose a pool added concurrently between
+        // the two calls, leaking it without close.
+        java.util.List<HikariDataSource> pools = new java.util.ArrayList<>(perDbDataSources.values());
+        perDbDataSources.clear();
+        for (HikariDataSource ds : pools) {
             try { ds.close(); } catch (Exception ignored) {}
         }
-        perDbDataSources.clear();
     }
 
     private void evictPool(String dbName) {
@@ -145,19 +151,35 @@ public class PostgresDatabaseRepository {
         if (dbName == null || dbName.isEmpty()) {
             throw new IllegalArgumentException("dbName must not be null or empty");
         }
+        if (deletingDatabases.contains(dbName)) {
+            throw new IllegalStateException("Database '" + dbName + "' is being deleted");
+        }
         HikariDataSource ds = perDbDataSources.computeIfAbsent(dbName, key -> {
             HikariDataSource hds = new HikariDataSource();
-            hds.setJdbcUrl(urlFor(key));
-            hds.setUsername(username);
-            hds.setPassword(password);
-            hds.setDriverClassName("org.postgresql.Driver");
-            hds.setMaximumPoolSize(2);
-            hds.setMinimumIdle(0);
-            hds.setConnectionTimeout(10000);
-            hds.setValidationTimeout(2000);
-            hds.setIdleTimeout(30000);
-            hds.setMaxLifetime(120000);
-            return hds;
+            try {
+                hds.setJdbcUrl(urlFor(key));
+                hds.setUsername(username);
+                hds.setPassword(password);
+                hds.setDriverClassName("org.postgresql.Driver");
+                hds.setMaximumPoolSize(2);
+                hds.setMinimumIdle(0);
+                hds.setConnectionTimeout(10000);
+                hds.setValidationTimeout(2000);
+                hds.setIdleTimeout(30000);
+                hds.setMaxLifetime(120000);
+                // Probe: fail fast if the database doesn't exist so we don't cache
+                // a pool for a non-existent DB (P2). If this throws, computeIfAbsent
+                // does not retain the mapping and the pool is closed below.
+                try (java.sql.Connection c = hds.getConnection()) {
+                    // connection acquired — DB reachable
+                } catch (java.sql.SQLException e) {
+                    throw new IllegalStateException("Could not connect to database '" + key + "': " + e.getMessage(), e);
+                }
+                return hds;
+            } catch (RuntimeException e) {
+                try { hds.close(); } catch (Exception ignored) {}
+                throw e;
+            }
         });
         JdbcTemplate tpl = new JdbcTemplate(ds);
         tpl.setQueryTimeout(10);
@@ -228,6 +250,7 @@ public class PostgresDatabaseRepository {
     }
 
     public void createDatabase(String dbName, String owner) {
+        deletingDatabases.remove(dbName);
         String sql = "CREATE DATABASE " + quoteIdentifier(dbName)
                 + " OWNER " + quoteIdentifier(owner)
                 + " TEMPLATE template0 ENCODING 'UTF8'";
@@ -235,12 +258,20 @@ public class PostgresDatabaseRepository {
     }
 
     public void dropDatabase(String dbName) {
+        // Mark as deleting first so a concurrent jdbcFor(dbName) cannot recreate
+        // a pool between our evict and the DROP (P1 race). Cleared in finally so
+        // a failed DROP doesn't leave the DB permanently unqueryable.
+        deletingDatabases.add(dbName);
         try {
-            jdbcTemplate.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()", (rs, rowNum) -> null, dbName);
-        } catch (Exception ignored) {
+            try {
+                jdbcTemplate.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()", (rs, rowNum) -> null, dbName);
+            } catch (Exception ignored) {
+            }
+            evictPool(dbName);
+            jdbcTemplate.execute("DROP DATABASE IF EXISTS " + quoteIdentifier(dbName));
+        } finally {
+            deletingDatabases.remove(dbName);
         }
-        evictPool(dbName);
-        jdbcTemplate.execute("DROP DATABASE IF EXISTS " + quoteIdentifier(dbName));
     }
 
     public void createUser(String dbName, String userName, String password) {
@@ -273,11 +304,16 @@ public class PostgresDatabaseRepository {
         } catch (Exception ignored) {
             // REVOKE may fail if DB already dropped
         }
-        try {
-            JdbcTemplate target = jdbcFor(dbName);
-            target.execute("REVOKE ALL ON SCHEMA public FROM " + quoteIdentifier(userName));
-        } catch (Exception ignored) {
-            // target DB may already be gone
+        // Only touch the per-db pool if the database still exists. Calling
+        // jdbcFor() on an already-dropped DB would create and cache a pool for a
+        // database that no longer exists (P3 leak).
+        if (databaseExists(dbName)) {
+            try {
+                JdbcTemplate target = jdbcFor(dbName);
+                target.execute("REVOKE ALL ON SCHEMA public FROM " + quoteIdentifier(userName));
+            } catch (Exception ignored) {
+                // target DB may already be gone
+            }
         }
         jdbcTemplate.execute("DROP ROLE IF EXISTS " + quoteIdentifier(userName));
     }
