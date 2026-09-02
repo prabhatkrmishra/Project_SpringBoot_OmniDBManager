@@ -8,6 +8,7 @@ import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import com.pkmprojects.mongodbserver.store.AuditStore;
+import com.pkmprojects.mongodbserver.util.BackupLimits;
 import com.pkmprojects.mongodbserver.util.Json;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -19,7 +20,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -27,7 +27,6 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -245,11 +244,10 @@ public class PostgresBackupService {
     private List<ParsedTable> readBackup(byte[] content) {
         Document doc;
         try {
-            String json;
-            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(content))) {
-                json = new String(gzip.readAllBytes(), StandardCharsets.UTF_8);
-            }
+            String json = BackupLimits.readBoundedGzip(content, BackupLimits.MAX_DECOMPRESSED_BYTES);
             doc = Document.parse(json);
+        } catch (NameNotAllowedException e) {
+            throw e;
         } catch (Exception e) {
             throw new NameNotAllowedException("Backup file could not be read or is not a valid backup");
         }

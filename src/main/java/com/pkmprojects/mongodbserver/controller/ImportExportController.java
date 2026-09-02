@@ -2,6 +2,7 @@ package com.pkmprojects.mongodbserver.controller;
 
 import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.service.ImportExportService;
+import com.pkmprojects.mongodbserver.util.BackupLimits;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -90,6 +91,11 @@ public class ImportExportController {
                                   RedirectAttributes redirectAttributes) {
         if (file == null || file.isEmpty()) {
             redirectAttributes.addFlashAttribute("flashError", "Choose a file to import");
+            return redirectToImport(dbName, collectionName);
+        }
+        if (file.getSize() > BackupLimits.MAX_UPLOAD_BYTES) {
+            redirectAttributes.addFlashAttribute("flashError",
+                    "Import file is too large (max " + BackupLimits.MAX_UPLOAD_BYTES + " bytes)");
             return redirectToImport(dbName, collectionName);
         }
         byte[] content;

@@ -2,6 +2,7 @@ package com.pkmprojects.mongodbserver.controller;
 
 import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.service.BackupService;
+import com.pkmprojects.mongodbserver.util.BackupLimits;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -86,6 +87,11 @@ public class BackupController {
         if (!confirm) {
             redirectAttributes.addFlashAttribute("flashError",
                     "Check the confirmation box to replace the database's current data");
+            return redirectToRestore(dbName);
+        }
+        if (file.getSize() > BackupLimits.MAX_UPLOAD_BYTES) {
+            redirectAttributes.addFlashAttribute("flashError",
+                    "Backup file is too large (max " + BackupLimits.MAX_UPLOAD_BYTES + " bytes)");
             return redirectToRestore(dbName);
         }
         byte[] content;

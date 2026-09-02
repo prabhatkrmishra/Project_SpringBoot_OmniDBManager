@@ -11,6 +11,7 @@ import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter;
 import com.pkmprojects.mongodbserver.store.AuditStore;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
+import com.pkmprojects.mongodbserver.util.BackupLimits;
 import com.pkmprojects.mongodbserver.util.Json;
 import org.bson.Document;
 import org.bson.json.JsonMode;
@@ -24,7 +25,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
@@ -32,7 +32,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -261,12 +260,11 @@ public class BackupService {
     private List<BackupCollection> readBackup(byte[] content) {
         Document backup;
         try {
-            String json;
-            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(content))) {
-                json = new String(gzip.readAllBytes(), StandardCharsets.UTF_8);
-            }
+            String json = BackupLimits.readBoundedGzip(content, BackupLimits.MAX_DECOMPRESSED_BYTES);
             backup = Document.parse(json);
-        } catch (IOException | RuntimeException e) {
+        } catch (NameNotAllowedException e) {
+            throw e;
+        } catch (RuntimeException e) {
             throw new NameNotAllowedException("Backup file could not be read or is not a valid backup");
         }
 
