@@ -3,8 +3,27 @@
 # Or all engines via the orchestrator:
 #   docker compose up -d
 services:
+  # One-shot init that guarantees the PGDATA volume is owned by the postgres
+  # UID (999) before the server starts. Named volumes are normally initialized
+  # from the image with the right ownership, but this makes bind mounts and
+  # pre-existing volumes robust too (the official entrypoint skips its root
+  # chown when the container runs as UID 999 under cap_drop ALL).
+  # NOTE: must mount the volume at the SAME path as postgres (/var/lib/postgresql)
+  # and create the PGDATA subdir, so the server sees a writable PGDATA.
+  postgres-init:
+    image: busybox:1.36
+    container_name: omnidb-postgres-init
+    restart: "no"
+    user: "0:0"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    command: ["sh", "-c", "mkdir -p /var/lib/postgresql/18/docker && chown -R 999:999 /var/lib/postgresql/18/docker && chmod 700 /var/lib/postgresql/18/docker"]
+
   postgres:
-    image: pgvector/pgvector:0.8.6-pg18-trixie
+    # Pinned to the multi-arch index digest for reproducibility (tag alone can
+    # drift on rebuild). Bump deliberately and re-resolve with:
+    #   docker buildx imagetools inspect pgvector/pgvector:0.8.6-pg18-trixie
+    image: pgvector/pgvector:0.8.6-pg18-trixie@sha256:78bf48b801e792f99e3ac62b5036fd3876e9be48afda16c1e331af1c75ceb2ff
     container_name: omnidb-postgres
     restart: unless-stopped
     ports:
@@ -19,6 +38,14 @@ services:
       - /tmp
       - /run/postgresql
     user: "999:999"
+    # Small-VPS guardrails (see README "Memory footprint"): cap total memory so
+    # postgres + pgvector HNSW builds cannot crowd out the JVM, and raise the
+    # open-file limit to match the other engines.
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
+    mem_limit: 1g
     # Enterprise hardening: scram-sha-256 is PG18 default; explicit command keeps it
     # pinned even if image defaults change.
     # TLS (verify-full with CA) — uncomment and provide certs:
@@ -48,12 +75,20 @@ services:
       # - ./certs/server.crt:/var/lib/postgresql/server.crt:ro
       # - ./certs/server.key:/var/lib/postgresql/server.key:ro
       # - ./certs/ca.crt:/var/lib/postgresql/ca.crt:ro
+    depends_on:
+      postgres-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   adminer:
     image: adminer:6.0.1-standalone
@@ -71,7 +106,13 @@ services:
     environment:
       ADMINER_DEFAULT_SERVER: postgres
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres-data:

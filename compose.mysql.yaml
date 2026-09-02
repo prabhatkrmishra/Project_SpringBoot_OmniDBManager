@@ -29,6 +29,11 @@ services:
       retries: 5
       start_period: 30s
     command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--default-authentication-plugin=caching_sha2_password"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   phpmyadmin:
     image: phpmyadmin:5.2
