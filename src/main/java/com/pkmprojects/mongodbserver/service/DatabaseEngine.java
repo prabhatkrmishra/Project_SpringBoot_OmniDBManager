@@ -36,4 +36,18 @@ public interface DatabaseEngine {
     void ping();
 
     default void grantPrivileges(String dbName, String userName) {}
+
+    // ── Vector extensions (pgvector) ─────────────────────────────────────
+    // Defaults are no-ops so non-vector engines (Mongo/MySQL) and future
+    // engines don't need to implement them; PostgresDatabaseEngine overrides.
+
+    default boolean isVectorAvailable() { return false; }
+
+    default boolean isVectorEnabled(String dbName) { return false; }
+
+    default void enableVector(String dbName) {
+        throw new UnsupportedOperationException("Vector extensions are not supported by " + type());
+    }
+
+    default String vectorVersion(String dbName) { return null; }
 }

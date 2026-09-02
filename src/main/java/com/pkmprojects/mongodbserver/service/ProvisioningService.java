@@ -553,7 +553,7 @@ public class ProvisioningService {
         nameValidator.validatePostgresDatabaseName(n);
         databaseLocks.withLock(lockKey(engineType, n), () -> {
             requireDatabase(n, engineType);
-            PostgresDatabaseEngine pg = (PostgresDatabaseEngine) engineFor(engineType);
+            DatabaseEngine pg = engineFor(engineType);
             if (pg.isVectorEnabled(n)) {
                 log.info("pgvector already enabled on '{}' — skipping", n);
                 return;
@@ -561,21 +561,33 @@ public class ProvisioningService {
             if (!pg.isVectorAvailable()) throw new ProvisioningException("pgvector extension not available on server — use pgvector/pgvector:0.8.6-pg18-trixie image or install postgresql-*-pgvector");
             try {
                 pg.enableVector(n);
-            } catch (org.springframework.dao.DataAccessException e) {
-                throw new ProvisioningException("Could not enable pgvector on '" + n + "': " + e.getMostSpecificCause().getMessage(), e);
+            } catch (Exception e) {
+                String detail = e instanceof org.springframework.dao.DataAccessException dae
+                        ? safeMessage(dae.getMostSpecificCause())
+                        : safeMessage(e);
+                throw new ProvisioningException("Could not enable pgvector on '" + n + "': " + detail, e);
             }
             audit(AuditEvent.VECTOR_ENABLED, n, engineType, null, clock.instant());
             log.info("Enabled pgvector on database '{}'", n);
         });
     }
 
+    private static String safeMessage(Throwable t) {
+        String m = t.getMessage();
+        return (m == null || m.isBlank()) ? t.getClass().getSimpleName() : m;
+    }
+
     public boolean isVectorEnabled(DatabaseEngineType engineType, String dbName) {
         if (engineType != DatabaseEngineType.POSTGRES) return false;
         if (postgresEngine.isEmpty()) return false;
+        nameValidator.validatePostgresDatabaseName(dbName);
         try { return postgresEngine.get().isVectorEnabled(dbName); } catch (org.springframework.dao.DataAccessException e) {
             log.warn("isVectorEnabled({}) failed", dbName, e);
             return false;
-        } catch (Exception e) { return false; }
+        } catch (Exception e) {
+            log.warn("isVectorEnabled({}) failed unexpectedly", dbName, e);
+            return false;
+        }
     }
 
     public boolean isVectorAvailable() {
@@ -583,12 +595,19 @@ public class ProvisioningService {
         try { return postgresEngine.get().isVectorAvailable(); } catch (org.springframework.dao.DataAccessException e) {
             log.warn("isVectorAvailable failed", e);
             return false;
-        } catch (Exception e) { return false; }
+        } catch (Exception e) {
+            log.warn("isVectorAvailable failed unexpectedly", e);
+            return false;
+        }
     }
 
     public String vectorVersion(DatabaseEngineType engineType, String dbName) {
         if (engineType != DatabaseEngineType.POSTGRES || postgresEngine.isEmpty()) return null;
-        try { return postgresEngine.get().vectorVersion(dbName); } catch (Exception e) { return null; }
+        nameValidator.validatePostgresDatabaseName(dbName);
+        try { return postgresEngine.get().vectorVersion(dbName); } catch (Exception e) {
+            log.warn("vectorVersion({}) failed", dbName, e);
+            return null;
+        }
     }
 
     private void audit(String eventType, String dbName, DatabaseEngineType engineType, String userName, java.time.Instant performedAt) {
