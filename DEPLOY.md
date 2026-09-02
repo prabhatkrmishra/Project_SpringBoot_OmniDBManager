@@ -1,6 +1,6 @@
-# DEPLOY — Single-Port (443) Deployment Guide
+# DEPLOY — OmniDB Manager Deployment Guide
 
-> **General guideline** for deploying OmniDB Manager on any VPS with **only port `443` public**. Single `443` serves both Manager UI (HTTPS) and Postgres (TLS) via Nginx `stream` + `ssl_preread` (ALPN multiplex). No `5432` public. Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<YOUR_EMAIL>` to your environment.
+> **General guideline** for deploying OmniDB Manager on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. A single public port `443` multiplexes the Manager UI (HTTPS) and Postgres (TLS) through Nginx `stream` + `ssl_preread` (ALPN). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>` to your environment.
 
 ## Architecture
 
@@ -8,25 +8,33 @@
 Internet:443 (<YOUR_DOMAIN>)
   → Nginx stream (ssl_preread on, port 443)
     ├─ ALPN h2 / http/1.1 → 127.0.0.1:8443 → Nginx http → 127.0.0.1:9811 (OmniDB Manager, Java 25)
-    └─ ALPN empty (Postgres wire) → 127.0.0.1:5432 (Postgres, ssl=on, Let's Encrypt cert)
+    └─ ALPN empty (Postgres wire) → 127.0.0.1:9813 (pgvector container, ssl=on)
 
 Internet:80 → Nginx http → 301 https://$host$request_uri (only for /.well-known/acme-challenge)
 ```
 
-| Component | Listen | Public | Internal |
+All engines run as Docker containers, loopback-bound only. The Manager provisions them over loopback; your apps connect directly to the engine via the issued string (the Manager is the control plane, **not** a proxy).
+
+| Component | Container / Process | Listen (loopback) | Public |
 |---|---|---|---|
-| Nginx stream | `0.0.0.0:443` | `<YOUR_DOMAIN>:443` | multiplex |
-| Nginx http | `127.0.0.1:8443` ssl | — | your sites (e.g. `<YOUR_DOMAIN>`, other apps) |
-| OmniDB Manager | `127.0.0.1:9811` | via `https://<YOUR_DOMAIN>/login` | `systemd omnidb.service` |
-| Postgres | `127.0.0.1:5432` ssl | via `<YOUR_DOMAIN>:443` (stream) | `postgres` user |
-| Certbot | — | `80` for `http-01` | `/etc/letsencrypt/live/<YOUR_DOMAIN>/` |
+| OmniDB Manager | `omnidb.service` (Java 25) | `127.0.0.1:9811` | via `https://<YOUR_DOMAIN>/login` |
+| MongoDB 8 | `omnidb-mongo` | `127.0.0.1:9812` | via `MONGODB_PUBLIC_HOST` |
+| mongo-express | `omnidb-mongo-express` | `127.0.0.1:9814` | via app proxy `/mongo-express` |
+| PostgreSQL 18 (pgvector) | `omnidb-postgres` | `127.0.0.1:9813` | via `<YOUR_DOMAIN>:443` (stream) |
+| Adminer | `omnidb-adminer` | `127.0.0.1:9815` | via app proxy `/adminer` |
+| MySQL 8.4 | `omnidb-mysql` | `127.0.0.1:9816` | via `MYSQL_PUBLIC_HOST` |
+| phpMyAdmin | `omnidb-phpmyadmin` | `127.0.0.1:9817` | via app proxy `/phpmyadmin` |
+| Nginx stream | — | `0.0.0.0:443` | `<YOUR_DOMAIN>:443` |
+| Nginx http | — | `127.0.0.1:8443` ssl | your sites |
+
+> **Single-port 443** cleanly multiplexes the Manager UI (HTTP ALPN) and Postgres (TLS, empty ALPN). MongoDB and MySQL use their own wire protocols and are exposed via their own public ports/streams (see §6.2/§6.3) — they do not ride the same 443 ALPN multiplex as Postgres.
 
 ## 1. Prerequisites
 
 - VPS (Ubuntu 24.04 recommended), user with `sudo`, SSH key
-- Domain `<YOUR_DOMAIN>` with DNS `A` record → `<YOUR_VPS_IP>` (DNS only / grey cloud if using Cloudflare — Postgres `5432` cannot go via Cloudflare HTTP proxy)
-- Only `443` + `80` (for Let's Encrypt) + `22` open. `5432` never public.
-- If other sites already use `443` on the same VPS, they will be moved to `127.0.0.1:8443` to free `443` for `stream` (step 7).
+- Domain `<YOUR_DOMAIN>` with DNS `A` record → `<YOUR_VPS_IP>` (DNS only / grey cloud if using Cloudflare — raw DB ports cannot go via Cloudflare HTTP proxy)
+- Only `443` + `80` (for Let's Encrypt) + `22` open. DB ports (`5432`, `27017`, `3306`) never public.
+- If other sites already use `443` on the same VPS, they will be moved to `127.0.0.1:8443` to free `443` for `stream` (step 6).
 
 Verify DNS:
 
@@ -44,121 +52,159 @@ ssh -i ~/.ssh/<YOUR_KEY> <YOUR_USER>@<YOUR_VPS_IP>
 sudo iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
 sudo iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT
 sudo iptables -L INPUT -n --line-numbers | head -10
-ss -tlnp | grep -E "80|443|5432|9811"
+ss -tlnp | grep -E "80|443|9811|9812|9813|9816"
 
-# Install Nginx + stream module + Certbot + Postgres + Java 25
+# Install Nginx + stream module + Certbot + Docker + Java 25
 sudo apt update
-sudo apt install -y nginx libnginx-mod-stream certbot python3-certbot-nginx postgresql-16 openjdk-25-jdk
+sudo apt install -y nginx libnginx-mod-stream certbot python3-certbot-nginx docker.io docker-compose-v2 openjdk-25-jdk
+sudo systemctl enable --now docker
+sudo usermod -aG docker <YOUR_USER>
 
 nginx -V 2>&1 | tr ' ' '\n' | grep stream
 # → --with-stream_ssl_module --with-stream_ssl_preread_module --with-stream=dynamic
 java -version
 # → openjdk 25.x
-psql --version
-# → 16.x
+docker --version
 ```
 
-## 3. Postgres — Set Superuser Password
+## 3. Docker Containers — All Engines
 
-Ubuntu Postgres superuser is `postgres`, not `root`. Manager must use `postgres`.
-
-Generate a strong password first (do not reuse):
+The repo ships an orchestrator plus one compose file per engine. Copy `compose*.yaml` and `.env` to `~/omnidb/`.
 
 ```bash
-openssl rand -base64 32
-# → <POSTGRES_PASSWORD>  (save securely, e.g. password manager)
+mkdir -p ~/omnidb && cd ~/omnidb
+# copy compose.yaml, compose.mongo.yaml, compose.postgres.yaml, compose.mysql.yaml, .env here
+
+# All engines:
+docker compose up -d
+# Or per-engine (only what you enable):
+docker compose -f compose.mongo.yaml up -d
+docker compose -f compose.postgres.yaml up -d
+docker compose -f compose.mysql.yaml up -d
 ```
 
+| Engine | Image | Container | Loopback port | Admin UI |
+|---|---|---|---|---|
+| MongoDB | `mongo:8` | `omnidb-mongo` | `127.0.0.1:9812` | mongo-express `127.0.0.1:9814` |
+| PostgreSQL | `pgvector/pgvector:0.8.6-pg18-trixie` | `omnidb-postgres` | `127.0.0.1:9813` | Adminer `127.0.0.1:9815` |
+| MySQL | `mysql:8.4` | `omnidb-mysql` | `127.0.0.1:9816` | phpMyAdmin `127.0.0.1:9817` |
+
+Verify all healthy:
+
 ```bash
-# Set postgres password to match .env (replace placeholder)
-echo "ALTER USER postgres WITH PASSWORD '<POSTGRES_PASSWORD>';" | sudo -u postgres psql
-
-# Verify local
-PGPASSWORD='<POSTGRES_PASSWORD>' psql -h 127.0.0.1 -p 5432 -U postgres -d postgres -c "select 1"
-# → 1 row
-
-# Postgres is ssl=on with snakeoil by default. Will switch to Let's Encrypt cert after cert is issued (step 5).
-sudo cat /etc/postgresql/16/main/postgresql.conf | grep -E "^ssl|^listen|^port"
-# ssl = on, ssl_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem
+docker ps --format '{{.Names}} {{.Status}}'
+# → omnidb-mongo Up (healthy), omnidb-postgres Up (healthy), omnidb-mysql Up (healthy), ...
 ```
 
-## 4. Nginx — Prepare Port 80 for Let's Encrypt Challenge
+## 4. Environment (.env)
+
+Copy `.env.example` → `.env` and fill real values. **Key rule:** `*_URI` is the **Manager → DB root link** on `127.0.0.1` (never public DNS); `*_PUBLIC_HOST` is what your **apps** dial in the issued strings.
 
 ```bash
-# Create minimal http site for <YOUR_DOMAIN> on port 80 (only for /.well-known/acme-challenge)
-sudo tee /etc/nginx/sites-available/<YOUR_DOMAIN> > /dev/null <<'NGINX80'
-server {
-    listen 80;
-    server_name <YOUR_DOMAIN>;
-    root /var/www/html;
-    location /.well-known/acme-challenge/ { allow all; }
-    location / { return 301 https://$host$request_uri; }
+cp .env.example .env
+# generate secrets:
+#   openssl rand -base64 32   # APP_ENCRYPTION_KEY
+#   openssl rand -hex 16      # each DB root password
+chmod 600 ~/omnidb/.env
+```
+
+Minimal production `.env` (all three engines enabled):
+
+```env
+# === App admin login ===
+APP_ADMIN_USERNAME=<ADMIN_USER>
+APP_ADMIN_PASSWORD=<ADMIN_PASSWORD>
+
+# === Network / HTTPS (behind Nginx / Cloudflare Tunnel) ===
+SERVER_ADDRESS=127.0.0.1
+RATE_LIMIT_TRUST_XFF=true
+SERVER_COOKIE_SECURE=true
+SERVER_COOKIE_SAME_SITE=lax
+
+# === MongoDB engine ===
+MONGO_ENABLED=true
+MONGODB_ROOT_USERNAME=root
+MONGODB_ROOT_PASSWORD=<MONGO_ROOT_PASSWORD>
+MONGODB_URI=mongodb://root:<MONGO_ROOT_PASSWORD>@127.0.0.1:9812/?authSource=admin&maxPoolSize=10
+MONGO_EXPRESS_USERNAME=admin
+MONGO_EXPRESS_PASSWORD=<MONGO_EXPRESS_PASSWORD>
+MONGODB_PUBLIC_HOST=mongo.example.com
+MONGODB_PUBLIC_TLS=false
+
+# === PostgreSQL engine ===
+POSTGRES_ENABLED=true
+POSTGRES_ROOT_USER=postgres
+POSTGRES_ROOT_PASSWORD=<POSTGRES_ROOT_PASSWORD>
+POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?user=postgres&password=<POSTGRES_ROOT_PASSWORD>&sslmode=require&connectTimeout=5&socketTimeout=10
+POSTGRES_PUBLIC_HOST=<YOUR_DOMAIN>:443
+POSTGRES_PUBLIC_TLS=true
+POSTGRES_PUBLIC_SSLMODE=require
+
+# === MySQL engine ===
+MYSQL_ENABLED=true
+MYSQL_ROOT_PASSWORD=<MYSQL_ROOT_PASSWORD>
+MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000
+MYSQL_PUBLIC_HOST=mysql.example.com
+MYSQL_PUBLIC_TLS=false
+MYSQL_PUBLIC_SSLMODE=REQUIRED
+
+# === Encryption at rest (AES-256-GCM) ===
+APP_ENCRYPTION_KEY=<BASE64_32_BYTES>
+```
+
+> **Manager → DB vs issued strings:** `*_URI` stays `127.0.0.1` (Manager and DB on the same host via Docker). `*_PUBLIC_HOST` is what your apps dial. Never give the root `*_URI` to your apps. See `VARS.md` for the full variable reference.
+
+## 5. TLS per Engine
+
+### 5.1 PostgreSQL (container certs, single 443)
+
+Generate a CA + server cert, enable `ssl=on` in `compose.postgres.yaml`, and require `hostssl` in `pg_hba.conf`. Full steps in §10 below (or the `postgres` service comments in `compose.postgres.yaml`). Issued strings carry `sslmode=require` (or `verify-full` with the CA).
+
+### 5.2 MongoDB
+
+MongoDB native TLS requires `mongod --tlsMode requireTLS` + certs (not configured in `compose.mongo.yaml` by default). The simplest public-TLS option is Nginx `stream` TLS termination on a dedicated public port:
+
+```nginx
+stream {
+    server {
+        listen 27017 ssl;
+        ssl_certificate     /etc/letsencrypt/live/<YOUR_DOMAIN>/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/<YOUR_DOMAIN>/privkey.pem;
+        proxy_pass 127.0.0.1:9812;
+    }
 }
-NGINX80
-sudo ln -sf /etc/nginx/sites-available/<YOUR_DOMAIN> /etc/nginx/sites-enabled/<YOUR_DOMAIN>
-sudo mkdir -p /var/www/html/.well-known/acme-challenge
-sudo nginx -t && sudo systemctl reload nginx
-ss -tlnp | grep -E "80|443"
-# → 0.0.0.0:80, 0.0.0.0:443
 ```
 
-## 5. Certbot — Get Certificate
+Then in `.env`:
 
-Use `webroot` with port 80 (opened above). If your DNS provider token matches the zone, you can use `certonly --dns-cloudflare` instead.
-
-```bash
-sudo certbot certonly --webroot -w /var/www/html -d <YOUR_DOMAIN> --non-interactive --agree-tos -m <YOUR_EMAIL>
-
-# Verify
-sudo ls -lh /etc/letsencrypt/live/<YOUR_DOMAIN>/
-# → fullchain.pem, privkey.pem
-openssl x509 -in /etc/letsencrypt/live/<YOUR_DOMAIN>/fullchain.pem -noout -subject -dates
-# → CN = <YOUR_DOMAIN>
+```env
+MONGODB_PUBLIC_HOST=mongo.example.com
+MONGODB_PUBLIC_TLS=true        # issued strings get &tls=true
 ```
 
-## 6. Postgres — Switch to Let's Encrypt Certificate (Copy, Not Symlink)
+### 5.3 MySQL
 
-Postgres user `postgres` (group `ssl-cert`) cannot read `/etc/letsencrypt/live` (root:root 750). Copy to a postgres-readable dir.
+MySQL 8.4 enables TLS by default with auto-generated certs. For a trusted CA, either configure MySQL's own certs or terminate TLS at Nginx `stream` on a dedicated public port:
 
-```bash
-sudo mkdir -p /etc/postgresql/certs
-sudo cp /etc/letsencrypt/live/<YOUR_DOMAIN>/fullchain.pem /etc/postgresql/certs/server.crt
-sudo cp /etc/letsencrypt/live/<YOUR_DOMAIN>/privkey.pem /etc/postgresql/certs/server.key
-sudo chown root:ssl-cert /etc/postgresql/certs/server.crt /etc/postgresql/certs/server.key
-sudo chmod 640 /etc/postgresql/certs/server.crt /etc/postgresql/certs/server.key
-sudo usermod -a -G ssl-cert postgres
-
-# Update postgresql.conf
-sudo sed -i "s|/etc/ssl/certs/ssl-cert-snakeoil.pem|/etc/postgresql/certs/server.crt|g" /etc/postgresql/16/main/postgresql.conf
-sudo sed -i "s|/etc/ssl/private/ssl-cert-snakeoil.key|/etc/postgresql/certs/server.key|g" /etc/postgresql/16/main/postgresql.conf
-grep -E "^ssl_cert|^ssl_key|^ssl =" /etc/postgresql/16/main/postgresql.conf
-# → ssl = on, ssl_cert_file = '/etc/postgresql/certs/server.crt', ssl_key_file = '/etc/postgresql/certs/server.key'
-
-sudo pg_ctlcluster 16 main restart
-sleep 2
-pg_lsclusters
-# → 16 main 5432 online
-sudo -u postgres psql -c "SHOW ssl; SHOW ssl_cert_file;"
-# → on, /etc/postgresql/certs/server.crt
-ss -tlnp | grep 5432
-# → 127.0.0.1:5432
-
-# Renewal hook (copies new cert on renew)
-sudo mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-sudo tee /etc/letsencrypt/renewal-hooks/deploy/postgres-reload.sh > /dev/null <<'HOOK'
-#!/bin/bash
-cp /etc/letsencrypt/live/<YOUR_DOMAIN>/fullchain.pem /etc/postgresql/certs/server.crt
-cp /etc/letsencrypt/live/<YOUR_DOMAIN>/privkey.pem /etc/postgresql/certs/server.key
-chown root:ssl-cert /etc/postgresql/certs/server.crt /etc/postgresql/certs/server.key
-chmod 640 /etc/postgresql/certs/server.crt /etc/postgresql/certs/server.key
-pg_ctlcluster 16 main reload
-HOOK
-sudo chmod +x /etc/letsencrypt/renewal-hooks/deploy/postgres-reload.sh
-# Replace <YOUR_DOMAIN> in the hook with your actual domain
-sudo sed -i "s|<YOUR_DOMAIN>|<YOUR_DOMAIN>|g" /etc/letsencrypt/renewal-hooks/deploy/postgres-reload.sh
+```nginx
+stream {
+    server {
+        listen 3306 ssl;
+        ssl_certificate     /etc/letsencrypt/live/<YOUR_DOMAIN>/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/<YOUR_DOMAIN>/privkey.pem;
+        proxy_pass 127.0.0.1:9816;
+    }
+}
 ```
 
-## 7. Nginx — Stream Multiplex on 443 (Only Public Port)
+Then in `.env`:
+
+```env
+MYSQL_PUBLIC_HOST=mysql.example.com
+MYSQL_PUBLIC_SSLMODE=REQUIRED        # or VERIFY_IDENTITY with a CA truststore
+```
+
+## 6. Nginx — Stream Multiplex on 443 (Only Public Port)
 
 Move all existing `443` http servers to `127.0.0.1:8443` (internal), let `stream` own public `443`.
 
@@ -166,13 +212,13 @@ Move all existing `443` http servers to `127.0.0.1:8443` (internal), let `stream
 # Move any existing sites that listen on 443 to 127.0.0.1:8443
 # Example: sudo sed -i "s/listen 443 ssl http2;/listen 127.0.0.1:8443 ssl http2;/g" /etc/nginx/sites-enabled/<OTHER_SITE>
 
-# Create stream.conf — ALPN multiplex
+# Create stream.conf — ALPN multiplex (app + Postgres on 443)
 sudo tee /etc/nginx/stream.conf > /dev/null <<'STREAM'
 stream {
     map $ssl_preread_alpn_protocols $upstream {
         ~\bh2\b 127.0.0.1:8443;
         ~\bhttp/1\.1\b 127.0.0.1:8443;
-        default 127.0.0.1:5432;
+        default 127.0.0.1:9813;   # Postgres container (not system 5432)
     }
     server {
         listen 443;
@@ -207,6 +253,7 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers on;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    client_max_body_size 256m;                 # restore uploads
     location / {
         proxy_pass http://127.0.0.1:9811;
         proxy_set_header Host $host;
@@ -218,6 +265,12 @@ server {
         proxy_set_header Connection "upgrade";
         proxy_read_timeout 90s;
     }
+    location /monitor/stream {                 # SSE — no buffering
+        proxy_pass http://127.0.0.1:9811;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
 }
 NGINX
 sudo ln -sf /etc/nginx/sites-available/<YOUR_DOMAIN> /etc/nginx/sites-enabled/<YOUR_DOMAIN>
@@ -227,8 +280,8 @@ sudo sed -i "s/listen 0.0.0.0:8443/listen 127.0.0.1:8443/g" /etc/nginx/sites-ena
 
 sudo nginx -t && sudo systemctl reload nginx
 # If "bind() to 127.0.0.1:8443 failed (98: Address already in use)" → systemctl stop nginx; fix; systemctl start nginx
-ss -tlnp | grep -E "443|8443|5432|9811|80"
-# → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443 (http), 127.0.0.1:5432, 127.0.0.1:9811
+ss -tlnp | grep -E "443|8443|9811|9812|9813|9816"
+# → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443 (http), 127.0.0.1:9811..9817 (containers)
 ```
 
 Verify SNI:
@@ -238,40 +291,16 @@ echo | openssl s_client -connect 127.0.0.1:8443 -servername <YOUR_DOMAIN> 2>&1 |
 # → CN = <YOUR_DOMAIN>
 ```
 
-## 8. OmniDB Manager — Systemd Service
+## 7. OmniDB Manager — Systemd Service
 
 Jar `omnidb-manager-*.jar` is compiled with Java 25 (class file 69). Requires `openjdk-25-jdk`.
 
 ```bash
-# Create .env at ~/omnidb/.env (Manager → DB local, issued strings public via 443)
-# Generate secrets first:
-#   openssl rand -base64 32  # for APP_ENCRYPTION_KEY
-#   openssl rand -hex 16     # for passwords
-cat > ~/omnidb/.env <<'ENV'
-APP_ADMIN_USERNAME=<ADMIN_USER>
-APP_ADMIN_PASSWORD=<ADMIN_PASSWORD>
-SERVER_ADDRESS=127.0.0.1
-RATE_LIMIT_TRUST_XFF=true
-SERVER_COOKIE_SECURE=true
-SERVER_COOKIE_SAME_SITE=lax
-POSTGRES_ENABLED=true
-POSTGRES_ROOT_USER=postgres
-POSTGRES_ROOT_PASSWORD=<POSTGRES_PASSWORD>
-POSTGRES_URI=jdbc:postgresql://127.0.0.1:5432/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10
-POSTGRES_PUBLIC_HOST=<YOUR_DOMAIN>:443
-POSTGRES_PUBLIC_TLS=false
-POSTGRES_PUBLIC_SSLMODE=require
-ADMINER_BASE_URL=http://127.0.0.1:9815
-APP_ENCRYPTION_KEY=<BASE64_32_BYTES>
-ENV
-chmod 600 ~/omnidb/.env
-
-# Systemd service
 sudo tee /etc/systemd/system/omnidb.service > /dev/null <<'UNIT'
 [Unit]
 Description=OmniDB Manager
-After=network.target postgresql.service
-Wants=postgresql.service
+After=network.target docker.service
+Wants=docker.service
 
 [Service]
 User=<YOUR_LINUX_USER>
@@ -292,56 +321,85 @@ sleep 15
 sudo systemctl status omnidb | head -20
 # → active (running), Main PID java
 sudo journalctl -u omnidb --no-pager | tail -20
-# → Tomcat started on port 9811, PostgresConfig uri=jdbc:postgresql://127.0.0.1:5432/postgres?sslmode=disable..., username=postgres
+# → Tomcat started on port 9811, PostgresConfig uri=jdbc:postgresql://127.0.0.1:9813/postgres?...sslmode=require...
 ss -tlnp | grep 9811
 # → [::ffff:127.0.0.1]:9811
 ```
 
-## 9. Create a Database (Example)
+## 8. Provision a Database (per engine)
+
+Sign in at `https://<YOUR_DOMAIN>/login`, pick an engine, then **Provision a database**. The Manager runs the DDL over loopback and returns an issued connection string. Equivalent CLI:
 
 ```bash
-# Via psql (or via Manager UI: https://<YOUR_DOMAIN>/login → Postgres → Create Database)
-# Replace <DB_NAME>, <DB_USER>, <DB_PASSWORD> with your values
-sudo -u postgres psql <<'SQL'
+# MongoDB
+docker exec omnidb-mongo mongosh "mongodb://<MONGO_ROOT>:<PASS>@127.0.0.1:27017/admin" \
+  --eval 'db.getSiblingDB("<DB_NAME>").createUser({user:"<DB_USER>",pwd:"<DB_PASSWORD>",roles:[{role:"readWrite",db:"<DB_NAME>"}]})'
+
+# PostgreSQL
+docker exec omnidb-postgres psql -U postgres -d postgres <<'SQL'
 CREATE ROLE "<DB_USER>" WITH LOGIN PASSWORD '<DB_PASSWORD>';
-CREATE DATABASE "<DB_NAME>" OWNER "<DB_USER>";
-GRANT ALL PRIVILEGES ON DATABASE "<DB_NAME>" TO "<DB_USER>";
-SQL
-sudo -u postgres psql -d <DB_NAME> <<'SQL'
-GRANT ALL ON SCHEMA public TO "<DB_USER>";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "<DB_USER>";
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "<DB_USER>";
+CREATE DATABASE "<DB_NAME>" OWNER "<DB_USER>" TEMPLATE template0 ENCODING 'UTF8';
+GRANT CONNECT ON DATABASE "<DB_NAME>" TO "<DB_USER>";
 SQL
 
-# Local test
-PGPASSWORD='<DB_PASSWORD>' psql -h 127.0.0.1 -p 5432 -U <DB_USER> -d <DB_NAME> -c "select current_user, current_database(), now();"
-# → <DB_USER> | <DB_NAME> | 1 row
+# MySQL
+docker exec omnidb-mysql mysql -uroot -p'<MYSQL_ROOT_PASSWORD>' <<'SQL'
+CREATE DATABASE `<DB_NAME>` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE USER '<DB_USER>'@'%' IDENTIFIED BY '<DB_PASSWORD>';
+GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,DROP ON `<DB_NAME>`.* TO '<DB_USER>'@'%';
+SQL
 ```
 
-## 10. Verification — All via 443
+## 9. Verification — All via 443
 
 ```bash
 # Manager UI via 443 stream → 8443 → 9811
 curl -k -s https://<YOUR_DOMAIN>/login | head -20
 # → <!DOCTYPE html> ... Sign in · DB Manager
 
-# Postgres via 443 stream → 5432 (ALPN empty)
+# Postgres via 443 stream → 9813 (ALPN empty, TLS)
 PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=<YOUR_DOMAIN> port=443 dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user, current_database(), now();"
 # → <DB_USER> | <DB_NAME> | 1 row
 
-PGPASSWORD='<POSTGRES_PASSWORD>' timeout 10 psql "host=<YOUR_DOMAIN> port=443 dbname=postgres user=postgres sslmode=require" -c "select 1"
-# → 1 row
-
 # Ports
-ss -tlnp | grep -E "443|8443|5432|9811|80"
-# → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443, 127.0.0.1:5432, 127.0.0.1:9811
+ss -tlnp | grep -E "443|8443|9811|9812|9813|9816|80"
+# → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443, 127.0.0.1:9811..9817
 ```
 
-## 11. Docker Container Postgres (pgvector) with TLS
+## Connection Strings
 
-> **Alternative to sections 3/6/9.** Instead of the system `postgresql-16`, run Postgres as a Docker container (`pgvector/pgvector`) on `127.0.0.1:9813` — this is what the repo ships (`compose.postgres.yaml`) and what the pgvector extension requires. TLS uses a self-generated CA + server cert (not Let's Encrypt), and the nginx stream `default` route points at the container port, not the system `5432`.
+**Manager → DB (root, loopback, never public DNS):**
+```
+MONGODB_URI=mongodb://root:<PASS>@127.0.0.1:9812/?authSource=admin&maxPoolSize=10
+POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?user=postgres&password=<PASS>&sslmode=require&connectTimeout=5&socketTimeout=10
+MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000
+```
 
-### 11.1 Generate CA + server certs
+**Issued per-DB strings (what your apps use, via public DNS):**
+```
+# MongoDB
+mongodb://<DB_USER>:<DB_PASSWORD>@mongo.example.com/<DB_NAME>?authSource=<DB_NAME>        # + &tls=true if MONGODB_PUBLIC_TLS=true
+
+# PostgreSQL (via 443)
+postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=require&application_name=omnidb
+# verify-full: postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=verify-full&sslrootcert=/path/to/ca.crt&application_name=omnidb
+
+# MySQL
+mysql://<DB_USER>:<DB_PASSWORD>@mysql.example.com:3306/<DB_NAME>?sslMode=REQUIRED
+# JDBC: jdbc:mysql://mysql.example.com:3306/<DB_NAME>?sslMode=REQUIRED&serverTimezone=UTC
+```
+
+**Manager UI:**
+```
+https://<YOUR_DOMAIN>/login
+# user <ADMIN_USER> / <ADMIN_PASSWORD> (from APP_ADMIN_USERNAME/PASSWORD)
+```
+
+## 10. Docker Container Postgres (pgvector) with TLS
+
+> The repo ships Postgres as a Docker container (`pgvector/pgvector`) on `127.0.0.1:9813` — this is what the pgvector extension requires. TLS uses a self-generated CA + server cert (not Let's Encrypt), and the nginx stream `default` route points at the container port, not the system `5432`.
+
+### 10.1 Generate CA + server certs
 
 ```bash
 cd ~/omnidb
@@ -378,7 +436,7 @@ sudo chown -R 999:999 ~/omnidb/certs
 sudo chmod 600 ~/omnidb/certs/server.key
 ```
 
-### 11.2 Enable SSL in compose.postgres.yaml
+### 10.2 Enable SSL in compose.postgres.yaml
 
 The `postgres` service must set `ssl=on` and mount the certs read-only:
 
@@ -396,7 +454,7 @@ The `postgres` service must set `ssl=on` and mount the certs read-only:
       - ./certs/ca.crt:/var/lib/postgresql/ca.crt:ro
 ```
 
-### 11.3 Require SSL in pg_hba.conf
+### 10.3 Require SSL in pg_hba.conf
 
 Change the catch-all TCP rule from `host` to `hostssl` so non-TLS connections are rejected:
 
@@ -406,28 +464,11 @@ sudo docker exec omnidb-postgres sed -i \
   /var/lib/postgresql/18/docker/pg_hba.conf
 ```
 
-### 11.4 Point nginx stream at the container
+### 10.4 Point nginx stream at the container
 
-The stream `default` route must target the container port `9813`, not the system `5432`:
+The stream `default` route must target the container port `9813`, not the system `5432` (see §6).
 
-```nginx
-stream {
-    map $ssl_preread_alpn_protocols $upstream {
-        ~\bh2\b 127.0.0.1:8443;
-        ~\bhttp/1\.1\b 127.0.0.1:8443;
-        default 127.0.0.1:9813;   # container postgres, not 5432
-    }
-    server {
-        listen 443;
-        ssl_preread on;
-        proxy_pass $upstream;
-        proxy_timeout 1h;
-        proxy_connect_timeout 10s;
-    }
-}
-```
-
-### 11.5 Update .env
+### 10.5 Update .env
 
 ```bash
 # App's own connection must now use TLS (container requires hostssl)
@@ -437,7 +478,7 @@ POSTGRES_PUBLIC_TLS=true
 POSTGRES_PUBLIC_SSLMODE=require
 ```
 
-### 11.6 Recreate container + restart app
+### 10.6 Recreate container + restart app
 
 ```bash
 cd ~/omnidb
@@ -446,7 +487,7 @@ sudo docker exec omnidb-postgres psql -U postgres -d postgres -tAc 'SHOW ssl;'  
 sudo systemctl restart omnidb
 ```
 
-### 11.7 Verify
+### 10.7 Verify
 
 ```bash
 # SSL connection succeeds
@@ -459,68 +500,39 @@ PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMA
 # → FATAL: no pg_hba.conf entry ... no encryption
 ```
 
-## Connection Strings
-
-**Manager → Postgres (local, never public DNS):**
-```
-jdbc:postgresql://127.0.0.1:5432/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10
-# user postgres, password from POSTGRES_ROOT_PASSWORD
-```
-
-**Issued per-DB string (what your apps use, via 443):**
-```
-postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=require
-# Port is 443, not 5432 — only 443 is public. Add &application_name=omnidb if needed.
-```
-
-**Manager UI:**
-```
-https://<YOUR_DOMAIN>/login
-# user <ADMIN_USER> / <ADMIN_PASSWORD> (from APP_ADMIN_USERNAME/PASSWORD)
-```
-
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `psql: FATAL: password authentication failed for user "root"` | Ubuntu PG superuser is `postgres` | `POSTGRES_ROOT_USER=postgres` in `.env`, `ALTER USER postgres WITH PASSWORD` |
-| `FATAL: could not load server certificate ... Permission denied` | `postgres` can't read `/etc/letsencrypt/live` | Copy to `/etc/postgresql/certs/server.crt/key` (`root:ssl-cert 640`), update `postgresql.conf` |
-| `FATAL: private key file ... has group or world access` | Wrong perms | `chown root:ssl-cert`, `chmod 640` (not `postgres:postgres 640` with group access) |
+| `psql: FATAL: password authentication failed for user "root"` | Postgres superuser is `postgres` | `POSTGRES_ROOT_USER=postgres` in `.env`, `ALTER USER postgres WITH PASSWORD` |
+| `FATAL: no pg_hba.conf entry ... no encryption` | SSL is enforced (`hostssl`), client connected without TLS | Use `sslmode=require` (or `verify-full`); never `sslmode=disable` |
+| `FATAL: private key file ... has group or world access` | Wrong perms on cert key | `chown 999:999`, `chmod 600` on `~/omnidb/certs/server.key` |
 | `bind() to 127.0.0.1:8443 failed (98: Address already in use)` | Old nginx still on `0.0.0.0:8443` | `systemctl stop nginx`, fix `listen` to `127.0.0.1:8443`, `systemctl start nginx` |
 | `unknown directive "stream"` | `libnginx-mod-stream` not installed or `include` before `load_module` | `apt install libnginx-mod-stream`, ensure `include /etc/nginx/stream.conf;` is after `include /etc/nginx/modules-enabled/*.conf;` and before `http {` |
 | `curl https://<YOUR_DOMAIN>` shows wrong cert | SNI mismatch, `8443` still `0.0.0.0:8443` | Ensure all `8443` are `127.0.0.1:8443`, `stream` owns `443` |
 | `omnidb: UnsupportedClassVersionError class file version 69.0` | Jar needs Java 25, VPS has 21 | `apt install openjdk-25-jdk`, `update-alternatives --config java` |
-| `omnidb: Unrecognized option: --sun-misc-unsafe-memory-access=allow` | Flag only on Java 25, service used Java 21 | Remove flag or use Java 25 |
 | `<YOUR_DOMAIN>:5432` timeout | Only `443` is public, `5432` closed | Use `<YOUR_DOMAIN>:443` with `sslmode=require` |
-| `FATAL: no pg_hba.conf entry ... no encryption` | SSL is enforced (`hostssl`), client connected without TLS | Use `sslmode=require` (or `verify-full`) in the connection string; never `sslmode=disable` |
+| `MongoTimeoutError` / `ECONNREFUSED` on issued Mongo string | `MONGODB_PUBLIC_HOST` wrong or port not exposed | Set `MONGODB_PUBLIC_HOST` + expose Mongo via Nginx `stream` (§5.2) |
+| `Public Key Retrieval is not allowed` (MySQL) | Missing `allowPublicKeyRetrieval=true` | Add `&allowPublicKeyRetrieval=true` to the JDBC URI |
 | `Unable to determine zone_id for <YOUR_DOMAIN>` | Cloudflare token for wrong zone | Use `webroot` with port 80, or create token for correct zone |
 
 ## Renewal
 
 ```bash
-# Cert auto-renews via systemd timer (certbot). Hook copies to postgres:
-cat /etc/letsencrypt/renewal-hooks/deploy/postgres-reload.sh
-# → cp fullchain.pem/privkey.pem → /etc/postgresql/certs/ → chown/chmod → pg_ctlcluster reload
-
-# Test renew dry-run
+# Let's Encrypt cert auto-renews via systemd timer (certbot).
+# Postgres uses its own self-generated CA cert (10-year) — rotate before expiry.
 sudo certbot renew --dry-run
 ```
 
 ## Files Changed on VPS
 
 - `/etc/nginx/nginx.conf` — added `include /etc/nginx/stream.conf;` before `http {`
-- `/etc/nginx/stream.conf` — new, ALPN multiplex `443` → `8443`/`5432` (or `9813` for the Docker container path, section 11)
+- `/etc/nginx/stream.conf` — new, ALPN multiplex `443` → `8443`/`9813` (app + Postgres container)
 - `/etc/nginx/sites-available/<YOUR_DOMAIN>` — new, `80` + `127.0.0.1:8443`
 - Other sites' configs — `443` → `127.0.0.1:8443` (to free `443` for stream)
-- `/etc/postgresql/16/main/postgresql.conf` — `ssl_cert_file/key_file` → `/etc/postgresql/certs/server.crt/key`
-- `/etc/postgresql/certs/server.crt`, `server.key` — copied Let's Encrypt cert
 - `/etc/systemd/system/omnidb.service` — new, `WorkingDirectory ~/omnidb`, `ExecStart java -jar omnidb-manager-*.jar`
-- `~/omnidb/.env` — `POSTGRES_ROOT_USER=postgres`, `POSTGRES_PUBLIC_HOST=<YOUR_DOMAIN>:443`, `POSTGRES_URI=127.0.0.1:5432`
-- `/etc/letsencrypt/live/<YOUR_DOMAIN>/` — new cert
-- `iptables` — `INPUT` allow `80`, `443`
-
-**Docker container path (section 11) additionally:**
-- `~/omnidb/compose.postgres.yaml` — `ssl=on` + cert mounts on the `postgres` service
-- `~/omnidb/certs/` — `ca.key`, `ca.crt`, `server.key`, `server.crt` (chowned to UID 999)
+- `~/omnidb/.env` — all engine root URIs + public hosts + TLS flags
+- `~/omnidb/compose*.yaml` — engine containers (mongo/postgres/mysql + admin UIs)
+- `~/omnidb/certs/` — `ca.key`, `ca.crt`, `server.key`, `server.crt` (Postgres TLS, chowned to UID 999)
 - Container `pg_hba.conf` (`/var/lib/postgresql/18/docker/pg_hba.conf`) — `host` → `hostssl` catch-all rule
-- `~/omnidb/.env` — `POSTGRES_URI` → `127.0.0.1:9813` with `sslmode=require`, `POSTGRES_PUBLIC_TLS=true`
+- `iptables` — `INPUT` allow `80`, `443`
