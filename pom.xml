@@ -10,7 +10,7 @@
     </parent>
     <groupId>com.pkmprojects</groupId>
     <artifactId>omnidb-manager</artifactId>
-    <version>1.6.0-SNAPSHOT</version>
+    <version>1.7.0-SNAPSHOT</version>
     <name>OmniDB Manager</name>
     <description>Enterprise dual-engine database control plane — MongoDB + PostgreSQL provisioning, isolation and lifecycle management</description>
     <url>https://github.com/prabhatkrmishra/Project_SpringBoot_OmniDBManager</url>
