@@ -15,7 +15,10 @@ import org.springframework.stereotype.Service;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Assembles server health metrics for the health dashboard.
@@ -61,25 +64,14 @@ public class HealthService {
     }
 
     public ServerHealth getHealth() {
-        // Parallel pings with hard timeout — never block dashboard >3s per engine
-        CompletableFuture<Boolean> mongoFuture = CompletableFuture.supplyAsync(this::pingMongo)
-                .orTimeout(PING_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .exceptionally(e -> {
-                    log.warn("MongoDB ping timed out or failed", e);
-                    return false;
-                });
-        CompletableFuture<Boolean> pgFuture = CompletableFuture.supplyAsync(this::pingPostgres)
-                .orTimeout(PING_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .exceptionally(e -> {
-                    log.warn("Postgres ping timed out or failed", e);
-                    return false;
-                });
-        CompletableFuture<Boolean> mysqlFuture = CompletableFuture.supplyAsync(this::pingMysql)
-                .orTimeout(PING_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .exceptionally(e -> {
-                    log.warn("MySQL ping timed out or failed", e);
-                    return false;
-                });
+        // Parallel pings with hard timeout — never block dashboard >3s per engine.
+        // Disabled engines are not pinged at all: a future that can only return
+        // false still occupies a common-pool thread, and under load it can miss
+        // its own deadline and log a misleading "timed out" warning for an engine
+        // that was never even contacted.
+        CompletableFuture<Boolean> mongoFuture = pingAsync(mongoEnabled, this::pingMongo, "MongoDB");
+        CompletableFuture<Boolean> pgFuture = pingAsync(postgresEnabled, this::pingPostgres, "Postgres");
+        CompletableFuture<Boolean> mysqlFuture = pingAsync(mysqlEnabled, this::pingMysql, "MySQL");
 
         boolean mongoReachable = joinBool(mongoFuture);
         boolean postgresReachable = joinBool(pgFuture);
@@ -136,6 +128,28 @@ public class HealthService {
         return new ServerHealth(mongoReachable, version, uptimeSeconds, databaseCount, totalStorageBytes, connectionCount,
                 mongoReachable, postgresReachable, postgresVersion, postgresEnabled,
                 mysqlReachable, mysqlVersion, mysqlEnabled, mongoEnabled);
+    }
+
+    /**
+     * Runs one engine ping with a hard timeout. A missed deadline is an expected,
+     * handled outcome (cold pool, slow first connection), so it logs as a single
+     * line with no stack trace. Genuine failures still log with the stack.
+     */
+    private CompletableFuture<Boolean> pingAsync(boolean enabled, Supplier<Boolean> ping, String engine) {
+        if (!enabled) {
+            return CompletableFuture.completedFuture(false);
+        }
+        return CompletableFuture.supplyAsync(ping)
+                .orTimeout(PING_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    if (e instanceof TimeoutException
+                            || (e instanceof CompletionException && e.getCause() instanceof TimeoutException)) {
+                        log.warn("{} ping timed out after {}s", engine, PING_TIMEOUT_SECONDS);
+                    } else {
+                        log.warn("{} ping failed", engine, e);
+                    }
+                    return false;
+                });
     }
 
     private boolean pingPostgres() {
