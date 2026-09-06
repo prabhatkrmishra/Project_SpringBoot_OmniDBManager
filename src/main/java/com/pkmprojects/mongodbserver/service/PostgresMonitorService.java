@@ -1,5 +1,6 @@
 package com.pkmprojects.mongodbserver.service;
 
+import com.pkmprojects.mongodbserver.dto.PgbouncerSnapshot;
 import com.pkmprojects.mongodbserver.dto.PostgresMonitorSnapshot;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import com.pkmprojects.mongodbserver.util.Json;
@@ -24,16 +25,27 @@ public class PostgresMonitorService {
 
     private final PostgresDatabaseRepository postgresRepository;
     private final Clock clock;
+    private final PgbouncerMonitorService pgbouncerMonitorService;
 
-    public PostgresMonitorService(@Autowired(required = false) PostgresDatabaseRepository postgresRepository, Clock clock) {
+    @Autowired
+    public PostgresMonitorService(@Autowired(required = false) PostgresDatabaseRepository postgresRepository,
+                                Clock clock,
+                                @Autowired(required = false) PgbouncerMonitorService pgbouncerMonitorService) {
         this.postgresRepository = postgresRepository;
         this.clock = clock;
+        this.pgbouncerMonitorService = pgbouncerMonitorService;
+    }
+
+    // Legacy for tests without pgbouncer
+    public PostgresMonitorService(PostgresDatabaseRepository postgresRepository, Clock clock) {
+        this(postgresRepository, clock, null);
     }
 
     public PostgresMonitorSnapshot getSnapshot() {
         Instant now = clock.instant();
         if (!ping()) {
-            return new PostgresMonitorSnapshot(false, now, null, null, null, 0, null, null, null, null, null);
+            PgbouncerSnapshot pgbouncer = pgbouncerMonitorService != null ? safePgbouncerSnapshot() : PgbouncerSnapshot.disabled();
+            return new PostgresMonitorSnapshot(false, now, null, null, null, 0, null, null, null, null, null, pgbouncer);
         }
 
         String version = null;
@@ -111,12 +123,13 @@ public class PostgresMonitorService {
             log.warn("Could not read Postgres activity stats", e);
         }
 
+        PgbouncerSnapshot pgbouncer = pgbouncerMonitorService != null ? safePgbouncerSnapshot() : PgbouncerSnapshot.disabled();
         return new PostgresMonitorSnapshot(true, now, version, uptimeSeconds, connectionCount,
-                databaseCount, totalStorageBytes, activeConnections, idleConnections, txCommitted, txRolledBack);
+                databaseCount, totalStorageBytes, activeConnections, idleConnections, txCommitted, txRolledBack, pgbouncer);
     }
 
     public String serialize(PostgresMonitorSnapshot s) {
-        StringBuilder json = new StringBuilder(256);
+        StringBuilder json = new StringBuilder(512);
         json.append('{')
                 .append("\"reachable\":").append(s.reachable())
                 .append(",\"measuredAt\":").append(Json.jsonString(s.measuredAt().toString()))
@@ -129,8 +142,54 @@ public class PostgresMonitorService {
                 .append(",\"idleConnections\":").append(number(s.idleConnections()))
                 .append(",\"transactionsCommitted\":").append(number(s.transactionsCommitted()))
                 .append(",\"transactionsRolledBack\":").append(number(s.transactionsRolledBack()))
+                .append(",\"pgbouncer\":").append(serializePgbouncer(s.pgbouncer()))
                 .append('}');
         return json.toString();
+    }
+
+    private String serializePgbouncer(PgbouncerSnapshot p) {
+        if (p == null || !p.enabled()) return "null";
+        StringBuilder b = new StringBuilder(256);
+        b.append('{');
+        b.append("\"enabled\":true");
+        b.append(",\"status\":").append(Json.jsonString(p.status()));
+        b.append(",\"pools\":[");
+        for (int i = 0; i < p.pools().size(); i++) {
+            var pool = p.pools().get(i);
+            if (i > 0) b.append(',');
+            b.append('{');
+            b.append("\"database\":").append(Json.jsonString(pool.database()));
+            b.append(",\"poolMode\":").append(Json.jsonString(pool.poolMode()));
+            b.append(",\"clientsActive\":").append(pool.clientsActive());
+            b.append(",\"clientsWaiting\":").append(pool.clientsWaiting());
+            b.append(",\"serversActive\":").append(pool.serversActive());
+            b.append(",\"serversIdle\":").append(pool.serversIdle());
+            b.append(",\"maxWaitSeconds\":").append(pool.maxWaitSeconds());
+            b.append('}');
+        }
+        b.append(']');
+        b.append(",\"stats\":");
+        if (p.stats() == null) {
+            b.append("null");
+        } else {
+            b.append('{');
+            b.append("\"totalQueries\":").append(p.stats().totalQueries());
+            b.append(",\"avgQueryTimeMs\":").append(p.stats().avgQueryTimeMs());
+            b.append(",\"totalWaitTimeMs\":").append(p.stats().totalWaitTimeMs());
+            b.append('}');
+        }
+        b.append('}');
+        return b.toString();
+    }
+
+    private PgbouncerSnapshot safePgbouncerSnapshot() {
+        if (pgbouncerMonitorService == null) return PgbouncerSnapshot.disabled();
+        try {
+            return pgbouncerMonitorService.getSnapshot();
+        } catch (Exception e) {
+            log.debug("Pgbouncer snapshot failed, returning disabled", e);
+            return PgbouncerSnapshot.disabled();
+        }
     }
 
     private boolean ping() {

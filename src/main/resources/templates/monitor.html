@@ -384,6 +384,55 @@
                         </div>
                     </div>
                 </section>
+
+                <!-- PgBouncer — facet of Postgres, only when PGBOUNCER_ENABLED=true (hidden otherwise) -->
+                <section class="card shadow-sm mb-4" id="pgbouncerCard" style="display:none" th:if="${monitorEngine == 'postgres' and pgbouncerAvailable}">
+                    <div class="card-header bg-transparent d-flex align-items-center gap-2">
+                        <i class="bi bi-hdd-network text-info"></i>
+                        <span class="fw-medium">PgBouncer</span>
+                        <span id="pgbouncerBadge" class="badge badge-soft-secondary ms-auto">—</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-sm-6 col-lg-2">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Status</div>
+                                    <div class="health-metric-value small" id="pgbouncerStatus">—</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-lg-2">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Clients waiting</div>
+                                    <div class="health-metric-value" id="pgbouncerWaiting">—</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-lg-2">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Clients active</div>
+                                    <div class="health-metric-value" id="pgbouncerActive">—</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-lg-2">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Servers idle</div>
+                                    <div class="health-metric-value" id="pgbouncerIdle">—</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-lg-2">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Max wait</div>
+                                    <div class="health-metric-value" id="pgbouncerMaxWait">—</div>
+                                </div>
+                            </div>
+                            <div class="col-sm-6 col-lg-2">
+                                <div class="health-metric">
+                                    <div class="health-metric-label">Total queries</div>
+                                    <div class="health-metric-value" id="pgbouncerQueries">—</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </main>
         </div>
     </div>
@@ -440,6 +489,7 @@
                 safeSet('pgRolledBack', fmtNum(s.transactionsRolledBack));
                 safeSet('pgDatabaseCount', fmtNum(s.databaseCount));
                 safeSet('pgTotalStorage', s.totalStorageBytes == null ? '—' : formatStorage(s.totalStorageBytes));
+                renderPgbouncer(s.pgbouncer);
                 return;
             }
             if (monitorEngine === 'mysql') {
@@ -480,6 +530,40 @@
                 ['lockQueueTotal', 'lockQueueReaders', 'lockQueueWriters',
                  'lockActiveTotal', 'lockActiveReaders', 'lockActiveWriters'].forEach(id => safeSet(id, '—'));
             }
+        }
+
+        function renderPgbouncer(p) {
+            const card = document.getElementById('pgbouncerCard');
+            const badge = document.getElementById('pgbouncerBadge');
+            if (!p || p.enabled === false || p === null) {
+                if (card) card.style.display = 'none';
+                return;
+            }
+            if (card) card.style.display = '';
+            const status = p.status || 'unknown';
+            safeSet('pgbouncerStatus', status);
+            if (badge) {
+                badge.textContent = status;
+                badge.className = status === 'healthy' ? 'badge badge-soft-success'
+                    : status === 'degraded' ? 'badge badge-soft-warning'
+                    : status === 'unreachable' ? 'badge badge-soft-danger' : 'badge badge-soft-secondary';
+            }
+            if (p.status === 'unreachable' || !p.pools || p.pools.length === 0) {
+                safeSet('pgbouncerWaiting', p.status === 'unreachable' ? 'unreachable' : '—');
+                safeSet('pgbouncerActive', p.status === 'unreachable' ? 'unreachable' : '—');
+                safeSet('pgbouncerIdle', '—');
+                safeSet('pgbouncerMaxWait', '—');
+                safeSet('pgbouncerQueries', p.stats ? fmtNum(p.stats.totalQueries) : '—');
+                return;
+            }
+            // Aggregate across pools for summary
+            let waiting = 0, active = 0, idle = 0, maxWait = 0;
+            p.pools.forEach(pool => { waiting += pool.clientsWaiting || 0; active += pool.clientsActive || 0; idle += pool.serversIdle || 0; maxWait = Math.max(maxWait, pool.maxWaitSeconds || 0); });
+            safeSet('pgbouncerWaiting', fmtNum(waiting));
+            safeSet('pgbouncerActive', fmtNum(active));
+            safeSet('pgbouncerIdle', fmtNum(idle));
+            safeSet('pgbouncerMaxWait', maxWait ? maxWait.toFixed(2) + 's' : '0s');
+            safeSet('pgbouncerQueries', p.stats ? fmtNum(p.stats.totalQueries) : '—');
         }
 
         function formatStorage(n) {

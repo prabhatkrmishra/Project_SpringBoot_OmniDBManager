@@ -2,6 +2,7 @@ package com.pkmprojects.mongodbserver.controller;
 
 import com.pkmprojects.mongodbserver.service.MonitorService;
 import com.pkmprojects.mongodbserver.service.MysqlMonitorService;
+import com.pkmprojects.mongodbserver.service.PgbouncerMonitorService;
 import com.pkmprojects.mongodbserver.service.PostgresMonitorService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -42,15 +43,18 @@ public class MonitorController {
     private final MonitorService monitorService;
     private final Optional<PostgresMonitorService> postgresMonitorService;
     private final Optional<MysqlMonitorService> mysqlMonitorService;
+    private final Optional<PgbouncerMonitorService> pgbouncerMonitorService;
     private final ScheduledExecutorService scheduler;
     private final ExecutorService tickExecutor;
 
     public MonitorController(@Autowired(required = false) MonitorService monitorService,
                              @Autowired(required = false) PostgresMonitorService postgresMonitorService,
-                             @Autowired(required = false) MysqlMonitorService mysqlMonitorService) {
+                             @Autowired(required = false) MysqlMonitorService mysqlMonitorService,
+                             @Autowired(required = false) PgbouncerMonitorService pgbouncerMonitorService) {
         this.monitorService = monitorService;
         this.postgresMonitorService = Optional.ofNullable(postgresMonitorService);
         this.mysqlMonitorService = Optional.ofNullable(mysqlMonitorService);
+        this.pgbouncerMonitorService = Optional.ofNullable(pgbouncerMonitorService);
         this.scheduler = Executors.newScheduledThreadPool(2, runnable -> {
             Thread thread = new Thread(runnable, "monitor-sse");
             thread.setDaemon(true);
@@ -68,6 +72,7 @@ public class MonitorController {
         model.addAttribute("monitorEngine", eng);
         model.addAttribute("postgresAvailable", postgresMonitorService.isPresent());
         model.addAttribute("mysqlAvailable", mysqlMonitorService.isPresent());
+        model.addAttribute("pgbouncerAvailable", pgbouncerMonitorService.isPresent());
         return "monitor";
     }
 

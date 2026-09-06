@@ -16,5 +16,16 @@ public record PostgresMonitorSnapshot(
         Integer activeConnections,
         Integer idleConnections,
         Long transactionsCommitted,
-        Long transactionsRolledBack) {
+        Long transactionsRolledBack,
+        PgbouncerSnapshot pgbouncer) {
+
+    public PostgresMonitorSnapshot(boolean reachable, Instant measuredAt, String version,
+                                   Long uptimeSeconds, Integer connectionCount, int databaseCount,
+                                   Long totalStorageBytes, Integer activeConnections,
+                                   Integer idleConnections, Long transactionsCommitted,
+                                   Long transactionsRolledBack) {
+        this(reachable, measuredAt, version, uptimeSeconds, connectionCount, databaseCount,
+                totalStorageBytes, activeConnections, idleConnections, transactionsCommitted,
+                transactionsRolledBack, PgbouncerSnapshot.disabled());
+    }
 }

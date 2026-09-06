@@ -23,6 +23,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
     private final String publicSslmode;
     private final com.pkmprojects.mongodbserver.config.PgbouncerProperties pgbouncerProperties;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public PostgresDatabaseEngine(PostgresDatabaseRepository postgresDatabaseRepository,
                                    Environment environment,
                                    @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String postgresUri,
@@ -39,7 +40,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         this.pgbouncerProperties = pgbouncerProperties;
     }
 
-    // Legacy constructor for tests without PgbouncerProperties
+    // Legacy constructor for tests without PgbouncerProperties (used via direct new in unit tests)
     public PostgresDatabaseEngine(PostgresDatabaseRepository postgresDatabaseRepository,
                                    Environment environment,
                                    String postgresUri,
