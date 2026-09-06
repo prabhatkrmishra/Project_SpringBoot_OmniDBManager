@@ -20,7 +20,6 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -87,26 +86,25 @@ public class PostgresPgbouncerService {
     /**
      * Called after a Postgres DB provision or password reset.
      * Regenerates config to include {@code dbName -> host:postgres:5432 dbname=dbName}
-     * and the md5-hashed user entry, then RELOADs.
+     * then RELOADs. Per-DB users authenticate via {@code auth_query} against
+     * {@code pg_shadow} (SCRAM), so no per-DB {@code userlist.txt} entries are written.
      */
     public void syncDatabase(String dbName, String userName, String plainPassword) {
-        if (isBlank(dbName) || isBlank(userName) || plainPassword == null) return;
+        if (isBlank(dbName)) return;
         fileLock.lock();
         try {
             ensureConfigDir();
             regenerateFromStore();
-            // Ensure the caller’s entry is present even if store not yet flushed
-            upsertUserInFile(userName, plainPassword);
             ensureDatabaseEntry(dbName);
             reload();
-            log.info("PgBouncer config synced for database '{}' / user '{}'", dbName, userName);
+            log.info("PgBouncer config synced for database '{}'", dbName);
         } finally {
             fileLock.unlock();
         }
     }
 
     /**
-     * Called after delete. Removes DB and optionally user entry, then RELOADs.
+     * Called after delete. Removes DB entry then RELOADs.
      */
     public void removeDatabase(String dbName, String userName) {
         if (isBlank(dbName)) return;
@@ -114,15 +112,7 @@ public class PostgresPgbouncerService {
         try {
             ensureConfigDir();
             regenerateFromStore();
-            // Remove per-db section even if store already deleted
             removeDatabaseEntry(dbName);
-            if (!isBlank(userName)) {
-                // Only remove user if no other DB still uses it
-                boolean stillUsed = isUserStillUsed(userName);
-                if (!stillUsed) {
-                    removeUserFromFile(userName);
-                }
-            }
             reload();
             log.info("PgBouncer config removed for database '{}'", dbName);
         } finally {
@@ -205,30 +195,12 @@ public class PostgresPgbouncerService {
             );
             Files.writeString(ini, iniContent, StandardCharsets.UTF_8);
 
-            // userlist.txt — admin + stats + per-db users (hashed from store if possible)
+            // userlist.txt — only admin + stats; per-DB users auth via auth_query (SCRAM) against pg_shadow
             StringBuilder ul = new StringBuilder();
             ul.append('"').append(properties.adminUser()).append("\" \"")
                     .append(pgbouncerMd5(properties.adminUser(), effectiveAdminPassword)).append("\"\n");
             ul.append('"').append(properties.statsUser()).append("\" \"")
                     .append(pgbouncerMd5(properties.statsUser(), effectiveStatsPassword)).append("\"\n");
-            if (managedDatabaseStore != null) {
-                try {
-                    var all = managedDatabaseStore.findAllByEngineType(DatabaseEngineType.POSTGRES);
-                    for (var md : all) {
-                        String user = md.getUserName();
-                        String enc = md.getStoredPassword();
-                        if (isBlank(user) || enc == null) continue;
-                        // Try to decrypt to get plain for hashing; if decrypt fails, skip (hashed from syncDatabase will cover recent provisions)
-                        String plain = tryDecrypt(enc);
-                        if (plain != null && !plain.isBlank()) {
-                            ul.append('"').append(escapeUser(user)).append("\" \"")
-                                    .append(pgbouncerMd5(user, plain)).append("\"\n");
-                        }
-                    }
-                } catch (Exception e) {
-                    log.warn("Could not regenerate pgbouncer userlist from store", e);
-                }
-            }
             Files.writeString(userlist, ul.toString(), StandardCharsets.UTF_8);
         } catch (IOException e) {
             log.warn("Failed to regenerate PgBouncer config files in {}", properties.configDir(), e);
@@ -267,50 +239,6 @@ public class PostgresPgbouncerService {
         }
     }
 
-    private void upsertUserInFile(String user, String plainPassword) {
-        try {
-            Path ul = Path.of(properties.configDir()).resolve("userlist.txt");
-            if (!Files.exists(ul)) return;
-            List<String> lines = Files.readAllLines(ul, StandardCharsets.UTF_8);
-            String hashed = pgbouncerMd5(user, plainPassword);
-            String wanted = "\"" + escapeUser(user) + "\" \"" + hashed + "\"";
-            boolean found = false;
-            for (int i = 0; i < lines.size(); i++) {
-                if (lines.get(i).contains("\"" + escapeUser(user) + "\"")) {
-                    lines.set(i, wanted);
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) lines.add(wanted);
-            Files.write(ul, lines, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            log.warn("Could not upsert PgBouncer userlist entry for {}", user, e);
-        }
-    }
-
-    private void removeUserFromFile(String user) {
-        try {
-            Path ul = Path.of(properties.configDir()).resolve("userlist.txt");
-            if (!Files.exists(ul)) return;
-            List<String> lines = Files.readAllLines(ul, StandardCharsets.UTF_8);
-            lines.removeIf(l -> l.contains("\"" + escapeUser(user) + "\""));
-            Files.write(ul, lines, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            log.warn("Could not remove PgBouncer userlist entry for {}", user, e);
-        }
-    }
-
-    private boolean isUserStillUsed(String user) {
-        if (managedDatabaseStore == null) return false;
-        try {
-            var all = managedDatabaseStore.findAllByEngineType(DatabaseEngineType.POSTGRES);
-            return all.stream().anyMatch(md -> user.equals(md.getUserName()));
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
     private void reload() {
         String url = "jdbc:postgresql://127.0.0.1:" + properties.port() + "/pgbouncer?sslmode=disable&connectTimeout=2&socketTimeout=3";
         try (Connection c = DriverManager.getConnection(url, properties.adminUser(), effectiveAdminPassword);
@@ -328,22 +256,6 @@ public class PostgresPgbouncerService {
         } catch (IOException e) {
             log.warn("Could not create PgBouncer config dir {}", properties.configDir(), e);
         }
-    }
-
-    private String tryDecrypt(String stored) {
-        if (stored == null) return null;
-        if (stored.startsWith("ENC:v1:")) {
-            if (encryptionService != null) {
-                try {
-                    return encryptionService.decrypt(stored);
-                } catch (Exception e) {
-                    log.warn("Could not decrypt stored password for PgBouncer userlist (will be re-synced on next provision/reset): {}", e.getMessage());
-                    return null;
-                }
-            }
-            return null;
-        }
-        return stored;
     }
 
     static String pgbouncerMd5(String user, String password) {
