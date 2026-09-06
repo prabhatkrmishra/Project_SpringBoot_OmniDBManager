@@ -106,6 +106,18 @@ app:
     base-url: ${ADMINER_BASE_URL:http://127.0.0.1:9815}
   phpmyadmin:
     base-url: ${PHPMYADMIN_BASE_URL:http://127.0.0.1:9817}
+  pgbouncer:
+    enabled: ${PGBOUNCER_ENABLED:false}
+    port: ${PGBOUNCER_PORT:6432}
+    pool-mode: ${PGBOUNCER_POOL_MODE:transaction}
+    max-client-conn: ${PGBOUNCER_MAX_CLIENT_CONN:1000}
+    default-pool-size: ${PGBOUNCER_DEFAULT_POOL_SIZE:25}
+    admin-user: ${PGBOUNCER_ADMIN_USER:pgbouncer_admin}
+    admin-password: ${PGBOUNCER_ADMIN_PASSWORD:}
+    stats-user: ${PGBOUNCER_STATS_USER:pgbouncer_stats}
+    stats-password: ${PGBOUNCER_STATS_PASSWORD:}
+    public-host: ${PGBOUNCER_PUBLIC_HOST:}
+    config-dir: ${PGBOUNCER_CONFIG_DIR:./pgbouncer}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)

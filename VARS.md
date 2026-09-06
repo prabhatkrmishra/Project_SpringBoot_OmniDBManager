@@ -85,13 +85,31 @@ These are commented in `.env.example` — uncomment the block that matches your 
 | `MYSQL_PUBLIC_SSLMODE` | `REQUIRED` | `application.yml:app.mysql.public-sslmode` | `DISABLED` / `REQUIRED` (TLS without CA) / `VERIFY_IDENTITY` (TLS + CA). |
 | `PHPMYADMIN_BASE_URL` | `http://127.0.0.1:9817` | `application.yml:app.phpmyadmin.base-url` → `PhpMyAdminProxyFilter` at `/phpmyadmin` | Internal phpMyAdmin URL. Requires `ADMIN` role, loopback only. |
 
-## 6. Encryption at Rest
+## 6. PgBouncer Pooling (Optional, Postgres)
+
+| Variable | Default | Where Used | Description |
+|---|---|---|---|
+| `PGBOUNCER_ENABLED` | `false` | `application.yml:app.pgbouncer.enabled` | `true` = enable pooling for any Postgres DB provisioned via OmniDB. Mirrors `POSTGRES_ENABLED`/`MYSQL_ENABLED`. When `false`, no container/UI/health/monitor changes. |
+| `PGBOUNCER_PORT` | `6432` | `application.yml:app.pgbouncer.port` + `compose.postgres.yaml:pgbouncer.ports` | Host port, loopback-bound `127.0.0.1:6432` by default (safe, closed). Same Docker network as `postgres` (`postgres:5432` internally). |
+| `PGBOUNCER_POOL_MODE` | `transaction` | `pgbouncer.ini:pool_mode` | `transaction` (locked stack choice). |
+| `PGBOUNCER_MAX_CLIENT_CONN` | `1000` | `pgbouncer.ini:max_client_conn` | Leave headroom for OmniDB admin connections (`Hikari maxPool 5`). |
+| `PGBOUNCER_DEFAULT_POOL_SIZE` | `25` | `pgbouncer.ini:default_pool_size` | Per-database server connections; keep well below `max_connections` (100). |
+| `PGBOUNCER_ADMIN_USER` | `pgbouncer_admin` | `pgbouncer.ini:admin_users` + `PostgresPgbouncerService.reload()` | Stats+admin: can `RELOAD`. Never in issued strings or logs. Auto-generated strong password if blank when enabled (via `security.PasswordGenerator`). |
+| `PGBOUNCER_ADMIN_PASSWORD` | `` (auto-gen) | `pgbouncer.ini:userlist.txt` + `application.yml:app.pgbouncer.admin-password` | Must not log. Regenerated file kept in `PGBOUNCER_CONFIG_DIR`. |
+| `PGBOUNCER_STATS_USER` | `pgbouncer_stats` | `pgbouncer.ini:stats_users` | Read-only monitor: `SHOW POOLS/STATS` only, cannot `RELOAD`/`KILL`/`PAUSE`. Used by Phase 2 monitoring. |
+| `PGBOUNCER_STATS_PASSWORD` | `` (auto-gen) | `pgbouncer.ini:userlist.txt` | Auto-generated if blank. |
+| `PGBOUNCER_PUBLIC_HOST` | `` (empty) | `PostgresDatabaseEngine.buildConnectionString()` | Host in issued strings when pooling enabled. Empty = derive from `POSTGRES_PUBLIC_HOST` / `POSTGRES_URI` with port swapped to `PGBOUNCER_PORT`. Mirrors `POSTGRES_PUBLIC_HOST` pattern. |
+| `PGBOUNCER_CONFIG_DIR` | `./pgbouncer` | `PgbouncerProperties.configDir` | Where `pgbouncer.ini`/`userlist.txt` are regenerated on provision/reset/delete. |
+
+*Privilege scoping:* `admin_users` (reload) ≠ `stats_users` (SHOW only). Stats credential is the only one monitoring ever uses; admin credential never leaves server-side `RELOAD` path.
+
+## 7. Encryption at Rest
 
 | Variable | Default | Where Used | Description |
 |---|---|---|---|
 | `APP_ENCRYPTION_KEY` | `` (empty) | `application.yml:app.encryption.key` → `EncryptionService` (AES-256-GCM) | **Critical.** Generate with `openssl rand -base64 32` (or `openssl rand -hex 32`). When set, per-database passwords in `mongodb_admin.managed_databases` are encrypted. When blank, stored **plaintext** (dev only). Changing the key after provisioning makes old passwords unreadable — generate once and back up securely. |
 
-## 7. Manager → DB vs Issued Strings
+## 8. Manager → DB vs Issued Strings
 
 | Link | Who Uses It | Example | Env Var |
 |---|---|---|---|
@@ -100,7 +118,7 @@ These are commented in `.env.example` — uncomment the block that matches your 
 
 Never give the root `*_URI` to your apps. `*_URI` stays `127.0.0.1` (manager and DB on same host via Docker); `*_PUBLIC_HOST` is what your apps dial.
 
-## 8. Local vs Production
+## 9. Local vs Production
 
 > `*_URI` is always `127.0.0.1` — Manager and DB run on the same host via Docker. Public DNS goes in `*_PUBLIC_HOST`, not `*_URI`.
 

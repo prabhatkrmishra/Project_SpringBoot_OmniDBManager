@@ -104,5 +104,37 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # PgBouncer — optional pooling for Postgres (generic, any provisioned DB).
+  # Preferred: same Docker network as postgres (host=postgres:5432 internally).
+  # Gated by Compose profile `pgbouncer` — activated only when PGBOUNCER_ENABLED=true:
+  #   PGBOUNCER_ENABLED=true docker compose --profile pgbouncer -f compose.postgres.yaml up -d
+  # Falls back to wildcard `*` database so new provisions need only a RELOAD, not a restart.
+  # Default is loopback-bound 127.0.0.1:6432 (safe/closed), matching the Adminer/mongo-express pattern.
+  pgbouncer:
+    image: pgbouncer/pgbouncer:1.23.1
+    container_name: omnidb-pgbouncer
+    restart: unless-stopped
+    profiles: [pgbouncer]
+    ports:
+      - "127.0.0.1:${PGBOUNCER_PORT:-6432}:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    healthcheck:
+      # pgbouncer image has no pg_isready; use tcp probe
+      test: ["CMD-SHELL", "timeout 2 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/6432' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres-data:

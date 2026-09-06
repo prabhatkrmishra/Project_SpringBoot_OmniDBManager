@@ -21,19 +21,32 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
     private final String publicHost;
     private final boolean publicTls;
     private final String publicSslmode;
+    private final com.pkmprojects.mongodbserver.config.PgbouncerProperties pgbouncerProperties;
 
     public PostgresDatabaseEngine(PostgresDatabaseRepository postgresDatabaseRepository,
-                                  Environment environment,
-                                  @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String postgresUri,
-                                  @Value("${app.postgres.public-host:}") String publicHost,
-                                  @Value("${app.postgres.public-tls:false}") boolean publicTls,
-                                  @Value("${app.postgres.public-sslmode:require}") String publicSslmode) {
+                                   Environment environment,
+                                   @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String postgresUri,
+                                   @Value("${app.postgres.public-host:}") String publicHost,
+                                   @Value("${app.postgres.public-tls:false}") boolean publicTls,
+                                   @Value("${app.postgres.public-sslmode:require}") String publicSslmode,
+                                   @org.springframework.beans.factory.annotation.Autowired(required = false) com.pkmprojects.mongodbserver.config.PgbouncerProperties pgbouncerProperties) {
         this.postgresDatabaseRepository = postgresDatabaseRepository;
         this.environment = environment;
         this.postgresUri = postgresUri;
         this.publicHost = publicHost;
         this.publicTls = publicTls;
         this.publicSslmode = publicSslmode;
+        this.pgbouncerProperties = pgbouncerProperties;
+    }
+
+    // Legacy constructor for tests without PgbouncerProperties
+    public PostgresDatabaseEngine(PostgresDatabaseRepository postgresDatabaseRepository,
+                                   Environment environment,
+                                   String postgresUri,
+                                   String publicHost,
+                                   boolean publicTls,
+                                   String publicSslmode) {
+        this(postgresDatabaseRepository, environment, postgresUri, publicHost, publicTls, publicSslmode, null);
     }
 
     @Override
@@ -114,6 +127,32 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
 
     @Override
     public String buildConnectionString(String userName, String password, String dbName) {
+        // Additive branch on PGBOUNCER_ENABLED — when pooling enabled, route through pgbouncer port
+        if (pgbouncerProperties != null && pgbouncerProperties.enabled()) {
+            String host = pgbouncerProperties.publicHost();
+            if (host == null || host.isBlank()) {
+                host = resolveHost();
+                // Swap port to pgbouncer port if resolveHost included a port
+                if (!host.contains(":")) {
+                    host = host + ":" + pgbouncerProperties.port();
+                } else {
+                    // Replace existing port with pgbouncer port
+                    int colon = host.lastIndexOf(':');
+                    String hostOnly = host.substring(0, colon);
+                    host = hostOnly + ":" + pgbouncerProperties.port();
+                }
+            } else {
+                // publicHost may already contain port; ensure pgbouncer port if no port present
+                if (!host.contains(":")) {
+                    host = host + ":" + pgbouncerProperties.port();
+                }
+            }
+            String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
+            if (publicTls) {
+                return base + "?sslmode=" + publicSslmode + "&application_name=omnidb";
+            }
+            return base + "?application_name=omnidb";
+        }
         String host = resolveHost();
         String encodedUser = uriEncode(userName);
         String encodedPass = uriEncode(password);

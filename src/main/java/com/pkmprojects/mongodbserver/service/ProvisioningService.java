@@ -60,6 +60,7 @@ public class ProvisioningService {
     private final Optional<MysqlDatabaseEngine> mysqlEngine;
     private final Optional<MysqlDatabaseRepository> mysqlRepository;
     private final EncryptionService encryptionService;
+    private final Optional<PostgresPgbouncerService> pgbouncerService;
 
     @Autowired
     public ProvisioningService(@Autowired(required = false) MongoDatabaseRepository mongoDatabaseRepository,
@@ -76,7 +77,8 @@ public class ProvisioningService {
                                @Autowired(required = false) PostgresDatabaseRepository postgresRepository,
                                @Autowired(required = false) MysqlDatabaseEngine mysqlEngine,
                                @Autowired(required = false) MysqlDatabaseRepository mysqlRepository,
-                               @Autowired(required = false) EncryptionService encryptionService) {
+                               @Autowired(required = false) EncryptionService encryptionService,
+                               @Autowired(required = false) PostgresPgbouncerService pgbouncerService) {
         this.mongoDatabaseRepository = Optional.ofNullable(mongoDatabaseRepository);
         this.managedDatabaseStore = managedDatabaseStore;
         this.auditStore = auditStore;
@@ -92,6 +94,7 @@ public class ProvisioningService {
         this.mysqlEngine = Optional.ofNullable(mysqlEngine);
         this.mysqlRepository = Optional.ofNullable(mysqlRepository);
         this.encryptionService = encryptionService;
+        this.pgbouncerService = Optional.ofNullable(pgbouncerService);
     }
 
     // Legacy 12-arg constructor for tests without EncryptionService
@@ -110,7 +113,29 @@ public class ProvisioningService {
         this(mongoDatabaseRepository, managedDatabaseStore,
                 new com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter(auditLogRepository), nameValidator,
                 passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
-                mongoEngine, postgresEngine, postgresRepository, null, null, null);
+                mongoEngine, postgresEngine, postgresRepository, null, null, null, null);
+    }
+
+    // Legacy 15-arg constructor for tests that use AuditStore directly but not pgbouncer
+    public ProvisioningService(MongoDatabaseRepository mongoDatabaseRepository,
+                               ManagedDatabaseStore managedDatabaseStore,
+                               AuditStore auditStore,
+                               DatabaseNameValidator nameValidator,
+                               PasswordGenerator passwordGenerator,
+                               java.time.Clock clock,
+                               Environment environment,
+                               ApplicationEventPublisher applicationEventPublisher,
+                               DatabaseLockRegistry databaseLocks,
+                               MongoDatabaseEngine mongoEngine,
+                               PostgresDatabaseEngine postgresEngine,
+                               PostgresDatabaseRepository postgresRepository,
+                               MysqlDatabaseEngine mysqlEngine,
+                               MysqlDatabaseRepository mysqlRepository,
+                               EncryptionService encryptionService) {
+        this(mongoDatabaseRepository, managedDatabaseStore, auditStore, nameValidator,
+                passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
+                mongoEngine, postgresEngine, postgresRepository, mysqlEngine, mysqlRepository,
+                encryptionService, null);
     }
 
     // Legacy 13-arg constructor for tests without MySQL (keeps existing tests green)
@@ -130,7 +155,7 @@ public class ProvisioningService {
         this(mongoDatabaseRepository, managedDatabaseStore,
                 new com.pkmprojects.mongodbserver.store.AuditLogRepositoryAdapter(auditLogRepository), nameValidator,
                 passwordGenerator, clock, environment, applicationEventPublisher, databaseLocks,
-                mongoEngine, postgresEngine, postgresRepository, null, null, encryptionService);
+                mongoEngine, postgresEngine, postgresRepository, null, null, encryptionService, null);
     }
 
     private String encryptPassword(String password) {
@@ -257,6 +282,11 @@ public class ProvisioningService {
             audit(AuditEvent.PROVISION, dbName, engineType, userName, now);
             log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, userName);
 
+            // Native PgBouncer: regenerate config for any Postgres DB provisioned
+            if (engineType == DatabaseEngineType.POSTGRES) {
+                syncPgbouncer(dbName, userName, password);
+            }
+
             return toInfo(dbName, metadata, collectionCount(dbName, engineType), null, 0L)
                     .withConnectionString(engine.buildConnectionString(userName, password, dbName));
         });
@@ -301,6 +331,10 @@ public class ProvisioningService {
             managedDatabaseStore.save(metadata);
             audit(AuditEvent.RESET_PASSWORD, dbName, engineType, metadata.getUserName(), metadata.getLastPasswordResetAt());
             log.info("Reset password for user '{}' on database '{}' ({})", metadata.getUserName(), dbName, engineType);
+
+            if (engineType == DatabaseEngineType.POSTGRES) {
+                syncPgbouncer(dbName, metadata.getUserName(), password);
+            }
 
             return toInfo(dbName, metadata, collectionCount(dbName, engineType), null, 0L)
                     .withConnectionString(engineFor(engineType).buildConnectionString(metadata.getUserName(), password, dbName));
@@ -363,6 +397,11 @@ public class ProvisioningService {
                     }
                 });
                 metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
+            }
+            // Native PgBouncer: remove entry on delete (best-effort, never fails delete)
+            if (engineType == DatabaseEngineType.POSTGRES) {
+                String userForPgbouncer = metadata.map(ManagedDatabase::getUserName).orElse(null);
+                removePgbouncer(dbName, userForPgbouncer);
             }
             audit(AuditEvent.DELETE, dbName, engineType, metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
             log.info("Deleted {} database '{}'", engineType, dbName);
@@ -660,6 +699,27 @@ public class ProvisioningService {
     private DatabaseInfo toInfo(String dbName, DatabaseEngineType engineType, ManagedDatabase metadata, Long collectionsCount, String connectionString, long sizeBytes) {
         if (metadata == null) return new DatabaseInfo(dbName, engineType, null, List.of(), collectionsCount, null, null, null, false, connectionString, sizeBytes);
         return toInfo(dbName, metadata, collectionsCount, connectionString, sizeBytes);
+    }
+
+    private void syncPgbouncer(String dbName, String userName, String plainPassword) {
+        pgbouncerService.ifPresent(svc -> {
+            try {
+                svc.syncDatabase(dbName, userName, plainPassword);
+            } catch (Exception e) {
+                // Never fail provision/reset on PgBouncer regeneration — log and continue (best-effort)
+                log.warn("PgBouncer sync failed for {}/{}: {}", DatabaseEngineType.POSTGRES, dbName, e.getMessage());
+            }
+        });
+    }
+
+    private void removePgbouncer(String dbName, String userName) {
+        pgbouncerService.ifPresent(svc -> {
+            try {
+                svc.removeDatabase(dbName, userName);
+            } catch (Exception e) {
+                log.warn("PgBouncer remove failed for {}/{}: {}", DatabaseEngineType.POSTGRES, dbName, e.getMessage());
+            }
+        });
     }
 
     private boolean isMongoCode(MongoCommandException e, int code) { return e.getErrorCode() == code; }
