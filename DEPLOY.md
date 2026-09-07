@@ -282,6 +282,8 @@ sudo nginx -t && sudo systemctl reload nginx
 # If "bind() to 127.0.0.1:8443 failed (98: Address already in use)" → systemctl stop nginx; fix; systemctl start nginx
 ss -tlnp | grep -E "443|8443|9811|9812|9813|9816"
 # → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443 (http), 127.0.0.1:9811..9817 (containers)
+
+> **Note:** `/actuator/health`, `/info`, and `/metrics` answer without login for anyone who can reach the app port (pool counters, component status). The setup above keeps the app on loopback behind nginx, which is enough — but if the dashboard URL is shared beyond trusted admins, wrap `location /actuator/` with `allow`/`deny` or basic-auth.
 ```
 
 Verify SNI:
