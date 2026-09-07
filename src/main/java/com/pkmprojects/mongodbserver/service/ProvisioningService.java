@@ -167,6 +167,14 @@ public class ProvisioningService {
         return encryptionService.decrypt(stored);
     }
 
+    public String decryptStoredPassword(String stored) {
+        return decryptPassword(stored);
+    }
+
+    public Optional<ManagedDatabase> findManagedDatabase(DatabaseEngineType engineType, String dbName) {
+        return managedDatabaseStore.findByEngineTypeAndDbName(engineType, dbName);
+    }
+
     private DatabaseEngine engineFor(DatabaseEngineType type) {
         if (type == DatabaseEngineType.POSTGRES) {
             return postgresEngine.orElseThrow(() -> new ProvisioningException("Postgres is not enabled"));

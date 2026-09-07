@@ -179,7 +179,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
      * Direct host for migrations/admin: DNS-only host + POSTGRES_ISSUED_PORT.
      * When host is blank, falls back to 127.0.0.1:9813 (local dev) or derived from postgresUri.
      */
-    String resolveDirectHost() {
+    public String resolveDirectHost() {
         if (issuedHost == null || issuedHost.isBlank()) {
             // Derive from jdbc:postgresql://host:port/db
             String uri = postgresUri;
@@ -201,7 +201,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
      * Pooled host for app/workers: same DNS host + PGBOUNCER_ISSUED_PORT.
      * When host is blank, returns 127.0.0.1:6432 (local pooled) or derived host with pooled port.
      */
-    String resolvePooledHost() {
+    public String resolvePooledHost() {
         int pooledPort = 6432;
         if (pgbouncerProperties != null) {
             pooledPort = pgbouncerProperties.issuedPort();

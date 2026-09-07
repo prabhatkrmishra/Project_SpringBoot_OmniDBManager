@@ -18,14 +18,24 @@ public class ProvisionController {
     private final boolean postgresEnabled;
     private final boolean mysqlEnabled;
 
+    private final String postgresIssuedHost;
+    private final int postgresIssuedPort;
+    private final int pgbouncerIssuedPort;
+
     public ProvisionController(ProvisioningService provisioningService,
                                @Value("${app.mongo.enabled:false}") boolean mongoEnabled,
                                @Value("${app.postgres.enabled:false}") boolean postgresEnabled,
-                               @Value("${app.mysql.enabled:false}") boolean mysqlEnabled) {
+                               @Value("${app.mysql.enabled:false}") boolean mysqlEnabled,
+                               @Value("${app.postgres.issued-host:}") String postgresIssuedHost,
+                               @Value("${app.postgres.issued-port:5432}") int postgresIssuedPort,
+                               @Value("${app.pgbouncer.issued-port:6432}") int pgbouncerIssuedPort) {
         this.provisioningService = provisioningService;
         this.mongoEnabled = mongoEnabled;
         this.postgresEnabled = postgresEnabled;
         this.mysqlEnabled = mysqlEnabled;
+        this.postgresIssuedHost = postgresIssuedHost;
+        this.postgresIssuedPort = postgresIssuedPort;
+        this.pgbouncerIssuedPort = pgbouncerIssuedPort;
     }
 
     @GetMapping("/provision")
@@ -77,7 +87,22 @@ public class ProvisionController {
         }
         model.addAttribute("engine", DatabaseEngineType.POSTGRES);
         model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
+        boolean hostBlank = postgresIssuedHost == null || postgresIssuedHost.isBlank();
+        String displayHost = hostBlank ? "" : stripLegacyPort(postgresIssuedHost.trim());
+        model.addAttribute("issuedHost", displayHost);
+        // For local dev (host blank), direct is 127.0.0.1:9813, not the public port
+        model.addAttribute("directPort", hostBlank ? 9813 : postgresIssuedPort);
+        model.addAttribute("pooledPort", pgbouncerIssuedPort);
         return "provision-postgres";
+    }
+
+    private static String stripLegacyPort(String host) {
+        if (host != null && host.contains(":")) {
+            int colon = host.lastIndexOf(':');
+            String hostOnly = host.substring(0, colon).trim();
+            return hostOnly.isBlank() ? host.trim() : hostOnly;
+        }
+        return host;
     }
 
     @GetMapping("/provision/mysql")

@@ -58,7 +58,14 @@
                                         <input class="form-check-input" id="pooled" type="checkbox" th:field="*{pooled}" value="true">
                                         <label class="form-check-label" for="pooled">Route via PgBouncer</label>
                                     </div>
-                                    <div class="form-hint">Connection string will use <code>127.0.0.1:6432</code> (pooled) instead of direct Postgres. Only for this database.</div>
+                                    <div class="form-hint">
+                                        <span th:if="${issuedHost != null and !issuedHost.isBlank()}" th:text="${issuedHost} + ':' + ${pooledPort} + ' pooled (app/workers) vs ' + ${issuedHost} + ':' + ${directPort} + ' direct (migrations/admin) — separation of duties'">pg.example.com:6432 pooled vs pg.example.com:5432 direct</span>
+                                        <span th:if="${issuedHost == null or issuedHost.isBlank()}" th:text="'127.0.0.1:' + ${pooledPort} + ' pooled (local) vs 127.0.0.1:' + ${directPort} + ' direct'">127.0.0.1:6432 pooled</span>
+                                        — only for this database.
+                                    </div>
+                                    <div class="alert alert-info small mt-2 mb-0">
+                                        <strong>Two links:</strong> <code>A</code> direct = DDL/migrations/break-glass (tighter IP allowlist). <code>B</code> pooled = runtime. Both need TLS (<code>sslmode=require</code>) + per-DB SCRAM + IP allowlist. Non-standard port is camouflage only.
+                                    </div>
                                 </div>
                                 <div class="form-actions">
                                     <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg me-1"></i> Create database</button>

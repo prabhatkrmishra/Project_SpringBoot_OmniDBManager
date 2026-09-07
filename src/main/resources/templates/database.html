@@ -132,8 +132,10 @@
                 </section>
 
                 <section class="card shadow-sm mb-4" th:if="${database.provisioned and database.connectionString != null}">
-                    <div class="card-header bg-transparent">
+                    <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
                         <h3 class="h6 mb-0"><i class="bi bi-link-45deg text-primary"></i> Connection String</h3>
+                        <span class="badge badge-soft-success" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and alternateConnectionString != null}">pooled + direct</span>
+                        <span class="badge badge-soft-info" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and alternateConnectionString == null and isPooled}">pooled</span>
                     </div>
                     <div class="card-body">
                         <p class="text-body-secondary small mb-3">Copy this connection string into your application's
@@ -148,6 +150,20 @@
                                     <i class="bi bi-clipboard"></i>
                                 </button>
                             </div>
+                            <div class="form-text" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and alternateConnectionString != null}">Primary — pooled via PgBouncer (app/workers, <code>sslmode=require</code>)</div>
+                        </div>
+                        <!-- Pooled link only when this DB was provisioned with pooling -->
+                        <div class="mb-3" th:if="${alternateConnectionString != null}">
+                            <label class="form-label fw-medium">Direct URI <span class="text-body-secondary">— migrations/admin</span></label>
+                            <div class="input-group">
+                                <input class="form-control form-control-sm font-monospace bg-body-secondary" readonly
+                                       th:value="${alternateConnectionString}" type="text">
+                                <button class="btn btn-outline-secondary btn-sm copy-btn" th:data-copy="${alternateConnectionString}"
+                                        type="button">
+                                    <i class="bi bi-clipboard"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Alternate — direct Postgres (<code>sslmode=require</code>), use for DDL/migrations only</div>
                         </div>
                         <div class="row g-3">
                             <div class="col-sm-6">

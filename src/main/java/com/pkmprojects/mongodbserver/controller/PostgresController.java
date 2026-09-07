@@ -51,17 +51,20 @@ public class PostgresController {
     private final Optional<PostgresStatisticsService> statisticsService;
     private final Optional<PostgresBackupService> backupService;
     private final Clock clock;
+    private final Optional<com.pkmprojects.mongodbserver.service.PostgresDatabaseEngine> postgresEngine;
 
     public PostgresController(ProvisioningService provisioningService,
                               @Autowired(required = false) PostgresExplorationService explorationService,
                               @Autowired(required = false) PostgresStatisticsService statisticsService,
                               @Autowired(required = false) PostgresBackupService backupService,
-                              Clock clock) {
+                              Clock clock,
+                              @Autowired(required = false) com.pkmprojects.mongodbserver.service.PostgresDatabaseEngine postgresEngine) {
         this.provisioningService = provisioningService;
         this.explorationService = Optional.ofNullable(explorationService);
         this.statisticsService = Optional.ofNullable(statisticsService);
         this.backupService = Optional.ofNullable(backupService);
         this.clock = clock;
+        this.postgresEngine = Optional.ofNullable(postgresEngine);
     }
 
     @GetMapping
@@ -86,6 +89,7 @@ public class PostgresController {
             model.addAttribute("engine", DatabaseEngineType.POSTGRES);
             model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
             model.addAttribute("enableVector", enableVector);
+            addProvisionHostAttributes(model);
             return "provision-postgres";
         }
         if (enableVector && !provisioningService.isVectorAvailable()) {
@@ -93,6 +97,7 @@ public class PostgresController {
             model.addAttribute("engine", DatabaseEngineType.POSTGRES);
             model.addAttribute("vectorAvailable", false);
             model.addAttribute("enableVector", true);
+            addProvisionHostAttributes(model);
             return "provision-postgres";
         }
         CreateDatabaseForm withEngine = new CreateDatabaseForm(form.dbName(), DatabaseEngineType.POSTGRES, form.userName(), form.password());
@@ -112,6 +117,29 @@ public class PostgresController {
         return "redirect:/postgres/databases/" + created.dbName();
     }
 
+    private void addProvisionHostAttributes(Model model) {
+        if (postgresEngine.isPresent()) {
+            var engine = postgresEngine.get();
+            // Use resolveDirectHost/resolvePooledHost to get display host:port, then split for template
+            String direct = engine.resolveDirectHost();
+            String pooled = engine.resolvePooledHost();
+            // Extract host part (before :) and ports
+            String host = direct.contains(":") ? direct.substring(0, direct.lastIndexOf(':')) : direct;
+            // If host is 127.0.0.1 fallback, show as-is; otherwise DNS
+            String directPort = direct.contains(":") ? direct.substring(direct.lastIndexOf(':') + 1) : "5432";
+            String pooledPort = pooled.contains(":") ? pooled.substring(pooled.lastIndexOf(':') + 1) : "6432";
+            // For local dev (127.0.0.1), issuedHost is blank — template handles that case
+            // But we still provide values for the hint
+            model.addAttribute("issuedHost", host.equals("127.0.0.1") ? "" : host);
+            model.addAttribute("directPort", directPort);
+            model.addAttribute("pooledPort", pooledPort);
+        } else {
+            model.addAttribute("issuedHost", "");
+            model.addAttribute("directPort", "5432");
+            model.addAttribute("pooledPort", "6432");
+        }
+    }
+
     @PostMapping("/databases/{dbName}/vector")
     @PreAuthorize("hasRole('ADMIN')")
     public String enableVector(@PathVariable String dbName, RedirectAttributes redirectAttributes) {
@@ -127,7 +155,8 @@ public class PostgresController {
 
     @GetMapping("/databases/{dbName}")
     public String detail(@PathVariable String dbName, Model model) {
-        model.addAttribute("database", provisioningService.getDatabase(DatabaseEngineType.POSTGRES, dbName));
+        var db = provisioningService.getDatabase(DatabaseEngineType.POSTGRES, dbName);
+        model.addAttribute("database", db);
         explorationService.ifPresent(svc -> {
             try {
                 model.addAttribute("tables", svc.listTables(dbName));
@@ -143,6 +172,41 @@ public class PostgresController {
         model.addAttribute("vectorEnabled", provisioningService.isVectorEnabled(DatabaseEngineType.POSTGRES, dbName));
         model.addAttribute("vectorVersion", provisioningService.vectorVersion(DatabaseEngineType.POSTGRES, dbName));
         if (!model.containsAttribute("resetForm")) model.addAttribute("resetForm", new ResetPasswordForm(""));
+        // Pooled link only when this DB was provisioned with pooling — compute alternate string for display
+        boolean isPooled = false;
+        String pooledPortForView = null;
+        String directPortForView = null;
+        if (postgresEngine.isPresent()) {
+            try {
+                pooledPortForView = String.valueOf(postgresEngine.get().resolvePooledHost().substring(postgresEngine.get().resolvePooledHost().lastIndexOf(':') + 1));
+                directPortForView = String.valueOf(postgresEngine.get().resolveDirectHost().substring(postgresEngine.get().resolveDirectHost().lastIndexOf(':') + 1));
+            } catch (Exception ignored) {
+            }
+        }
+        if (pooledPortForView != null) model.addAttribute("pooledPort", pooledPortForView);
+        if (directPortForView != null) model.addAttribute("directPort", directPortForView);
+        if (db.provisioned() && db.connectionString() != null) {
+            try {
+                if (postgresEngine.isPresent()) {
+                    var engine = postgresEngine.get();
+                    var md = provisioningService.findManagedDatabase(DatabaseEngineType.POSTGRES, dbName);
+                    if (md.isPresent() && md.get().isPooled()) {
+                        isPooled = true;
+                        if (md.get().getStoredPassword() != null) {
+                            String plain = provisioningService.decryptStoredPassword(md.get().getStoredPassword());
+                            if (plain != null) {
+                                String direct = engine.buildConnectionString(md.get().getUserName(), plain, dbName);
+                                model.addAttribute("alternateConnectionString", direct);
+                                model.addAttribute("alternateLabel", "Direct (migrations/admin)");
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("Could not build alternate connection string for '{}'", dbName, e);
+            }
+        }
+        model.addAttribute("isPooled", isPooled);
         return "database";
     }
 
