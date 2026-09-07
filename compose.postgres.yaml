@@ -110,10 +110,17 @@ services:
   # Default loopback-bound 127.0.0.1:6432 (safe/closed), matching Adminer/mongo-express pattern.
   # Config lives in named volume `pgbouncer-data` (no host folder), written by one-shot init below.
   pgbouncer-init:
-    image: busybox:1.36
+    image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
     container_name: omnidb-pgbouncer-init
     restart: "no"
     user: "0:0"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    # No cap_drop here: this one-shot runs as root only to chown userlist.txt
+    # down to the pgbouncer runtime user (postgres), which needs CAP_CHOWN.
+    tmpfs:
+      - /tmp
     volumes:
       - pgbouncer-data:/etc/pgbouncer
     environment:
@@ -149,12 +156,25 @@ services:
         INI
         { md5line "$$ADMIN_USER" "$$PGBOUNCER_ADMIN_PASSWORD"; md5line "$$STATS_USER" "$$PGBOUNCER_STATS_PASSWORD"; } > /etc/pgbouncer/userlist.txt
         chmod 600 /etc/pgbouncer/userlist.txt
+        # The pgbouncer image runs as uid:gid 70:70, so hand it ownership of
+        # the credentials file (stays 600) — otherwise it fails to open auth_file
+        # and every pooled login breaks. Numeric id because busybox has no
+        # postgres name entry. The ini stays root-owned 644 (world-readable).
+        chown 70:70 /etc/pgbouncer/userlist.txt
   pgbouncer:
     # Maintained image (the pgbouncer/pgbouncer repo is stale); pre-existing
     # pgbouncer.ini/userlist.txt mounts win over the entrypoint generator.
     image: edoburu/pgbouncer:v1.24.1-p1@sha256:3db3d7223e93af52b4116f642951a1a5fa44702a88c2a59cf7562cac19320c9e
     container_name: omnidb-pgbouncer
     restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /run
     ports:
       - "127.0.0.1:${OVERRIDE_PGBOUNCER_PORT:-6432}:6432"
     environment:
