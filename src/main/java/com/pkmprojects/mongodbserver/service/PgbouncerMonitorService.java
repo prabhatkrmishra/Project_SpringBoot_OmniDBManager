@@ -48,7 +48,9 @@ public class PgbouncerMonitorService {
     private String resolveStatsPassword() {
         String cfg = properties.statsPassword();
         if (cfg != null && !cfg.isBlank()) return cfg;
-        return cfg;
+        // Never return null — DriverManager treats null inconsistently across drivers;
+        // empty lets auth fail cleanly as unreachable instead of NPE.
+        return "";
     }
 
     public PgbouncerSnapshot getSnapshot() {
