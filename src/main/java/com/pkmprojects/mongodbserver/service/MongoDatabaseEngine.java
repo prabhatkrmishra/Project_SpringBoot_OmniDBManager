@@ -88,7 +88,7 @@ public class MongoDatabaseEngine implements DatabaseEngine {
     }
 
     String resolveConnectionHost() {
-        String publicHost = environment.getProperty("app.mongo-public-host", "");
+        String publicHost = environment.getProperty("app.mongo.issued-host", "");
         if (publicHost != null && !publicHost.isBlank()) {
             return publicHost;
         }
@@ -106,7 +106,7 @@ public class MongoDatabaseEngine implements DatabaseEngine {
     }
 
     private boolean resolveConnectionTls() {
-        Boolean tls = environment.getProperty("app.mongo-public-tls", Boolean.class, false);
+        Boolean tls = environment.getProperty("app.mongo.tls", Boolean.class, false);
         return Boolean.TRUE.equals(tls);
     }
 

@@ -1,5 +1,5 @@
 # MongoDB Atlas profile: run with -Dspring-boot.run.profiles=atlas (or --spring.profiles.active=atlas).
-# Requires MONGODB_URI (Atlas cluster-admin connection string) in .env or the environment.
+# Requires OVERRIDE_MONGODB_URI (Atlas cluster-admin connection string) in .env or the environment.
 spring:
   mongodb:
-    uri: ${MONGODB_URI:}
+    uri: ${OVERRIDE_MONGODB_URI:}

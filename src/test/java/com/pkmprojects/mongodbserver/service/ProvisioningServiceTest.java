@@ -77,8 +77,8 @@ class ProvisioningServiceTest {
     void setUp() {
         lenient().when(environment.getProperty("spring.mongodb.uri", ""))
                 .thenReturn("mongodb://root:root@localhost:27017/?authSource=admin");
-        lenient().when(environment.getProperty("app.mongo-public-host", "")).thenReturn("");
-        lenient().when(environment.getProperty("app.mongo-public-tls", Boolean.class, false)).thenReturn(false);
+        lenient().when(environment.getProperty("app.mongo.issued-host", "")).thenReturn("");
+        lenient().when(environment.getProperty("app.mongo.tls", Boolean.class, false)).thenReturn(false);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         AuditStore auditStore = new AuditLogRepositoryAdapter(auditLogRepository);
@@ -159,7 +159,7 @@ class ProvisioningServiceTest {
     void buildConnectionStringAddsTlsWhenConfigured() {
         // lenient: resolveConnectionHost's sibling getProperty calls are
         // intentionally unstubbed in this test.
-        lenient().when(environment.getProperty("app.mongo-public-tls", Boolean.class, false)).thenReturn(true);
+        lenient().when(environment.getProperty("app.mongo.tls", Boolean.class, false)).thenReturn(true);
         when(passwordGenerator.generate(16)).thenReturn("generatedPass123");
 
         DatabaseInfo info = service.provision(new CreateDatabaseForm("myapp", "appuser", ""));
@@ -468,7 +468,7 @@ class ProvisioningServiceTest {
 
     @Test
     void resolveConnectionHostStripsCredentialsAndQuery() {
-        when(environment.getProperty("app.mongo-public-host", "")).thenReturn("");
+        when(environment.getProperty("app.mongo.issued-host", "")).thenReturn("");
         when(environment.getProperty("spring.mongodb.uri", ""))
                 .thenReturn("mongodb+srv://root:root@cluster0.abcd.mongodb.net/?retryWrites=true&w=majority");
         assertThat(service.resolveConnectionHost()).isEqualTo("cluster0.abcd.mongodb.net");
@@ -480,7 +480,7 @@ class ProvisioningServiceTest {
         when(environment.getProperty("spring.mongodb.uri", "")).thenReturn("");
         assertThat(service.resolveConnectionHost()).isEqualTo("127.0.0.1:9812");
 
-        when(environment.getProperty("app.mongo-public-host", ""))
+        when(environment.getProperty("app.mongo.issued-host", ""))
                 .thenReturn("mongo.pkmprojects.online:9812");
         assertThat(service.resolveConnectionHost()).isEqualTo("mongo.pkmprojects.online:9812");
     }

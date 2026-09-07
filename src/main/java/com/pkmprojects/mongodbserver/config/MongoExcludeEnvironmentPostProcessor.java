@@ -43,9 +43,9 @@ public class MongoExcludeEnvironmentPostProcessor implements EnvironmentPostProc
     };
 
     private static final String[] BLANK_AS_ABSENT = {
-            "MONGODB_URI", "POSTGRES_URI", "MYSQL_URI",
-            "MONGODB_ROOT_USERNAME", "MONGODB_ROOT_PASSWORD",
-            "POSTGRES_ROOT_USER", "POSTGRES_ROOT_PASSWORD",
+            "OVERRIDE_MONGODB_URI", "OVERRIDE_POSTGRES_URI", "OVERRIDE_MYSQL_URI",
+            "MONGODB_ROOT_PASSWORD",
+            "POSTGRES_ROOT_PASSWORD",
             "MYSQL_ROOT_PASSWORD"
     };
 

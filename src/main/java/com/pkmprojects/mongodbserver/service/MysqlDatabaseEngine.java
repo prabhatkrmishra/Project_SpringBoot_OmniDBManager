@@ -16,20 +16,26 @@ public class MysqlDatabaseEngine implements DatabaseEngine {
 
     private final MysqlDatabaseRepository mysqlDatabaseRepository;
     private final String mysqlUri;
-    private final String publicHost;
-    private final boolean publicTls;
-    private final String publicSslmode;
+    private final String issuedHost;
+    private final boolean tls;
 
     public MysqlDatabaseEngine(MysqlDatabaseRepository mysqlDatabaseRepository,
                                @Value("${app.mysql.uri:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}") String mysqlUri,
-                               @Value("${app.mysql.public-host:}") String publicHost,
-                               @Value("${app.mysql.public-tls:false}") boolean publicTls,
-                               @Value("${app.mysql.public-sslmode:REQUIRED}") String publicSslmode) {
+                               @Value("${app.mysql.issued-host:}") String issuedHost,
+                               @Value("${app.mysql.tls:false}") boolean tls) {
         this.mysqlDatabaseRepository = mysqlDatabaseRepository;
         this.mysqlUri = mysqlUri;
-        this.publicHost = publicHost;
-        this.publicTls = publicTls;
-        this.publicSslmode = publicSslmode;
+        this.issuedHost = issuedHost;
+        this.tls = tls;
+    }
+
+    // Legacy constructor for tests with old public-host/public-tls/public-sslmode shape
+    public MysqlDatabaseEngine(MysqlDatabaseRepository mysqlDatabaseRepository,
+                               String mysqlUri,
+                               String publicHost,
+                               boolean publicTls,
+                               String publicSslmode) {
+        this(mysqlDatabaseRepository, mysqlUri, publicHost, publicTls);
     }
 
     @Override
@@ -98,15 +104,15 @@ public class MysqlDatabaseEngine implements DatabaseEngine {
         String encodedUser = uriEncode(userName);
         String encodedPass = uriEncode(password);
         String base = "mysql://" + encodedUser + ":" + encodedPass + "@" + host + "/" + dbName;
-        if (publicTls) {
-            return base + "?sslMode=" + publicSslmode;
+        if (tls) {
+            return base + "?sslMode=REQUIRED";
         }
         return base;
     }
 
     String resolveHost() {
-        if (publicHost != null && !publicHost.isBlank()) {
-            return publicHost;
+        if (issuedHost != null && !issuedHost.isBlank()) {
+            return issuedHost.contains(":") ? issuedHost : issuedHost + ":9816";
         }
         // Derive from jdbc:mysql://host:port/db?params
         String uri = mysqlUri;

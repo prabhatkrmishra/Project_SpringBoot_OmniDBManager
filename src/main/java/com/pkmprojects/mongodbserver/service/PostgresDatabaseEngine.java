@@ -18,25 +18,22 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
     private final PostgresDatabaseRepository postgresDatabaseRepository;
     private final Environment environment;
     private final String postgresUri;
-    private final String publicHost;
-    private final boolean publicTls;
-    private final String publicSslmode;
+    private final String issuedHost;
+    private final String sslmode;
     private final com.pkmprojects.mongodbserver.config.PgbouncerProperties pgbouncerProperties;
 
     @org.springframework.beans.factory.annotation.Autowired
     public PostgresDatabaseEngine(PostgresDatabaseRepository postgresDatabaseRepository,
                                    Environment environment,
                                    @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres}") String postgresUri,
-                                   @Value("${app.postgres.public-host:}") String publicHost,
-                                   @Value("${app.postgres.public-tls:false}") boolean publicTls,
-                                   @Value("${app.postgres.public-sslmode:require}") String publicSslmode,
+                                   @Value("${app.postgres.issued-host:}") String issuedHost,
+                                   @Value("${app.postgres.sslmode:require}") String sslmode,
                                    @org.springframework.beans.factory.annotation.Autowired(required = false) com.pkmprojects.mongodbserver.config.PgbouncerProperties pgbouncerProperties) {
         this.postgresDatabaseRepository = postgresDatabaseRepository;
         this.environment = environment;
         this.postgresUri = postgresUri;
-        this.publicHost = publicHost;
-        this.publicTls = publicTls;
-        this.publicSslmode = publicSslmode;
+        this.issuedHost = issuedHost;
+        this.sslmode = sslmode;
         this.pgbouncerProperties = pgbouncerProperties;
     }
 
@@ -47,7 +44,16 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
                                    String publicHost,
                                    boolean publicTls,
                                    String publicSslmode) {
-        this(postgresDatabaseRepository, environment, postgresUri, publicHost, publicTls, publicSslmode, null);
+        this(postgresDatabaseRepository, environment, postgresUri, publicHost, publicSslmode, null);
+    }
+
+    // Legacy 6-arg without TLS bool (new shape)
+    public PostgresDatabaseEngine(PostgresDatabaseRepository postgresDatabaseRepository,
+                                   Environment environment,
+                                   String postgresUri,
+                                   String issuedHost,
+                                   String sslmode) {
+        this(postgresDatabaseRepository, environment, postgresUri, issuedHost, sslmode, null);
     }
 
     @Override
@@ -128,48 +134,31 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
 
     @Override
     public String buildConnectionString(String userName, String password, String dbName) {
-        // Additive branch on PGBOUNCER_ENABLED — when pooling enabled, route through pgbouncer port
+        // Pooled branch — route through pgbouncer port using issued host
         if (pgbouncerProperties != null && pgbouncerProperties.enabled()) {
-            String host = pgbouncerProperties.publicHost();
-            if (host == null || host.isBlank()) {
-                host = resolveHost();
-                // Swap port to pgbouncer port if resolveHost included a port
-                if (!host.contains(":")) {
-                    host = host + ":" + pgbouncerProperties.port();
-                } else {
-                    // Replace existing port with pgbouncer port
-                    int colon = host.lastIndexOf(':');
-                    String hostOnly = host.substring(0, colon);
-                    host = hostOnly + ":" + pgbouncerProperties.port();
-                }
+            String host = resolveHost();
+            if (!host.contains(":")) {
+                host = host + ":" + pgbouncerProperties.port();
             } else {
-                // publicHost may already contain port; ensure pgbouncer port if no port present
-                if (!host.contains(":")) {
-                    host = host + ":" + pgbouncerProperties.port();
-                }
+                int colon = host.lastIndexOf(':');
+                String hostOnly = host.substring(0, colon);
+                host = hostOnly + ":" + pgbouncerProperties.port();
             }
             String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
-            if (publicTls) {
-                return base + "?sslmode=" + publicSslmode + "&application_name=omnidb";
-            }
-            return base + "?application_name=omnidb";
+            return base + "?sslmode=" + sslmode + "&application_name=omnidb";
         }
         String host = resolveHost();
         String encodedUser = uriEncode(userName);
         String encodedPass = uriEncode(password);
         String encodedDb = uriEncode(dbName);
         String base = "postgresql://" + encodedUser + ":" + encodedPass + "@" + host + "/" + encodedDb;
-        // Official libpq URI: postgresql://user:pass@host:port/db?sslmode=require&application_name=omnidb
-        // When publicTls=false we omit sslmode (libpq defaults to prefer — opportunistic TLS) and keep only application_name
-        if (publicTls) {
-            return base + "?sslmode=" + publicSslmode + "&application_name=omnidb";
-        }
-        return base + "?application_name=omnidb";
+        // sslmode is enum-based (Postgres only) — always included
+        return base + "?sslmode=" + sslmode + "&application_name=omnidb";
     }
 
     String resolveHost() {
-        if (publicHost != null && !publicHost.isBlank()) {
-            return publicHost;
+        if (issuedHost != null && !issuedHost.isBlank()) {
+            return issuedHost.contains(":") ? issuedHost : issuedHost + ":9813";
         }
         // Derive from jdbc:postgresql://host:port/db
         String uri = postgresUri;

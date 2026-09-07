@@ -14,7 +14,7 @@ class PostgresConfigTest {
 
     @Test
     void postgresDataSourceCreatesHikariDataSource() {
-        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root", "secret");
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "secret");
         assertThat(ds).isInstanceOf(HikariDataSource.class);
         HikariDataSource hds = (HikariDataSource) ds;
         assertThat(hds.getJdbcUrl()).isEqualTo("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10");
@@ -26,7 +26,7 @@ class PostgresConfigTest {
 
     @Test
     void postgresDataSourceSetsPostgresDriver() {
-        DataSource ds = config.postgresDataSource("jdbc:postgresql://host:5432/db", "user", "pass");
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://host:5432/db", "pass");
         HikariDataSource hds = (HikariDataSource) ds;
         assertThat(hds.getJdbcUrl()).contains("postgresql");
         assertThat(hds.getDriverClassName()).isEqualTo("org.postgresql.Driver");
@@ -34,7 +34,7 @@ class PostgresConfigTest {
 
     @Test
     void postgresJdbcTemplateWrapsDataSource() {
-        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root", "root");
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root");
         JdbcTemplate template = config.postgresJdbcTemplate(ds);
         assertThat(template).isNotNull();
         assertThat(template.getDataSource()).isSameAs(ds);
@@ -42,14 +42,14 @@ class PostgresConfigTest {
 
     @Test
     void postgresDataSourceWithCustomUri() {
-        DataSource ds = config.postgresDataSource("jdbc:postgresql://pg.example.com:5432/mydb?sslmode=require", "admin", "p@ss");
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://pg.example.com:5432/mydb?sslmode=require", "p@ss");
         HikariDataSource hds = (HikariDataSource) ds;
         assertThat(hds.getJdbcUrl()).isEqualTo("jdbc:postgresql://pg.example.com:5432/mydb?sslmode=require");
     }
 
     @Test
     void postgresJdbcTemplateHasQueryTimeout() {
-        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root", "root");
+        DataSource ds = config.postgresDataSource("jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10", "root");
         JdbcTemplate template = config.postgresJdbcTemplate(ds);
         // queryTimeout is set via JdbcTemplate; verify it is configured (5s)
         assertThat(template).isNotNull();

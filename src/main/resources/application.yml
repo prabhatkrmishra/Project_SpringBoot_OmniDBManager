@@ -8,7 +8,7 @@ spring:
     # below the driver default of 100 - this is a single-admin control plane, so
     # 10 connections bound socket/buffer memory without starving the parallel
     # collStats reads (16) or the SSE monitor.
-    uri: ${MONGODB_URI:mongodb://${MONGODB_ROOT_USERNAME:root}:${MONGODB_ROOT_PASSWORD:root}@127.0.0.1:9812/?authSource=admin&maxPoolSize=10}
+    uri: ${OVERRIDE_MONGODB_URI:mongodb://root:${MONGODB_ROOT_PASSWORD:root}@127.0.0.1:9812/?authSource=admin&maxPoolSize=10}
     # Default database used by Spring Data repositories (provisioning metadata).
     database: mongodb_admin
 
@@ -76,48 +76,38 @@ app:
     enforce-strong-credentials: ${APP_ADMIN_ENFORCE_STRONG:false}
   mongo:
     enabled: ${MONGO_ENABLED:false}
-  # Public Mongo host used in the connection strings shown in the UI (set when
-  # Mongo is reachable via a domain name, e.g. behind a reverse proxy/tunnel).
-  # Add ":port" only if clients must reach a non-default port (drivers default
-  # to 27017). Empty by default: derived from spring.mongodb.uri / local fallback.
-  mongo-public-host: ${MONGODB_PUBLIC_HOST:}
-  # Set true when clients reach MongoDB through a TLS-terminating TCP proxy
-  # (e.g. nginx stream) or mongod itself serves TLS; issued connection strings
-  # then carry &tls=true so drivers encrypt the wire from day one.
-  mongo-public-tls: ${MONGODB_PUBLIC_TLS:false}
-  # Bundled mongo-express UI, reverse-proxied at /mongo-express (from .env)
+    # Host baked into issued per-DB strings (apps live on other servers, never 127.0.0.1 in prod).
+    # Empty by default: derived from spring.mongodb.uri / local fallback.
+    issued-host: ${MONGODB_ISSUED_HOST:}
+    # _TLS is a boolean toggle (Mongo/MySQL). _SSLMODE is enum-based (Postgres only) — intentional split.
+    tls: ${OVERRIDE_MONGODB_TLS:false}
+  # Bundled mongo-express UI, reverse-proxied at /mongo-express (managed default, no env)
   mongo-express:
-    base-url: ${MONGO_EXPRESS_BASE_URL:http://127.0.0.1:9814/mongo-express}
-    username: ${MONGO_EXPRESS_USERNAME:admin}
-    password: ${MONGO_EXPRESS_PASSWORD:admin}
+    base-url: http://127.0.0.1:9814/mongo-express
+    username: admin
+    password: admin
   postgres:
     enabled: ${POSTGRES_ENABLED:false}
-    uri: ${POSTGRES_URI:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}
-    public-host: ${POSTGRES_PUBLIC_HOST:}
-    public-tls: ${POSTGRES_PUBLIC_TLS:false}
-    public-sslmode: ${POSTGRES_PUBLIC_SSLMODE:require}
+    uri: ${OVERRIDE_POSTGRES_URI:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}
+    issued-host: ${POSTGRES_ISSUED_HOST:}
+    sslmode: ${OVERRIDE_POSTGRES_SSLMODE:require}
   mysql:
     enabled: ${MYSQL_ENABLED:false}
-    uri: ${MYSQL_URI:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000}
-    public-host: ${MYSQL_PUBLIC_HOST:}
-    public-tls: ${MYSQL_PUBLIC_TLS:false}
-    public-sslmode: ${MYSQL_PUBLIC_SSLMODE:REQUIRED}
+    uri: ${OVERRIDE_MYSQL_URI:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000}
+    issued-host: ${MYSQL_ISSUED_HOST:}
+    tls: ${OVERRIDE_MYSQL_TLS:false}
   adminer:
-    base-url: ${ADMINER_BASE_URL:http://127.0.0.1:9815}
+    base-url: http://127.0.0.1:9815
   phpmyadmin:
-    base-url: ${PHPMYADMIN_BASE_URL:http://127.0.0.1:9817}
+    base-url: http://127.0.0.1:9817
   pgbouncer:
     enabled: ${PGBOUNCER_ENABLED:false}
-    port: ${PGBOUNCER_PORT:6432}
-    pool-mode: ${PGBOUNCER_POOL_MODE:transaction}
-    max-client-conn: ${PGBOUNCER_MAX_CLIENT_CONN:1000}
-    default-pool-size: ${PGBOUNCER_DEFAULT_POOL_SIZE:25}
-    admin-user: ${PGBOUNCER_ADMIN_USER:pgbouncer_admin}
-    admin-password: ${PGBOUNCER_ADMIN_PASSWORD:}
-    stats-user: ${PGBOUNCER_STATS_USER:pgbouncer_stats}
-    stats-password: ${PGBOUNCER_STATS_PASSWORD:}
-    public-host: ${PGBOUNCER_PUBLIC_HOST:}
-    config-dir: ${PGBOUNCER_CONFIG_DIR:./pgbouncer}
+    port: ${OVERRIDE_PGBOUNCER_PORT:6432}
+    pool-mode: ${OVERRIDE_PGBOUNCER_POOL_MODE:transaction}
+    max-client-conn: ${OVERRIDE_PGBOUNCER_MAX_CLIENT_CONN:1000}
+    default-pool-size: ${OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE:25}
+    admin-password: ${OVERRIDE_PGBOUNCER_ADMIN_PASSWORD:}
+    stats-password: ${OVERRIDE_PGBOUNCER_STATS_PASSWORD:}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)

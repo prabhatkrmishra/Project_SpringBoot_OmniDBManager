@@ -22,12 +22,11 @@ public class PostgresConfig {
     @Bean
     DataSource postgresDataSource(
             @Value("${app.postgres.uri:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}") String uri,
-            @Value("${POSTGRES_ROOT_USER:root}") String username,
             @Value("${POSTGRES_ROOT_PASSWORD:root}") String password) {
-        log.info("PostgresConfig: Creating Hikari postgresDataSource with uri={}, username={}", uri, username);
+        log.info("PostgresConfig: Creating Hikari postgresDataSource with uri={}, username={}", uri, "root");
         HikariDataSource ds = new HikariDataSource();
         ds.setJdbcUrl(uri);
-        ds.setUsername(username);
+        ds.setUsername("root");
         ds.setPassword(password);
         ds.setDriverClassName("org.postgresql.Driver");
         ds.setMaximumPoolSize(5);

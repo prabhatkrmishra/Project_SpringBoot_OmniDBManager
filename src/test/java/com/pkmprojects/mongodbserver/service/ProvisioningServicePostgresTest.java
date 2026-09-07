@@ -59,13 +59,13 @@ class ProvisioningServicePostgresTest {
     @BeforeEach
     void setUp() {
         lenient().when(env.getProperty("spring.mongodb.uri", "")).thenReturn("mongodb://root:root@localhost:27017/?authSource=admin");
-        lenient().when(env.getProperty("app.mongo-public-host", "")).thenReturn("");
-        lenient().when(env.getProperty("app.mongo-public-tls", Boolean.class, false)).thenReturn(false);
+        lenient().when(env.getProperty("app.mongo.issued-host", "")).thenReturn("");
+        lenient().when(env.getProperty("app.mongo.tls", Boolean.class, false)).thenReturn(false);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         MongoDatabaseEngine mongoEngine = new MongoDatabaseEngine(mongoRepo, env);
         postgresEngine = new PostgresDatabaseEngine(postgresRepo, env,
-                "jdbc:postgresql://127.0.0.1:9813/postgres", "", false, "require");
+                "jdbc:postgresql://127.0.0.1:9813/postgres", "", "require");
         service = new ProvisioningService(mongoRepo, managedRepo, auditRepo, new DatabaseNameValidator(),
                 passwordGen, Clock.fixed(NOW, ZoneOffset.UTC), env, publisher,
                 new DatabaseLockRegistry(), mongoEngine, postgresEngine, postgresRepo, null);
@@ -104,7 +104,7 @@ class ProvisioningServicePostgresTest {
     @Test
     void provisionPostgresEncodesSpecialCharsInConnectionString() {
         DatabaseInfo info = service.provision(new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "p@ss#word"));
-        assertThat(info.connectionString()).isEqualTo("postgresql://myapp_user:p%40ss%23word@127.0.0.1:9813/myapp?application_name=omnidb");
+        assertThat(info.connectionString()).isEqualTo("postgresql://myapp_user:p%40ss%23word@127.0.0.1:9813/myapp?sslmode=require&application_name=omnidb");
     }
 
     @Test
@@ -183,7 +183,7 @@ class ProvisioningServicePostgresTest {
     @Test
     void provisionPostgresWithTlsIncludesSslmodeInConnectionString() {
         PostgresDatabaseEngine tlsEngine = new PostgresDatabaseEngine(postgresRepo, env,
-                "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com:5432", true, "require");
+                "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com:5432", "require");
         ProvisioningService tlsService = new ProvisioningService(mongoRepo, managedRepo, auditRepo, new DatabaseNameValidator(),
                 passwordGen, Clock.fixed(NOW, ZoneOffset.UTC), env, publisher,
                 new DatabaseLockRegistry(), new MongoDatabaseEngine(mongoRepo, env), tlsEngine, postgresRepo, null);

@@ -4,10 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
  * PgBouncer pooler configuration, bound from {@code app.pgbouncer.*}.
- * Mirrors the existing per-engine enable pattern (POSTGRES_ENABLED/MYSQL_ENABLED).
- *
- * <p>When {@code enabled=false} (default) no PgBouncer container, beans or UI
- * are registered — same as disabling MYSQL_ENABLED hides MySQL entirely.</p>
+ * Managed defaults live here — only port/pool-mode/sizes are overrideable via
+ * {@code OVERRIDE_PGBOUNCER_*}. Admin/stats users and config dir are hard constants.
  */
 @ConfigurationProperties(prefix = "app.pgbouncer")
 public record PgbouncerProperties(
@@ -16,10 +14,26 @@ public record PgbouncerProperties(
         String poolMode,
         int maxClientConn,
         int defaultPoolSize,
-        String adminUser,
         String adminPassword,
-        String statsUser,
-        String statsPassword,
-        String publicHost,
-        String configDir) {
+        String statsPassword) {
+
+    public static final String ADMIN_USER = "pgbouncer_admin";
+    public static final String STATS_USER = "pgbouncer_stats";
+    public static final String CONFIG_DIR = "./pgbouncer";
+
+    public String adminUser() {
+        return ADMIN_USER;
+    }
+
+    public String statsUser() {
+        return STATS_USER;
+    }
+
+    public String publicHost() {
+        return "";
+    }
+
+    public String configDir() {
+        return CONFIG_DIR;
+    }
 }
