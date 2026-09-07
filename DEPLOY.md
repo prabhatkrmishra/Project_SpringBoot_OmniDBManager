@@ -395,6 +395,74 @@ https://<YOUR_DOMAIN>/login
 # user <ADMIN_USER> / <ADMIN_PASSWORD> (from APP_ADMIN_USERNAME/PASSWORD)
 ```
 
+## Custom Public DB Ports (Alternative to §6)
+
+Use this instead of the 443 multiplex when a separate, non-standard public
+port per engine is preferred (quieter than well-known ports — camouflage, not
+a lock; the allowlist + TLS + per-DB credentials below are the actual locks).
+Each engine gets **one** public port; every database on that engine shares it
+(databases are distinguished by dbname + credentials, not by port). Enabling a
+database in OmniDB opens nothing by itself — traffic flows only once the
+stream server (§6-style, one per port — see `deploy/nginx.conf.example`) and
+the firewall rules below both exist.
+
+| Engine | Stream target (loopback) | Public port | `*_ISSUED_HOST` value | Notes |
+|---|---|---|---|---|
+| MongoDB | `127.0.0.1:9812` | `<CUSTOM_PORT>` | `mongo.example.com:<CUSTOM_PORT>` | `OVERRIDE_MONGODB_TLS=true` for `&tls=true` |
+| PostgreSQL direct | `127.0.0.1:9813` | `<CUSTOM_PORT>` | `pg.example.com:<CUSTOM_PORT>` | `?sslmode=require` (or `verify-full` with CA) |
+| PostgreSQL pooled | `127.0.0.1:6432` | `<CUSTOM_PORT>` | same host, port swapped automatically | Only for DBs provisioned with **Route via PgBouncer** |
+| MySQL | `127.0.0.1:9816` | `<CUSTOM_PORT>` | `mysql.example.com:<CUSTOM_PORT>` | `?sslMode=REQUIRED` with `OVERRIDE_MYSQL_TLS=true` |
+
+Use a **different** `<CUSTOM_PORT>` per engine — one port cannot serve two
+engines without SNI routing (see §6). Pooled and direct Postgres must also
+differ from each other.
+
+### NSG / security-group rules (one per public DB port)
+
+Default-deny everything inbound; allow each custom port **only** from your app
+servers (never `0.0.0.0/0`). Host-level `ufw` stays as a second layer (see
+`deploy/nginx.conf.example`).
+
+```bash
+# Azure NSG (one rule per port; lower priority number wins):
+az network nsg rule create \
+  --resource-group <RESOURCE_GROUP> --nsg-name <NSG_NAME> \
+  --name allow-db-<ENGINE> --priority 110 \
+  --source-address-prefixes <APP_SERVER_IP>/32 \
+  --destination-port-ranges <CUSTOM_PORT> \
+  --destination-address-prefixes '*' \
+  --access Allow --protocol Tcp --direction Inbound
+
+# AWS security group equivalent:
+aws ec2 authorize-security-group-ingress \
+  --group-id <SECURITY_GROUP_ID> \
+  --protocol tcp --port <CUSTOM_PORT> --cidr <APP_SERVER_IP>/32
+```
+
+Portal path is the same rule: inbound, TCP, port `<CUSTOM_PORT>`,
+source `<APP_SERVER_IP>/32`, allow. Keep `80`/`443`/`22` as §2 already has
+them; `9811..9817` and `6432` stay loopback-only (no cloud rule at all).
+
+### How enabled databases pick up the ports
+
+1. Add the stream server(s) and reload nginx (`sudo nginx -t && sudo systemctl reload nginx`).
+2. Add the NSG rule(s) above and set the matching `*_ISSUED_HOST` values in
+   `~/omnidb/.env` (host **with** `:<CUSTOM_PORT>`), then restart the jar.
+3. Provision (or open the detail page of) a database — the issued string now
+   carries the custom port. Strings are snapshots: apps holding an older
+   string keep dialing the old port until they adopt the new one, so change
+   ports only when ready to rotate client configs (password reset reissues).
+
+Verify (replace placeholders; Postgres shown, others analogous):
+
+```bash
+echo | openssl s_client -connect pg.example.com:<CUSTOM_PORT> -servername pg.example.com 2>&1 | openssl x509 -noout -subject
+# → CN = pg.example.com (proves TLS terminates on your stream)
+
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=<CUSTOM_PORT> dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user;"
+# → <DB_USER> (1 row)
+```
+
 ## 10. Docker Container Postgres (pgvector) with TLS
 
 > The repo ships Postgres as a Docker container (`pgvector/pgvector`) on `127.0.0.1:9813` — this is what the pgvector extension requires. TLS uses a self-generated CA + server cert (not Let's Encrypt), and the nginx stream `default` route points at the container port, not the system `5432`.

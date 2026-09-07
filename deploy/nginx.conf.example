@@ -131,6 +131,8 @@ server {
 # Validate and apply:
 #   sudo nginx -t && sudo systemctl reload nginx
 #   sudo ufw allow from <app-server-ip> to any port <custom-port> proto tcp
+# Cloud firewall (NSG / security group): same rule there — this port open ONLY
+# to your app servers, never 0.0.0.0/0. See DEPLOY.md "Custom Public DB Ports".
 #
 # Caveats:
 # - Some office networks block outbound ports except 80/443 - apps behind
