@@ -22,9 +22,10 @@ server {
     # Restore/import uploads are up to 256MB - nginx's 1MB default rejects them.
     client_max_body_size 256m;
 
-    # Actuator is manager-only: never serve it on a public name. Reads from
-    # the box itself still work straight against the jar
-    # (curl 127.0.0.1:9811/actuator/health).
+    # Actuator is manager-only: never serve it on a public name. On the
+    # box itself it still needs the manager login (form login, ADMIN role) —
+    # open it in a logged-in browser or curl with a session cookie, not
+    # anonymous curl.
     location ^~ /actuator/ {
         return 404;
     }
@@ -52,6 +53,7 @@ server {
 #     client_max_body_size 256m;
 #
 #     # Actuator is manager-only: never serve it on a public name (see above).
+#     # On the box it still needs the manager login (ADMIN role).
 #     location ^~ /actuator/ {
 #         return 404;
 #     }

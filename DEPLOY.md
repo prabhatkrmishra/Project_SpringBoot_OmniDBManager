@@ -243,6 +243,9 @@ server {
     server_name <YOUR_DOMAIN>;
     root /var/www/html;
     location /.well-known/acme-challenge/ { allow all; }
+    # Actuator never on public name either (http just redirects, but block explicitly)
+    location ^~ /actuator/ { return 404; }
+    location = /actuator { return 404; }
     location / { return 301 https://$host$request_uri; }
 }
 server {
@@ -286,7 +289,7 @@ ss -tlnp | grep -E "443|8443|9811|9812|9813|9816"
 # → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443 (http), 127.0.0.1:9811..9817 (containers)
 ```
 
-> **Note:** `/actuator/*` is blocked at the proxy above (`location ^~ /actuator/` → 404), so pool counters and component status are loopback-only — read them on the box with `curl 127.0.0.1:9811/actuator/health`. Defense in depth: the app itself also requires the admin login for actuator (`anyRequest().authenticated()`, single ADMIN principal), so even a direct hit on the app port never answers anonymously.
+> **Note:** `/actuator/*` is blocked at the proxy above (`location ^~ /actuator/` + `location = /actuator` → 404), so it is never reachable via the public name. On the box itself it still requires the manager login (form login, `ADMIN` role) — open `http://127.0.0.1:9811/actuator/health` in a logged-in browser, or `curl` with the `JSESSIONID` cookie from a prior `POST /login`. Defense in depth: the app itself requires `hasRole("ADMIN")` for actuator, so even a direct hit on the app port never answers anonymously.
 
 Verify SNI:
 
