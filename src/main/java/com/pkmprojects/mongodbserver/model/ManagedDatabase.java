@@ -35,6 +35,8 @@ public class ManagedDatabase {
 
     private String storedPassword;
 
+    private boolean pooled;
+
     public ManagedDatabase() {
         // for Spring Data
     }
@@ -112,6 +114,14 @@ public class ManagedDatabase {
 
     public void setStoredPassword(String storedPassword) {
         this.storedPassword = storedPassword;
+    }
+
+    public boolean isPooled() {
+        return pooled;
+    }
+
+    public void setPooled(boolean pooled) {
+        this.pooled = pooled;
     }
 
     /**

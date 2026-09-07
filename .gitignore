@@ -59,8 +59,3 @@ replay_pid*.log
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
-
-# PgBouncer generated config (contains hashed passwords) — not committed
-pgbouncer/pgbouncer.ini
-pgbouncer/userlist.txt
-pgbouncer/.pgbouncer-*.pass

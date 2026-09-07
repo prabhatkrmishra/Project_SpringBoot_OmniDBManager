@@ -9,10 +9,10 @@ import org.springframework.stereotype.Component;
 /**
  * Actuator health indicator for PgBouncer — facet of Postgres engine health.
  * Mirrors {@code PostgresHealthIndicator}/{@code MysqlHealthIndicator} shape.
- * Only registered when {@code app.pgbouncer.enabled=true}.
+ * Managed like pgvector — always on when Postgres is enabled.
  */
 @Component
-@ConditionalOnProperty(name = "app.pgbouncer.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "app.postgres.enabled", havingValue = "true")
 public class PgbouncerHealthIndicator implements HealthIndicator {
 
     private final PgbouncerMonitorService monitorService;

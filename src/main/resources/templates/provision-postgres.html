@@ -53,6 +53,13 @@
                                 <div class="mb-3 full" th:if="${vectorAvailable != true}">
                                     <div class="form-hint text-body-secondary">pgvector not available on server — use <code>pgvector/pgvector:0.8.6-pg18-trixie</code> image or install <code>postgresql-*-pgvector</code>.</div>
                                 </div>
+                                <div class="mb-3 full">
+                                    <div class="form-check">
+                                        <input class="form-check-input" id="pooled" type="checkbox" th:field="*{pooled}" value="true">
+                                        <label class="form-check-label" for="pooled">Route via PgBouncer</label>
+                                    </div>
+                                    <div class="form-hint">Connection string will use <code>127.0.0.1:6432</code> (pooled) instead of direct Postgres. Only for this database.</div>
+                                </div>
                                 <div class="form-actions">
                                     <button class="btn btn-primary" type="submit"><i class="bi bi-plus-lg me-1"></i> Create database</button>
                                     <a class="btn btn-outline-secondary" th:href="@{/provision}"><i class="bi bi-arrow-left me-1"></i> Cancel</a>

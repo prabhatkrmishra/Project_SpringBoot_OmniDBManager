@@ -134,25 +134,33 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
 
     @Override
     public String buildConnectionString(String userName, String password, String dbName) {
-        // Pooled branch — route through pgbouncer port using issued host
-        if (pgbouncerProperties != null && pgbouncerProperties.enabled()) {
-            String host = resolveHost();
-            if (!host.contains(":")) {
-                host = host + ":" + pgbouncerProperties.port();
-            } else {
-                int colon = host.lastIndexOf(':');
-                String hostOnly = host.substring(0, colon);
-                host = hostOnly + ":" + pgbouncerProperties.port();
-            }
-            String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
-            return base + "?sslmode=" + sslmode + "&application_name=omnidb";
-        }
         String host = resolveHost();
         String encodedUser = uriEncode(userName);
         String encodedPass = uriEncode(password);
         String encodedDb = uriEncode(dbName);
         String base = "postgresql://" + encodedUser + ":" + encodedPass + "@" + host + "/" + encodedDb;
         // sslmode is enum-based (Postgres only) — always included
+        return base + "?sslmode=" + sslmode + "&application_name=omnidb";
+    }
+
+    /**
+     * Pooled connection string for DBs provisioned with pooling enabled.
+     * Routes through PgBouncer port using issued host (per-DB opt-in, not global).
+     */
+    public String buildPooledConnectionString(String userName, String password, String dbName) {
+        String host = resolveHost();
+        int pgbouncerPort = 6432;
+        if (pgbouncerProperties != null) {
+            pgbouncerPort = pgbouncerProperties.port();
+        }
+        if (!host.contains(":")) {
+            host = host + ":" + pgbouncerPort;
+        } else {
+            int colon = host.lastIndexOf(':');
+            String hostOnly = host.substring(0, colon);
+            host = hostOnly + ":" + pgbouncerPort;
+        }
+        String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
         return base + "?sslmode=" + sslmode + "&application_name=omnidb";
     }
 

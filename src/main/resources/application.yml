@@ -101,13 +101,12 @@ app:
   phpmyadmin:
     base-url: http://127.0.0.1:9817
   pgbouncer:
-    enabled: ${PGBOUNCER_ENABLED:false}
     port: ${OVERRIDE_PGBOUNCER_PORT:6432}
     pool-mode: ${OVERRIDE_PGBOUNCER_POOL_MODE:transaction}
     max-client-conn: ${OVERRIDE_PGBOUNCER_MAX_CLIENT_CONN:1000}
     default-pool-size: ${OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE:25}
-    admin-password: ${OVERRIDE_PGBOUNCER_ADMIN_PASSWORD:}
-    stats-password: ${OVERRIDE_PGBOUNCER_STATS_PASSWORD:}
+    admin-password: ${PGBOUNCER_ADMIN_PASSWORD:}
+    stats-password: ${PGBOUNCER_STATS_PASSWORD:}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)

@@ -23,13 +23,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * second loop. PgBouncer is a facet of the Postgres engine, not a peer engine.
  */
 @Service
-@ConditionalOnProperty(name = "app.pgbouncer.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "app.postgres.enabled", havingValue = "true")
 public class PgbouncerMonitorService {
 
     private static final Logger log = LoggerFactory.getLogger(PgbouncerMonitorService.class);
 
     private final PgbouncerProperties properties;
-    private final PostgresPgbouncerService pgbouncerService;
     private final AtomicInteger consecutiveDegraded = new AtomicInteger(0);
 
     // Thresholds — configurable via app.pgbouncer.thresholds.* (defaults match spec)
@@ -38,10 +37,8 @@ public class PgbouncerMonitorService {
     private final int degradedSustainedPolls;
 
     @Autowired
-    public PgbouncerMonitorService(PgbouncerProperties properties,
-                                   @Autowired(required = false) PostgresPgbouncerService pgbouncerService) {
+    public PgbouncerMonitorService(PgbouncerProperties properties) {
         this.properties = properties;
-        this.pgbouncerService = pgbouncerService;
         // Thresholds — read from properties or fallback; allow env override via properties file if needed
         this.degradedClientsWaitingThreshold = 1;
         this.degradedMaxWaitSeconds = 0.5;
@@ -49,29 +46,12 @@ public class PgbouncerMonitorService {
     }
 
     private String resolveStatsPassword() {
-        // Prefer live service's password (avoids divergence after auto-generation)
-        if (pgbouncerService != null) {
-            try {
-                String live = pgbouncerService.effectiveStatsPasswordForTest();
-                if (live != null && !live.isBlank()) return live;
-            } catch (Exception ignored) {}
-        }
         String cfg = properties.statsPassword();
         if (cfg != null && !cfg.isBlank()) return cfg;
-        try {
-            var p = java.nio.file.Path.of(properties.configDir(), ".pgbouncer-stats-pass");
-            if (java.nio.file.Files.exists(p)) {
-                String saved = java.nio.file.Files.readString(p).trim();
-                if (!saved.isBlank()) return saved;
-            }
-        } catch (Exception ignored) {}
         return cfg;
     }
 
     public PgbouncerSnapshot getSnapshot() {
-        if (!properties.enabled()) {
-            return PgbouncerSnapshot.disabled();
-        }
         List<PgbouncerSnapshot.Pool> pools = new ArrayList<>();
         PgbouncerSnapshot.Stats stats = null;
         String status;
@@ -139,7 +119,6 @@ public class PgbouncerMonitorService {
     }
 
     public void ping() {
-        if (!properties.enabled()) throw new IllegalStateException("PgBouncer not enabled");
         try (Connection c = openAdminConnection();
              Statement st = c.createStatement();
              ResultSet rs = st.executeQuery("SHOW POOLS")) {
