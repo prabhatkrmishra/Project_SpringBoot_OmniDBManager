@@ -34,7 +34,7 @@ docker compose -f compose.mysql.yaml up -d
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
 | `MONGO_ENABLED` | `false` | **Yes** | `application.yml:app.mongo.enabled` | `true` = enable Mongo provisioning routes. |
-| `MONGODB_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.mongo.issued-host` → `MongoDatabaseEngine.buildConnectionString()` | Host baked into **issued per-DB strings** apps dial. Empty = `127.0.0.1:9812` for local dev. Set to VPS Tailscale IP / domain when apps live on other servers. |
+| `MONGODB_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.mongo.issued-host` → `MongoDatabaseEngine.buildConnectionString()` | Host baked into **issued per-DB strings** apps dial. Empty = `127.0.0.1:9812` for local dev. Set to VPS Tailscale IP / domain when apps live on other servers. Use `host:<custom-port>` form to serve it on a non-standard public port (see `deploy/nginx.conf.example`). |
 | `MONGODB_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.mongo.yaml:MONGO_INITDB_ROOT_PASSWORD` + `spring.mongodb.uri` | **Must change.** Root for `mongo:27017`. |
 
 ## 3. PostgreSQL Engine
@@ -42,7 +42,7 @@ docker compose -f compose.mysql.yaml up -d
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
 | `POSTGRES_ENABLED` | `false` | **Yes** | `application.yml:app.postgres.enabled` | `true` = enable Postgres provisioning (+ PgBouncer sidecar, managed). |
-| `POSTGRES_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.postgres.issued-host` → `PostgresDatabaseEngine` | Host in **issued per-DB strings**. Empty = `127.0.0.1:9813`. Set when apps on other servers. |
+| `POSTGRES_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.postgres.issued-host` → `PostgresDatabaseEngine` | Host in **issued per-DB strings**. Empty = `127.0.0.1:9813`. Set when apps on other servers. Use `host:<custom-port>` form for a non-standard public port (pooled strings keep the same host with the port swapped to the pooler). |
 | `POSTGRES_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:POSTGRES_PASSWORD` + `PostgresConfig` | **Must change.** Superuser for DDL. |
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:pgbouncer-init` | **Must change.** Pooler admin (no host folder, static wildcard). |
 | `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | **Yes if enabled** | same | Monitor `stats_users` for `SHOW` only. |
@@ -54,7 +54,7 @@ docker compose -f compose.mysql.yaml up -d
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
 | `MYSQL_ENABLED` | `false` | **Yes** | `application.yml:app.mysql.enabled` | `true` = enable MySQL provisioning. |
-| `MYSQL_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.mysql.issued-host` | Host in issued strings. Empty = `127.0.0.1:9816`. |
+| `MYSQL_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.mysql.issued-host` | Host in issued strings. Empty = `127.0.0.1:9816`. Use `host:<custom-port>` form for a non-standard public port. |
 | `MYSQL_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.mysql.yaml:MYSQL_ROOT_PASSWORD` + `MysqlConfig` | **Must change.** Root password (user always `root`). |
 
 ## 5. Network / HTTPS (advanced)

@@ -205,6 +205,10 @@ OVERRIDE_POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=verify-f
 
 Mount certs in `compose.postgres.yaml` (see commented `postgres` service) and set `pg_hba.conf: hostssl all all 0.0.0.0/0 scram-sha-256`. Issued strings then carry `sslmode=verify-full`.
 
+### Custom public port (optional)
+
+Any engine can be served on a non-standard public port instead of `27017`/`5432`/`3306`: add a matching `stream` server (`listen <custom-port> ssl` → `proxy_pass 127.0.0.1:9812|9813|6432-pooled|9816`), open that port **only to your app servers** in the firewall, and set `*_ISSUED_HOST` to `host:<custom-port>` — issued strings then carry it with no extra variable. The odd port only quiets scanners; the allowlist, TLS, and per-database credentials are the actual locks. See `deploy/nginx.conf.example`.
+
 ## Using the provisioned database
 
 ### MongoDB (Node.js)

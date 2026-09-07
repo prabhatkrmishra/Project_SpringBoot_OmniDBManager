@@ -97,8 +97,8 @@ server {
 #   sudo ufw allow 27017/tcp
 #
 # Finally set in ~/omnidb/.env so ISSUED connection strings are correct:
-#   MONGODB_PUBLIC_HOST=your.domain.com
-#   MONGODB_PUBLIC_TLS=true
+#   MONGODB_ISSUED_HOST=your.domain.com
+#   OVERRIDE_MONGODB_TLS=true
 # and restart the jar. New strings then read:
 #   mongodb://user:pass@your.domain.com/db?authSource=db&tls=true
 #
@@ -107,3 +107,33 @@ server {
 # - Connections already issued WITHOUT &tls=true keep working unencrypted until
 #   rotated - reset passwords to reissue TLS strings.
 # - mongod's own --maxConns guardrail still applies behind nginx.
+#
+# ── Custom public port (optional) ────────────────────────────────────────────
+# A non-standard public port quiets internet-wide scanners but is camouflage,
+# not a lock - anyone who finds it faces the same login. The real locks stay:
+# firewall allowlist (this port open ONLY to your app servers), TLS below, and
+# per-database credentials. Same shape works for Postgres/MySQL: point the
+# stream at 127.0.0.1:9813 (direct), 127.0.0.1:6432 (pooled) or 127.0.0.1:9816
+# and set the matching *_ISSUED_HOST to host:<custom-port> so issued strings
+# carry it (no new env var needed - any host:port is accepted as-is).
+#
+# server {
+#     listen <custom-port> ssl;
+#     proxy_pass 127.0.0.1:9813;
+#
+#     ssl_certificate     /etc/letsencrypt/live/pg.example.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/pg.example.com/privkey.pem;
+#
+#     # Per-IP guardrail, same idea as the Mongo example above.
+#     # limit_conn db_conn_per_ip 20;
+# }
+#
+# Validate and apply:
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo ufw allow from <app-server-ip> to any port <custom-port> proto tcp
+#
+# Caveats:
+# - Some office networks block outbound ports except 80/443 - apps behind
+#   those cannot reach a custom port (that's the one case for SNI-routed 443).
+# - Cloudflare's orange cloud proxies HTTP only: keep DB hostnames on grey-cloud
+#   DNS (or Spectrum) or the TCP never arrives.
