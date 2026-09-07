@@ -254,6 +254,8 @@ server {
     ssl_prefer_server_ciphers on;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     client_max_body_size 256m;                 # restore uploads
+    location ^~ /actuator/ { return 404; }   # manager-only: never on a public name
+    location = /actuator { return 404; }
     location / {
         proxy_pass http://127.0.0.1:9811;
         proxy_set_header Host $host;
@@ -282,9 +284,9 @@ sudo nginx -t && sudo systemctl reload nginx
 # If "bind() to 127.0.0.1:8443 failed (98: Address already in use)" → systemctl stop nginx; fix; systemctl start nginx
 ss -tlnp | grep -E "443|8443|9811|9812|9813|9816"
 # → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443 (http), 127.0.0.1:9811..9817 (containers)
-
-> **Note:** `/actuator/health`, `/info`, and `/metrics` answer without login for anyone who can reach the app port (pool counters, component status). The setup above keeps the app on loopback behind nginx, which is enough — but if the dashboard URL is shared beyond trusted admins, wrap `location /actuator/` with `allow`/`deny` or basic-auth.
 ```
+
+> **Note:** `/actuator/*` is blocked at the proxy above (`location ^~ /actuator/` → 404), so pool counters and component status are loopback-only — read them on the box with `curl 127.0.0.1:9811/actuator/health`. Defense in depth: the app itself also requires the admin login for actuator (`anyRequest().authenticated()`, single ADMIN principal), so even a direct hit on the app port never answers anonymously.
 
 Verify SNI:
 

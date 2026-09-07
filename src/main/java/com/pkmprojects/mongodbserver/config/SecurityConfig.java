@@ -39,6 +39,9 @@ public class SecurityConfig {
     SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.authorizeHttpRequests(auth -> auth
                         .requestMatchers("/login", "/css/**", "/js/**", "/webjars/**", "/error", "/favicon.ico").permitAll()
+                        // Actuator is manager-only: nginx already returns 404 on the public name,
+                        // but the app itself must also never answer anonymously (direct IP hit).
+                        .requestMatchers("/actuator", "/actuator/**").hasRole("ADMIN")
                         .requestMatchers("/adminer/**", "/mongo-express/**", "/phpmyadmin/**").hasRole("ADMIN")
                         .requestMatchers("/databases/*/reset", "/databases/*/delete",
                                 "/databases/*/backup", "/databases/*/restore",
