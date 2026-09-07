@@ -29,12 +29,12 @@ Most teams run MongoDB *and* PostgreSQL *and* MySQL. OmniDB Manager unifies them
 - **Hardening** — per-engine rate limit (`IP:engine`, 5/min, `trustXFF=false`), TLS (`sslmode=require` / `verify-full` + `application_name` for PG; `sslMode=REQUIRED` / `VERIFY_IDENTITY` for MySQL), `scram-sha-256` / `caching_sha2_password`, `PGDATA=/var/lib/postgresql/18/docker`, audit trail (`PROVISION/RESET_PASSWORD/DELETE/TABLE_CREATED/DROPPED/TRUNCATED/ROW_INSERTED/ROW_DELETED/BACKUP_CREATED/RESTORED/IMPORT`), Micrometer `provisioned.databases{engine}` gauge, `postgres` + `mysql` HealthIndicators.
 - **Optional PgBouncer pooling** — `pgbouncer:6432` runs with postgres (same network, `postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder). Per-DB opt-in on provision; pooled strings use `POSTGRES_ISSUED_HOST:6432`, direct stay `POSTGRES_ISSUED_HOST:9813` — Mongo/MySQL untouched.
 - **Brute-force protection** — login rate limit per IP+username (5/15m, 429 + `Retry-After`).
-- **Bundled UIs (optional)** — mongo-express at `/mongo-express`, Adminer at `/adminer` (Postgres), phpMyAdmin at `/phpmyadmin` (MySQL), all loopback-bound and behind app auth.
+- **Bundled UIs (optional)** — mongo-express at `/mongo-express`, Adminer at `/adminer` (Postgres), phpMyAdmin at `/phpmyadmin` (MySQL), all loopback-bound and behind app auth. Adminer signs in automatically as the Postgres superuser, so one click sees every provisioned database — no second login.
 
 ## Stack
 
 - **Java 25**, **Spring Boot 4.1.1** (`spring-boot-starter-webmvc`, `data-mongodb`, `jdbc`, `security`, `validation`, `actuator`, `micrometer`)
-- **MongoDB 8** + **PostgreSQL 18.6-alpine** + **MySQL 8.4** + **PgBouncer 1.23.1** + **Adminer 6.0.1-standalone** + **phpMyAdmin 5.2**
+- **MongoDB 8** + **PostgreSQL 18.6-alpine** + **MySQL 8.4** + **PgBouncer 1.24.1** (edoburu image) + **Adminer 6.0.1-standalone** + **phpMyAdmin 5.2**
 - **PostgreSQL driver 42.7.13** + **MySQL Connector/J 9.4**, **HikariCP** (via `spring-boot-starter-jdbc`)
 - **Thymeleaf** + **Bootstrap 5.3.8** + **Bootstrap Icons 1.13.1**
 - **Docker Compose** for local stack; **Testcontainers** for integration tests
@@ -309,13 +309,13 @@ Naming is validated per-engine; system databases are protected.
 - **DDL** — `CREATE/DROP DATABASE` runs outside transactions (auto-commit `JdbcTemplate`). `CREATE DATABASE "db" OWNER "user" TEMPLATE template0 ENCODING 'UTF8'`; `CREATE ROLE "user" WITH LOGIN PASSWORD '...'` (`scram-sha-256`); `GRANT CONNECT` + schema grants.
 - **Table/row CRUD** — `CREATE TABLE ... (col TEXT)`, `DROP TABLE IF EXISTS ... CASCADE`, `TRUNCATE ... CASCADE`, `INSERT` dynamic, `SELECT *, ctid::text AS __pg_ctid LIMIT ? OFFSET ?`, `DELETE ... WHERE ctid = ?::tid`. Columns lowercased, `distinct()`, reserved names blocked (`__pg_ctid/__ctid/ctid/__new_col/__new_val/_csrf`).
 - **Connection strings** — built from `app.postgres.issued-host` or `127.0.0.1:9813`, `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb`. Pooled DBs use `POSTGRES_ISSUED_HOST:6432` — Postgres-only, Mongo/MySQL untouched.
-- **PgBouncer** — `pgbouncer/pgbouncer:1.23.1` same Docker network (`postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder, static wildcard `*`). Per-DB opt-in on provision; `SHOW` via `stats_users`.
+- **PgBouncer** — `edoburu/pgbouncer:v1.24.1-p1` same Docker network (`postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder, static wildcard `*`). Per-DB opt-in on provision; `SHOW` via `stats_users`.
 
 ## MySQL specifics
 
 - **DDL** — auto-commit `JdbcTemplate` (MySQL DDL implicit commit). ``CREATE DATABASE `db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci``; ``CREATE USER 'user'@'%' IDENTIFIED BY '...'`` (`caching_sha2_password`); ``GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,DROP,REFERENCES,CREATE VIEW,SHOW VIEW,TRIGGER,CREATE TEMPORARY TABLES,LOCK TABLES,EXECUTE ON `db`.* TO 'user'@'%'``.
 - **Table/row CRUD** — ``CREATE TABLE `db`.`table` (col TEXT)``, ``DROP TABLE IF EXISTS `db`.`table```, ``TRUNCATE TABLE `db`.`table```, `INSERT` dynamic, ``SELECT * FROM `db`.`table` LIMIT ? OFFSET ?``, PK detection via `information_schema.KEY_COLUMN_USAGE` (`constraint_name='PRIMARY'`), single-PK guard (composite PKs → delete via phpMyAdmin), `DELETE ... WHERE pk = ?`. Columns lowercased, `distinct()`, reserved names blocked (`__mysql_pk/__mysql_pk_col/__new_col/__new_val/_csrf`).
-- **Connection strings** — built from `app.mysql.public-host` or parsed `app.mysql.uri` host, `uriEncode` for user/pass, `mysql://user:pass@host/db?sslMode=REQUIRED` (or `VERIFY_IDENTITY` with CA). JDBC: `jdbc:mysql://host/db?sslMode=REQUIRED&serverTimezone=UTC`.
+- **Connection strings** — built from `app.mysql.issued-host` or parsed `app.mysql.uri` host, `uriEncode` for user/pass, `mysql://user:pass@host/db?sslMode=REQUIRED` (or `VERIFY_IDENTITY` with CA). JDBC: `jdbc:mysql://host/db?sslMode=REQUIRED&serverTimezone=UTC`.
 - **Sizes & monitor** — `SUM(data_length+index_length) FROM information_schema.TABLES`, `information_schema.PROCESSLIST` + `performance_schema.global_status` (`Com_commit`/`Com_rollback`, `Uptime` as `VARCHAR` → `Long.parseLong`).
 
 ## Releases & deployment

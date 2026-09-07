@@ -150,11 +150,18 @@ services:
         { md5line "$$ADMIN_USER" "$$PGBOUNCER_ADMIN_PASSWORD"; md5line "$$STATS_USER" "$$PGBOUNCER_STATS_PASSWORD"; } > /etc/pgbouncer/userlist.txt
         chmod 600 /etc/pgbouncer/userlist.txt
   pgbouncer:
-    image: pgbouncer/pgbouncer:1.23.1
+    # Maintained image (the pgbouncer/pgbouncer repo is stale); pre-existing
+    # pgbouncer.ini/userlist.txt mounts win over the entrypoint generator.
+    image: edoburu/pgbouncer:v1.24.1-p1@sha256:3db3d7223e93af52b4116f642951a1a5fa44702a88c2a59cf7562cac19320c9e
     container_name: omnidb-pgbouncer
     restart: unless-stopped
     ports:
       - "127.0.0.1:${OVERRIDE_PGBOUNCER_PORT:-6432}:6432"
+    environment:
+      # Stats credential for the healthcheck only — the entrypoint ignores
+      # unknown vars, so this never touches userlist.txt (DB_USER/DATABASE_URL
+      # must stay unset for the same reason).
+      PGBOUNCER_STATS_PASSWORD: ${PGBOUNCER_STATS_PASSWORD:-change-me-now}
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,8 +170,7 @@ services:
     volumes:
       - pgbouncer-data:/etc/pgbouncer:ro
     healthcheck:
-      # pgbouncer image has no pg_isready; use tcp probe
-      test: ["CMD-SHELL", "timeout 2 sh -c 'cat < /dev/null > /dev/tcp/127.0.0.1/6432' || exit 1"]
+      test: ["CMD-SHELL", "PGPASSWORD=\"$PGBOUNCER_STATS_PASSWORD\" psql -h 127.0.0.1 -p 6432 -U pgbouncer_stats -d pgbouncer -tAc 'SHOW POOLS' | grep -q ."]
       interval: 10s
       timeout: 5s
       retries: 5
