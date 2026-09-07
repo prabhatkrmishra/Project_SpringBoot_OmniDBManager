@@ -1,15 +1,15 @@
 # Environment Variables — OmniDB Manager
 
 > Copy `.env.example` → `.env` and fill real values before `docker compose up -d`.
-> All `*_URI` vars are **Manager → DB root links** (admin) on `127.0.0.1` — the manager runs on the same host as the DB containers and connects via loopback, **not** public DNS. They are used to `CREATE DATABASE / CREATE USER / GRANT`. They are **not** the per-database strings issued to your apps (those are built by `*DatabaseEngine.buildConnectionString()` using `*_PUBLIC_HOST` + `*_PUBLIC_SSLMODE` and shown in the UI).
+> Manager + DBs all on `127.0.0.1` same VPS — set `*_ISSUED_HOST` to the host your apps dial for per-DB strings.
 
 ## Quick Start
 
 ```bash
 cp .env.example .env
 # edit .env: change every `change-me-now`, set APP_ENCRYPTION_KEY=$(openssl rand -base64 32)
-# *_URI defaults are already local (127.0.0.1) — Manager connects via loopback, not public DNS
-# Prod: keep local *_URI, set *_PUBLIC_HOST + *_PUBLIC_SSLMODE for issued per-DB strings + TLS
+# No URI vars needed locally — Manager connects via loopback by default
+# Prod: set *_ISSUED_HOST to your VPS Tailscale IP / domain for issued per-DB strings
 docker compose up -d              # all engines
 # or per engine:
 docker compose -f compose.mongo.yaml up -d
@@ -17,147 +17,106 @@ docker compose -f compose.postgres.yaml up -d
 docker compose -f compose.mysql.yaml up -d
 ```
 
-**Loopback ports (not internet-exposed):** App `9811`, Mongo `127.0.0.1:9812`, Postgres `127.0.0.1:9813`, mongo-express `127.0.0.1:9814`, Adminer `127.0.0.1:9815`, MySQL `127.0.0.1:9816`, phpMyAdmin `127.0.0.1:9817`.
+**Loopback ports (not internet-exposed):** App `9811`, Mongo `127.0.0.1:9812`, Postgres `127.0.0.1:9813`, mongo-express `127.0.0.1:9814`, Adminer `127.0.0.1:9815`, MySQL `127.0.0.1:9816`, phpMyAdmin `127.0.0.1:9817`, PgBouncer `127.0.0.1:6432`.
 
 ---
 
-## 1. App Login — Web UI `http://127.0.0.1:9811/login` or `https://your-domain.com/login`
-
-> **Access:** Local dev → `http://127.0.0.1:9811/login` (loopback, `SERVER_ADDRESS=127.0.0.1`). Public → `https://your-domain.com/login` via reverse proxy / Cloudflare Tunnel that forwards to `127.0.0.1:9811` (see §2 Condition B). The app itself always binds `127.0.0.1:9811`; public DNS is at the proxy, not the app.
+## 1. App Login — Web UI `http://127.0.0.1:9811/login`
 
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
-| `APP_ADMIN_USERNAME` | `admin` | **Yes** | `application.yml:app.admin.username` → `SecurityConfig.userDetailsService()` | Single admin login. Stored as `BCrypt` in-memory user. Works for both local and public URL — same credentials. |
+| `APP_ADMIN_USERNAME` | `admin` | **Yes** | `application.yml:app.admin.username` → `SecurityConfig.userDetailsService()` | Single admin login. Stored as `BCrypt` in-memory user. |
 | `APP_ADMIN_PASSWORD` | `change-me-now` | **Yes** | same | **Must change.** Anyone with this can provision/delete all databases. |
+| `APP_ENCRYPTION_KEY` | `` (empty) | **Yes in prod** | `application.yml:app.encryption.key` → `EncryptionService` (AES-256-GCM) | Generate with `openssl rand -base64 32`. When blank, stored **plaintext** (dev only). |
 
-## 2. Network / HTTPS
+## 2. MongoDB Engine
 
-These are commented in `.env.example` — uncomment the block that matches your deployment.
+| Variable | Default | Required | Where Used | Description |
+|---|---|---|---|---|
+| `MONGO_ENABLED` | `false` | **Yes** | `application.yml:app.mongo.enabled` | `true` = enable Mongo provisioning routes. |
+| `MONGODB_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.mongo.issued-host` → `MongoDatabaseEngine.buildConnectionString()` | Host baked into **issued per-DB strings** apps dial. Empty = `127.0.0.1:9812` for local dev. Set to VPS Tailscale IP / domain when apps live on other servers. |
+| `MONGODB_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.mongo.yaml:MONGO_INITDB_ROOT_PASSWORD` + `spring.mongodb.uri` | **Must change.** Root for `mongo:27017`. |
 
-| Variable | Default | Where Used | Description |
-|---|---|---|---|
-| `SERVER_ADDRESS` | `127.0.0.1` | `application.yml:server.address` | `127.0.0.1` = loopback only (secure, reach via reverse proxy / Cloudflare Tunnel). `0.0.0.0` = expose directly (not recommended for public). |
-| `RATE_LIMIT_TRUST_XFF` | `false` | `application.yml:app.login-rate-limit.trust-x-forwarded-for` + `app.provision-rate-limit.trust-x-forwarded-for` | `false` = `X-Forwarded-For` ignored (prevents spoof). Set `true` **only** behind a trusted proxy that overwrites the header (Nginx / Cloudflare Tunnel), otherwise attacker bypasses rate limiting. |
-| `SERVER_COOKIE_SECURE` | `false` | `application.yml:server.servlet.session.cookie.secure` | `false` for local `http://127.0.0.1:9811`. Set `true` behind TLS-terminating proxy or the login cookie is never sent → redirect loop (Phase 5 fix). |
-| `SERVER_COOKIE_SAME_SITE` | `lax` | `application.yml:server.servlet.session.cookie.same-site` | `lax` = CSRF protection with top-level navigation allowed. Use `strict` in production. |
+## 3. PostgreSQL Engine
 
-**Conditions in `.env.example`:**
-- **A — Local dev (no TLS):** keep `SERVER_ADDRESS=127.0.0.1`, `RATE_LIMIT_TRUST_XFF=false`.
-- **B — Behind reverse proxy / Cloudflare Tunnel (recommended for `https://`):** `SERVER_ADDRESS=127.0.0.1`, `RATE_LIMIT_TRUST_XFF=true`, `SERVER_COOKIE_SECURE=true`. App stays `127.0.0.1`, proxy forwards to `127.0.0.1:9811` and sets `X-Forwarded-Proto/For`. `application.yml` already has `forward-headers-strategy: framework`. Nginx example: `listen 443 ssl; proxy_pass http://127.0.0.1:9811; proxy_set_header X-Forwarded-Proto $scheme;`
-- **C — Expose directly (not recommended):** `SERVER_ADDRESS=0.0.0.0`, `RATE_LIMIT_TRUST_XFF=false`.
+| Variable | Default | Required | Where Used | Description |
+|---|---|---|---|---|
+| `POSTGRES_ENABLED` | `false` | **Yes** | `application.yml:app.postgres.enabled` | `true` = enable Postgres provisioning. |
+| `POSTGRES_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.postgres.issued-host` → `PostgresDatabaseEngine` | Host in **issued per-DB strings**. Empty = `127.0.0.1:9813`. Set when apps on other servers. |
+| `POSTGRES_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:POSTGRES_PASSWORD` + `PostgresConfig` | **Must change.** Superuser for DDL. |
 
-## 3. MongoDB Engine
+## 4. MySQL Engine
 
-| Variable | Default | Where Used | Description |
-|---|---|---|---|
-| `MONGO_ENABLED` | `false` | `application.yml:app.mongo.enabled` | `true` = enable Mongo provisioning routes. `false` = routes disabled, health shows `disabled`. |
-| `MONGODB_ROOT_USERNAME` | `root` | `compose.mongo.yaml:MONGO_INITDB_ROOT_USERNAME` + `application.yml:spring.mongodb.uri` fallback | Root/admin user for `mongo:27017`. Manager connects as this to run `createUser` / `createDatabase`. |
-| `MONGODB_ROOT_PASSWORD` | `change-me-now` | same + `compose.mongo.yaml:ME_CONFIG_MONGODB_URL` | **Must change.** Also used by `mongo-express` internal URL. |
-| `MONGODB_URI` | `mongodb://root:root@127.0.0.1:9812/?authSource=admin&maxPoolSize=10` | `application.yml:spring.mongodb.uri` → `MongoClient` | **Manager → Mongo root link (local, not public DNS).** Manager connects via loopback `127.0.0.1:9812` to provision databases. **Remote alternative:** `mongodb+srv://<clusterAdmin>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority`. Empty `MONGODB_URI=` is normalized to absent → fallback to `127.0.0.1:9812` works. |
-| `MONGO_EXPRESS_USERNAME` | `admin` | `compose.mongo.yaml:ME_CONFIG_BASICAUTH_USERNAME` | Basic auth for `http://127.0.0.1:9814` (proxied at `/mongo-express`). |
-| `MONGO_EXPRESS_PASSWORD` | `change-me-now` | `compose.mongo.yaml:ME_CONFIG_BASICAUTH_PASSWORD` | **Must change.** |
-| `MONGODB_PUBLIC_HOST` | `` (empty) | `application.yml:app.mongo-public-host` → `MongoDatabaseEngine.buildConnectionString()` | Host placed in **issued per-DB strings** shown in UI. Empty = derived from `MONGODB_URI` / `127.0.0.1:9812`. Set `mongo.example.com` when clients dial via domain/tunnel. Add `:port` only if non-`27017`. |
-| `MONGODB_PUBLIC_TLS` | `false` | `application.yml:app.mongo-public-tls` | `false` = issued `mongodb://user:pass@host/db?authSource=db`. `true` = adds `&tls=true` (for `mongod --tls` or Nginx `stream { listen 27017 ssl; proxy_pass 127.0.0.1:9812; }`). |
-| `MONGO_EXPRESS_BASE_URL` | `http://127.0.0.1:9814/mongo-express` | `application.yml:app.mongo-express.base-url` → `MongoExpressProxyFilter` | Internal URL for mongo-express proxy at `/mongo-express`. Don't change unless you move mongo-express. |
+| Variable | Default | Required | Where Used | Description |
+|---|---|---|---|---|
+| `MYSQL_ENABLED` | `false` | **Yes** | `application.yml:app.mysql.enabled` | `true` = enable MySQL provisioning. |
+| `MYSQL_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.mysql.issued-host` | Host in issued strings. Empty = `127.0.0.1:9816`. |
+| `MYSQL_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.mysql.yaml:MYSQL_ROOT_PASSWORD` + `MysqlConfig` | **Must change.** Root password (user always `root`). |
 
-## 4. PostgreSQL Engine
+## 5. Network / HTTPS (advanced)
 
 | Variable | Default | Where Used | Description |
 |---|---|---|---|
-| `POSTGRES_ENABLED` | `false` | `application.yml:app.postgres.enabled` | `true` = enable Postgres provisioning. |
-| `POSTGRES_ROOT_USER` | `root` | `compose.postgres.yaml:POSTGRES_USER` + `PostgresConfig` | Postgres superuser. Manager authenticates as this via `POSTGRES_URI`. |
-| `POSTGRES_ROOT_PASSWORD` | `change-me-now` | same | **Must change.** |
-| `POSTGRES_URI` | `jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10` | `application.yml:app.postgres.uri` → `PostgresConfig:HikariDataSource` | **Manager → Postgres root link (local, not public DNS).** Manager connects via loopback `127.0.0.1:9813` to do `CREATE DATABASE / CREATE ROLE / GRANT`. `sslmode=disable` + timeouts fix `enableSSL Read timed out` hang (Phase 4). **Remote alternative:** `jdbc:postgresql://pg.example.com:5432/postgres?sslmode=require` or `verify-full` with `&sslrootcert=./certs/ca.crt` + mount certs in `compose.postgres.yaml` (`ssl=on` + `hostssl` in `pg_hba.conf`). |
-| `POSTGRES_PUBLIC_HOST` | `` | `application.yml:app.postgres.public-host` → `PostgresDatabaseEngine` | Host in **issued per-DB strings** (`postgresql://user:pass@host/db`). Empty = derived from `POSTGRES_URI`. Set `pg.example.com` for public. |
-| `POSTGRES_PUBLIC_TLS` | `false` | `application.yml:app.postgres.public-tls` | Legacy symmetry flag. Real TLS is `POSTGRES_PUBLIC_SSLMODE`. |
-| `POSTGRES_PUBLIC_SSLMODE` | `require` | `application.yml:app.postgres.public-sslmode` | `sslmode` in issued strings: `disable` (local), `require` (TLS without CA), `verify-full` (TLS + CA). For `verify-full` also set `POSTGRES_URI` with `sslrootcert` and mount `server.crt/key/ca.crt` in `compose.postgres.yaml`. |
-| `ADMINER_BASE_URL` | `http://127.0.0.1:9815` | `application.yml:app.adminer.base-url` → `AdminerProxyFilter` at `/adminer` | Internal Adminer URL. Requires `ADMIN` role, loopback only. |
+| `SERVER_ADDRESS` | `127.0.0.1` | `application.yml:server.address` | Loopback only. `0.0.0.0` = expose directly (not recommended). |
+| `RATE_LIMIT_TRUST_XFF` | `false` | `application.yml:app.*.trust-x-forwarded-for` | Set `true` only behind trusted proxy. |
 
-## 5. MySQL Engine
+## 6. Encryption at Rest
 
-| Variable | Default | Where Used | Description |
-|---|---|---|---|
-| `MYSQL_ENABLED` | `false` | `application.yml:app.mysql.enabled` | `true` = enable MySQL provisioning. |
-| `MYSQL_ROOT_PASSWORD` | `change-me-now` | `compose.mysql.yaml:MYSQL_ROOT_PASSWORD` + `MysqlConfig` | Root password (user is always `root`, do not set `MYSQL_ROOT_USER`). **Must change.** |
-| `MYSQL_URI` | `jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000` | `application.yml:app.mysql.uri` → `MysqlConfig:HikariDataSource` | **Manager → MySQL root link (local, not public DNS).** Manager connects via loopback `127.0.0.1:9816`. `useSSL=false` + timeouts for local Docker. **Remote alternative:** `jdbc:mysql://mysql.example.com:3306/mysql?sslMode=REQUIRED&allowPublicKeyRetrieval=true&serverTimezone=UTC` or `VERIFY_IDENTITY` with `&trustCertificateKeyStoreUrl=file:./certs/ca.crt` + `MYSQL_PUBLIC_SSLMODE=VERIFY_IDENTITY`. |
-| `MYSQL_PUBLIC_HOST` | `mysql.example.com` (commented) | `application.yml:app.mysql.public-host` | Host in issued `jdbc:mysql://user:pass@host/db` strings. |
-| `MYSQL_PUBLIC_TLS` | `false` | `application.yml:app.mysql.public-tls` | Symmetry flag. |
-| `MYSQL_PUBLIC_SSLMODE` | `REQUIRED` | `application.yml:app.mysql.public-sslmode` | `DISABLED` / `REQUIRED` (TLS without CA) / `VERIFY_IDENTITY` (TLS + CA). |
-| `PHPMYADMIN_BASE_URL` | `http://127.0.0.1:9817` | `application.yml:app.phpmyadmin.base-url` → `PhpMyAdminProxyFilter` at `/phpmyadmin` | Internal phpMyAdmin URL. Requires `ADMIN` role, loopback only. |
+See §1 `APP_ENCRYPTION_KEY` — changing the key after provisioning makes old passwords unreadable.
 
-## 6. PgBouncer Pooling (Optional, Postgres)
-
-| Variable | Default | Where Used | Description |
-|---|---|---|---|
-| `PGBOUNCER_ENABLED` | `false` | `application.yml:app.pgbouncer.enabled` | `true` = enable pooling for any Postgres DB provisioned via OmniDB. Mirrors `POSTGRES_ENABLED`/`MYSQL_ENABLED`. When `false`, no container/UI/health/monitor changes. |
-| `PGBOUNCER_PORT` | `6432` | `application.yml:app.pgbouncer.port` + `compose.postgres.yaml:pgbouncer.ports` | Host port, loopback-bound `127.0.0.1:6432` by default (safe, closed). Same Docker network as `postgres` (`postgres:5432` internally). |
-| `PGBOUNCER_POOL_MODE` | `transaction` | `pgbouncer.ini:pool_mode` | `transaction` (locked stack choice). |
-| `PGBOUNCER_MAX_CLIENT_CONN` | `1000` | `pgbouncer.ini:max_client_conn` | Leave headroom for OmniDB admin connections (`Hikari maxPool 5`). |
-| `PGBOUNCER_DEFAULT_POOL_SIZE` | `25` | `pgbouncer.ini:default_pool_size` | Per-database server connections; keep well below `max_connections` (100). |
-| `PGBOUNCER_ADMIN_USER` | `pgbouncer_admin` | `pgbouncer.ini:admin_users` + `PostgresPgbouncerService.reload()` | Stats+admin: can `RELOAD`. Never in issued strings or logs. Auto-generated strong password if blank when enabled (via `security.PasswordGenerator`). |
-| `PGBOUNCER_ADMIN_PASSWORD` | `` (auto-gen) | `pgbouncer.ini:userlist.txt` + `application.yml:app.pgbouncer.admin-password` | Must not log. Regenerated file kept in `PGBOUNCER_CONFIG_DIR`. |
-| `PGBOUNCER_STATS_USER` | `pgbouncer_stats` | `pgbouncer.ini:stats_users` | Read-only monitor: `SHOW POOLS/STATS` only, cannot `RELOAD`/`KILL`/`PAUSE`. Used by Phase 2 monitoring. |
-| `PGBOUNCER_STATS_PASSWORD` | `` (auto-gen) | `pgbouncer.ini:userlist.txt` | Auto-generated if blank. |
-| `PGBOUNCER_PUBLIC_HOST` | `` (empty) | `PostgresDatabaseEngine.buildConnectionString()` | Host in issued strings when pooling enabled. Empty = derive from `POSTGRES_PUBLIC_HOST` / `POSTGRES_URI` with port swapped to `PGBOUNCER_PORT`. Mirrors `POSTGRES_PUBLIC_HOST` pattern. |
-| `PGBOUNCER_CONFIG_DIR` | `./pgbouncer` | `PgbouncerProperties.configDir` | Where `pgbouncer.ini`/`userlist.txt` are regenerated on provision/reset/delete. |
-
-*Privilege scoping:* `admin_users` (reload) ≠ `stats_users` (SHOW only). Stats credential is the only one monitoring ever uses; admin credential never leaves server-side `RELOAD` path.
-
-## 7. Encryption at Rest
-
-| Variable | Default | Where Used | Description |
-|---|---|---|---|
-| `APP_ENCRYPTION_KEY` | `` (empty) | `application.yml:app.encryption.key` → `EncryptionService` (AES-256-GCM) | **Critical.** Generate with `openssl rand -base64 32` (or `openssl rand -hex 32`). When set, per-database passwords in `mongodb_admin.managed_databases` are encrypted. When blank, stored **plaintext** (dev only). Changing the key after provisioning makes old passwords unreadable — generate once and back up securely. |
-
-## 8. Manager → DB vs Issued Strings
+## 7. Manager → DB vs Issued Strings
 
 | Link | Who Uses It | Example | Env Var |
 |---|---|---|---|
-| **Manager → DB (root)** | **Manager** as `root` on `127.0.0.1` to create DBs | `jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable` | `POSTGRES_URI` / `MYSQL_URI` / `MONGODB_URI` (local, never public DNS) |
-| **Issued per-DB string** | **Your app** as per-DB user via public DNS | `postgresql://myapp_user:GENERATED_PASS@pg.example.com:5432/myapp?sslmode=require` | Built by `*DatabaseEngine.buildConnectionString()` using `*_PUBLIC_HOST` + `*_PUBLIC_SSLMODE` |
+| **Manager → DB (root)** | **Manager** as `root` on `127.0.0.1` to create DBs | `jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable` | Managed default — `OVERRIDE_*_URI` only for remote (see §10a) |
+| **Issued per-DB string** | **Your app** as per-DB user via TCP | `postgresql://myapp_user:GENERATED_PASS@pg.example.com:5432/myapp?sslmode=require` | Built by `*DatabaseEngine.buildConnectionString()` using `*_ISSUED_HOST` |
 
-Never give the root `*_URI` to your apps. `*_URI` stays `127.0.0.1` (manager and DB on same host via Docker); `*_PUBLIC_HOST` is what your apps dial.
+## 8. Local vs Production
 
-## 9. Local vs Production
-
-> `*_URI` is always `127.0.0.1` — Manager and DB run on the same host via Docker. Public DNS goes in `*_PUBLIC_HOST`, not `*_URI`.
+> Local needs 0 URI vars. Remote only then use `OVERRIDE_`.
 
 **Local Docker (loopback, no TLS):**
 ```env
 MONGO_ENABLED=true
-MONGODB_URI=mongodb://root:root@127.0.0.1:9812/?authSource=admin&maxPoolSize=10
 POSTGRES_ENABLED=true
-POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10
 MYSQL_ENABLED=true
-MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000
-# No *_PUBLIC_HOST needed — issued strings use 127.0.0.1
+# No *_ISSUED_HOST needed — issued strings use 127.0.0.1
 ```
 
-**Production (same host, public TLS for issued strings):**
+**Production (same host, apps on other servers):**
 ```env
-# Manager still connects via loopback — DO NOT change *_URI to public DNS
 MONGO_ENABLED=true
-MONGODB_URI=mongodb://root:root@127.0.0.1:9812/?authSource=admin&maxPoolSize=10
-MONGODB_PUBLIC_HOST=mongo.example.com
-MONGODB_PUBLIC_TLS=true
+MONGODB_ISSUED_HOST=mongo.example.com
 POSTGRES_ENABLED=true
-POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10
-POSTGRES_PUBLIC_HOST=pg.example.com
-POSTGRES_PUBLIC_SSLMODE=require
-# For verify-full issued strings: POSTGRES_PUBLIC_SSLMODE=verify-full + mount certs in compose.postgres.yaml
+POSTGRES_ISSUED_HOST=pg.example.com
 MYSQL_ENABLED=true
-MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000
-MYSQL_PUBLIC_HOST=mysql.example.com
-MYSQL_PUBLIC_SSLMODE=REQUIRED
-SERVER_COOKIE_SECURE=true
-RATE_LIMIT_TRUST_XFF=true
+MYSQL_ISSUED_HOST=mysql.example.com
 ```
-Plus uncomment TLS volumes/command in `compose.postgres.yaml` and mount `server.crt/key/ca.crt` for `verify-full`.
 
-**Remote DB (Manager on different host than DB) — only then change `*_URI`:**
-```env
-# e.g. Atlas or RDS — Manager dials remote host
-MONGODB_URI=mongodb+srv://<clusterAdmin>:<password>@<cluster>.mongodb.net/?retryWrites=true&w=majority
-POSTGRES_URI=jdbc:postgresql://pg.example.com:5432/postgres?sslmode=require
-MYSQL_URI=jdbc:mysql://mysql.example.com:3306/mysql?sslMode=REQUIRED&allowPublicKeyRetrieval=true&serverTimezone=UTC
-```
+## 10. Overrides
+
+### 10a. Remote connections (`_URI`, `_ISSUED_HOST` already in §2-4, `_TLS`/`_SSLMODE`)
+
+| Variable | Default | Where Used | Description |
+|---|---|---|---|
+| `OVERRIDE_MONGODB_URI` | `mongodb://root:root@127.0.0.1:9812/...` | `spring.mongodb.uri` | Manager → Mongo root link. Only set for Atlas/remote. |
+| `OVERRIDE_POSTGRES_URI` | `jdbc:postgresql://127.0.0.1:9813/postgres?...` | `app.postgres.uri` | Manager → Postgres root link. Only for remote. |
+| `OVERRIDE_MYSQL_URI` | `jdbc:mysql://127.0.0.1:9816/mysql?...` | `app.mysql.uri` | Manager → MySQL root link. Only for remote. |
+| `OVERRIDE_MONGODB_TLS` | `false` | `app.mongo.tls` | Adds `&tls=true` to issued Mongo strings. |
+| `OVERRIDE_POSTGRES_SSLMODE` | `require` | `app.postgres.sslmode` | `disable` / `require` / `verify-full` in issued strings. |
+| `OVERRIDE_MYSQL_TLS` | `false` | `app.mysql.tls` | Adds `?sslMode=REQUIRED` to issued MySQL strings. |
+
+> `_TLS` vs `_SSLMODE` is intentional, not inconsistency: `_TLS` is a boolean toggle (Mongo/MySQL), `_SSLMODE` is an enum (Postgres only).
+
+### 10b. Tuning (`OVERRIDE_PGBOUNCER_*`)
+
+| Variable | Default | Where Used | Description |
+|---|---|---|---|
+| `OVERRIDE_PGBOUNCER_PORT` | `6432` | `app.pgbouncer.port` + `compose.postgres.yaml:pgbouncer.ports` | Loopback `127.0.0.1:6432`. Same Docker network as `postgres` (`postgres:5432` internally). |
+| `OVERRIDE_PGBOUNCER_POOL_MODE` | `transaction` | `pgbouncer.ini:pool_mode` | Locked to `transaction`. |
+| `OVERRIDE_PGBOUNCER_MAX_CLIENT_CONN` | `1000` | `pgbouncer.ini:max_client_conn` | Leave headroom for admin (`Hikari maxPool 5`). |
+| `OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE` | `25` | `pgbouncer.ini:default_pool_size` | Keep well below `max_connections` (100). |
+| `OVERRIDE_PGBOUNCER_ADMIN_PASSWORD` | `` (auto-gen) | `userlist.txt` | Never logged. Persisted to `data/pgbouncer/.pgbouncer-admin-pass`. |
+| `OVERRIDE_PGBOUNCER_STATS_PASSWORD` | `` (auto-gen) | `userlist.txt` | `stats_users` for `SHOW` only, cannot `RELOAD`. |
+
+*Privilege scoping:* `admin_users` (reload) ≠ `stats_users` (SHOW only).
