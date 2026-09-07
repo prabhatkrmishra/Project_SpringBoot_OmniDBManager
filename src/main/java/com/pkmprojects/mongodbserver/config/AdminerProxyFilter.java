@@ -50,7 +50,20 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
     private static final String PROXY_PREFIX = "/adminer";
     private static final Set<String> NON_FORWARDED_HEADERS = Set.of(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
-            "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length");
+            "te", "trailer", "transfer-encoding", "upgrade", "host", "content-length",
+            // A client-supplied X-Forwarded-Prefix can mutate Adminer's cookie
+            // paths (Adminer CVE-2026-16434 class). The nginx template never sets
+            // it and this filter rewrites paths itself, so nothing legitimate
+            // needs it upstream.
+            "x-forwarded-prefix");
+
+    /**
+     * True when a header must not cross the proxy boundary in either direction.
+     * Package-private so tests can pin the blocklist without a live upstream.
+     */
+    static boolean isNonForwardedHeader(String name) {
+        return name != null && NON_FORWARDED_HEADERS.contains(name.toLowerCase());
+    }
 
     /**
      * The only cookies ever forwarded to (or accepted from) Adminer. Verified
@@ -104,7 +117,7 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
         Map<String, List<String>> forwardHeaders = new LinkedHashMap<>();
         while (headerNames.hasMoreElements()) {
             String name = headerNames.nextElement();
-            if (NON_FORWARDED_HEADERS.contains(name.toLowerCase())) continue;
+            if (isNonForwardedHeader(name)) continue;
             if (name.equalsIgnoreCase("authorization") || name.equalsIgnoreCase("cookie")) continue;
             List<String> values = new ArrayList<>();
             request.getHeaders(name).asIterator().forEachRemaining(values::add);
@@ -184,7 +197,7 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
         response.setStatus(upstream.statusCode());
         upstream.headers().map().forEach((name, values) -> {
             String lower = name.toLowerCase();
-            if (NON_FORWARDED_HEADERS.contains(lower)) return;
+            if (isNonForwardedHeader(lower)) return;
             for (String value : values) {
                 if (lower.equals("location")) {
                     response.addHeader(name, rewriteLocation(value));

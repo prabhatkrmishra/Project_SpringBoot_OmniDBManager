@@ -14,7 +14,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Unit tests for {@link AdminerProxyFilter}: cookie scoping keeps the Adminer
  * session pair while the Spring session never leaks upstream, login tokens
- * parse from the real 6.0.1 markup, and an unreachable upstream still answers
+ * parse from the real 6.0.1 markup, spoofed forwarding headers never cross
+ * the proxy boundary, and an unreachable upstream still answers
  * 502 (single sign-on failure falls back instead of failing the request).
  */
 class AdminerProxyFilterTest {
@@ -109,6 +110,16 @@ class AdminerProxyFilterTest {
         assertThat(AdminerProxyFilter.isLoginPage(null, loginHtml.getBytes(java.nio.charset.StandardCharsets.UTF_8))).isFalse();
         assertThat(AdminerProxyFilter.isLoginPage("text/html", null)).isFalse();
         assertThat(AdminerProxyFilter.isLoginPage("text/html", new byte[65537])).isFalse();
+    }
+
+    @Test
+    void dropsSpoofedForwardedPrefixHeader() {
+        // Adminer honors X-Forwarded-Prefix for cookie paths (CVE-2026-16434
+        // class); a client-supplied value must never reach the upstream.
+        assertThat(AdminerProxyFilter.isNonForwardedHeader("X-Forwarded-Prefix")).isTrue();
+        assertThat(AdminerProxyFilter.isNonForwardedHeader("x-forwarded-prefix")).isTrue();
+        assertThat(AdminerProxyFilter.isNonForwardedHeader("X-Forwarded-For")).isFalse();
+        assertThat(AdminerProxyFilter.isNonForwardedHeader(null)).isFalse();
     }
 
     @Test
