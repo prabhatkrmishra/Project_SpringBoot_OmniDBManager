@@ -42,12 +42,14 @@ docker compose -f compose.mysql.yaml up -d
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
 | `POSTGRES_ENABLED` | `false` | **Yes** | `application.yml:app.postgres.enabled` | `true` = enable Postgres provisioning (+ PgBouncer sidecar, managed). |
-| `POSTGRES_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.postgres.issued-host` → `PostgresDatabaseEngine` | Host in **issued per-DB strings**. Empty = `127.0.0.1:9813`. Set when apps on other servers. Use `host:<custom-port>` form for a non-standard public port (pooled strings keep the same host with the port swapped to the pooler). |
+| `POSTGRES_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.postgres.issued-host` → `PostgresDatabaseEngine` | **DNS only, no `:port`** — host in issued strings. Empty = `127.0.0.1` (local dev, ports ignored). Set to `pg.example.com` when apps on other servers. Legacy `host:port` is stripped with a WARN — use the two port vars below. |
+| `POSTGRES_ISSUED_PORT` | `5432` | No | `application.yml:app.postgres.issued-port` → `PostgresDatabaseEngine.resolveDirectHost()` | Public direct port `A` → `127.0.0.1:9813` (migrations/admin). Non-standard prod e.g. `27431`. Ignored when `POSTGRES_ISSUED_HOST` blank. Must be `1-65535`. |
+| `PGBOUNCER_ISSUED_PORT` | `6432` | No | `application.yml:app.pgbouncer.issued-port` → `PostgresDatabaseEngine.resolvePooledHost()` | Public pooled port `B` → `127.0.0.1:6432` (app/workers). Non-standard prod e.g. `27432`. Ignored when host blank. Must be `1-65535`. |
 | `POSTGRES_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:POSTGRES_PASSWORD` + `PostgresConfig` | **Must change.** Superuser for DDL. |
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:pgbouncer-init` | **Must change.** Pooler admin (no host folder, static wildcard). |
 | `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | **Yes if enabled** | same | Monitor `stats_users` for `SHOW` only. |
 
-> Pooling is per-database at provision time (**Route via PgBouncer** checkbox, stored as `pooled`). No toggle after — pooled strings use `:6432`, direct stay `:9813`.
+> Pooling is per-database at provision time (**Route via PgBouncer** checkbox, stored as `pooled`). No toggle after — pooled strings use `PGBOUNCER_ISSUED_PORT` (default `6432`), direct use `POSTGRES_ISSUED_PORT` (default `5432`). When `POSTGRES_ISSUED_HOST` blank, both resolve to `127.0.0.1:9813` / `127.0.0.1:6432` for local dev.
 
 ## 4. MySQL Engine
 

@@ -11,6 +11,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "app.pgbouncer")
 public record PgbouncerProperties(
         int port,
+        int issuedPort,
         String poolMode,
         int maxClientConn,
         int defaultPoolSize,

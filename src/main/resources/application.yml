@@ -89,7 +89,10 @@ app:
   postgres:
     enabled: ${POSTGRES_ENABLED:false}
     uri: ${OVERRIDE_POSTGRES_URI:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}
+    # DNS-only host for issued strings (no :port). Two public ports below drive the two TCP links:
+    # direct A -> 127.0.0.1:9813 (migrations/admin), pooled B -> 127.0.0.1:6432 (app/workers via PgBouncer).
     issued-host: ${POSTGRES_ISSUED_HOST:}
+    issued-port: ${POSTGRES_ISSUED_PORT:5432}
     sslmode: ${OVERRIDE_POSTGRES_SSLMODE:require}
   mysql:
     enabled: ${MYSQL_ENABLED:false}
@@ -102,6 +105,7 @@ app:
     base-url: http://127.0.0.1:9817
   pgbouncer:
     port: ${OVERRIDE_PGBOUNCER_PORT:6432}
+    issued-port: ${PGBOUNCER_ISSUED_PORT:6432}
     pool-mode: ${OVERRIDE_PGBOUNCER_POOL_MODE:transaction}
     max-client-conn: ${OVERRIDE_PGBOUNCER_MAX_CLIENT_CONN:1000}
     default-pool-size: ${OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE:25}
