@@ -281,7 +281,11 @@ public class ProvisioningService {
             }
             managedDatabaseStore.save(metadata);
             audit(AuditEvent.PROVISION, dbName, engineType, userName, now);
-            log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, userName);
+            if (engineType == DatabaseEngineType.POSTGRES && metadata.isPooled()) {
+                log.info("Provisioned {} database '{}' with user '{}' (pooled via PgBouncer)", engineType, dbName, userName);
+            } else {
+                log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, userName);
+            }
 
             return toInfo(dbName, metadata, collectionCount(dbName, engineType), null, 0L)
                     .withConnectionString(buildConnectionStringFor(engineType, engine, userName, password, dbName, metadata.isPooled()));
