@@ -97,6 +97,21 @@ class AdminerProxyFilterTest {
     }
 
     @Test
+    void detectsLoginPageOnlyForHtmlLoginMarkup() {
+        String loginHtml = "<form><input name=\"auth[username]\">"
+                + "<input type='hidden' name='token' value='1:2'></form>";
+        assertThat(AdminerProxyFilter.isLoginPage("text/html; charset=utf-8",
+                loginHtml.getBytes(java.nio.charset.StandardCharsets.UTF_8))).isTrue();
+        assertThat(AdminerProxyFilter.isLoginPage("application/json",
+                loginHtml.getBytes(java.nio.charset.StandardCharsets.UTF_8))).isFalse();
+        assertThat(AdminerProxyFilter.isLoginPage("text/html",
+                "<html>databases here</html>".getBytes(java.nio.charset.StandardCharsets.UTF_8))).isFalse();
+        assertThat(AdminerProxyFilter.isLoginPage(null, loginHtml.getBytes(java.nio.charset.StandardCharsets.UTF_8))).isFalse();
+        assertThat(AdminerProxyFilter.isLoginPage("text/html", null)).isFalse();
+        assertThat(AdminerProxyFilter.isLoginPage("text/html", new byte[65537])).isFalse();
+    }
+
+    @Test
     void unreachableUpstreamStillAnswers502() throws Exception {
         AdminerProxyFilter unreachable =
                 new AdminerProxyFilter("http://127.0.0.1:9", "root", "secret",

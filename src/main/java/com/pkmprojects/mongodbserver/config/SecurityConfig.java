@@ -59,6 +59,7 @@ public class SecurityConfig {
                 .logout(logout -> logout
                         .logoutUrl("/logout")
                         .logoutSuccessUrl("/login?logout")
+                        .deleteCookies("adminer_sid", "adminer_key")
                         .permitAll())
                 .headers(headers -> headers
                         .contentSecurityPolicy(csp -> csp

@@ -99,72 +99,108 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
         if (request.getQueryString() != null) target += "?" + request.getQueryString();
 
         byte[] body = request.getInputStream().readAllBytes();
-        HttpRequest.Builder builder;
-        try {
-            builder = HttpRequest.newBuilder(URI.create(target))
-                    .timeout(Duration.ofSeconds(60));
-        } catch (IllegalArgumentException e) {
-            log.debug("Cannot proxy request with unparseable target '{}'", target);
-            writeError(response, HttpServletResponse.SC_BAD_REQUEST, "The requested path cannot be proxied to Adminer");
-            return;
-        }
 
         var headerNames = request.getHeaderNames();
+        Map<String, List<String>> forwardHeaders = new LinkedHashMap<>();
         while (headerNames.hasMoreElements()) {
             String name = headerNames.nextElement();
             if (NON_FORWARDED_HEADERS.contains(name.toLowerCase())) continue;
             if (name.equalsIgnoreCase("authorization") || name.equalsIgnoreCase("cookie")) continue;
-            request.getHeaders(name).asIterator().forEachRemaining(value -> builder.header(name, value));
+            List<String> values = new ArrayList<>();
+            request.getHeaders(name).asIterator().forEachRemaining(values::add);
+            forwardHeaders.put(name, values);
         }
         String outboundCookie = adminerCookieHeader(request.getCookies());
-        if (outboundCookie == null && "GET".equalsIgnoreCase(request.getMethod())
-                && (path.equals("/") || path.isEmpty())) {
+        boolean hadRequestCookies = outboundCookie != null;
+        boolean isLoginPageLoad = "GET".equalsIgnoreCase(request.getMethod())
+                && (path.equals("/") || path.isEmpty());
+        if (outboundCookie == null && isLoginPageLoad) {
             List<String> ssoCookies = tryServerSideLogin();
             if (ssoCookies != null && !ssoCookies.isEmpty()) {
                 ssoCookies.forEach(value -> response.addHeader("Set-Cookie", value));
                 outboundCookie = cookieHeaderFromSetCookies(ssoCookies);
             }
         }
-        if (outboundCookie != null) {
-            builder.header("Cookie", outboundCookie);
-        }
-        builder.method(request.getMethod(), body.length == 0
-                ? HttpRequest.BodyPublishers.noBody()
-                : HttpRequest.BodyPublishers.ofByteArray(body));
 
-        try {
-            HttpResponse<byte[]> upstream = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
-            response.setStatus(upstream.statusCode());
-            upstream.headers().map().forEach((name, values) -> {
-                String lower = name.toLowerCase();
-                if (NON_FORWARDED_HEADERS.contains(lower)) return;
-                for (String value : values) {
-                    if (lower.equals("location")) {
-                        response.addHeader(name, rewriteLocation(value));
-                    } else if (lower.equals("set-cookie")) {
-                        String rewritten = rewriteSetCookie(value);
-                        if (rewritten != null) {
-                            response.addHeader(name, rewritten);
-                        }
-                    } else {
-                        response.addHeader(name, value);
-                    }
+        boolean retried = false;
+        while (true) {
+            HttpRequest.Builder attempt;
+            try {
+                attempt = HttpRequest.newBuilder(URI.create(target))
+                        .timeout(Duration.ofSeconds(60));
+            } catch (IllegalArgumentException e) {
+                log.debug("Cannot proxy request with unparseable target '{}'", target);
+                writeError(response, HttpServletResponse.SC_BAD_REQUEST, "The requested path cannot be proxied to Adminer");
+                return;
+            }
+            forwardHeaders.forEach((name, values) ->
+                    values.forEach(value -> attempt.header(name, value)));
+            if (outboundCookie != null) {
+                attempt.header("Cookie", outboundCookie);
+            }
+            attempt.method(request.getMethod(), body.length == 0
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : HttpRequest.BodyPublishers.ofByteArray(body));
+
+            HttpResponse<byte[]> upstream;
+            try {
+                upstream = http.send(attempt.build(), HttpResponse.BodyHandlers.ofByteArray());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Adminer proxy request was interrupted", e);
+                writeError(response, HttpServletResponse.SC_BAD_GATEWAY, "Adminer proxy request was interrupted");
+                return;
+            } catch (ConnectException e) {
+                log.warn("Adminer is not reachable at {}", targetBase, e);
+                writeError(response, HttpServletResponse.SC_BAD_GATEWAY, "Adminer is not reachable. Is the container running?");
+                return;
+            } catch (IOException e) {
+                log.error("Adminer proxy request to {} failed", target, e);
+                writeError(response, HttpServletResponse.SC_BAD_GATEWAY, "Adminer proxy request failed");
+                return;
+            }
+
+            // Upstream session expired mid-use: it answers the login page even
+            // though the browser sent cookies. Refresh once transparently (GET
+            // only — never auto-replay a POST) instead of stranding the user
+            // on a login form for credentials they were never given.
+            if (!retried && hadRequestCookies && isLoginPageLoad
+                    && upstream.statusCode() == 200
+                    && isLoginPage(upstream.headers().firstValue("content-type").orElse(null), upstream.body())) {
+                List<String> fresh = tryServerSideLogin();
+                if (fresh != null && !fresh.isEmpty()) {
+                    fresh.forEach(value -> response.addHeader("Set-Cookie", value));
+                    outboundCookie = cookieHeaderFromSetCookies(fresh);
+                    retried = true;
+                    continue;
                 }
-            });
-            byte[] upstreamBody = upstream.body();
-            response.setContentLength(upstreamBody.length);
-            response.getOutputStream().write(upstreamBody);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Adminer proxy request was interrupted", e);
-            writeError(response, HttpServletResponse.SC_BAD_GATEWAY, "Adminer proxy request was interrupted");
-        } catch (ConnectException e) {
-            log.warn("Adminer is not reachable at {}", targetBase, e);
-            writeError(response, HttpServletResponse.SC_BAD_GATEWAY, "Adminer is not reachable. Is the container running?");
-        } catch (IOException e) {
-            log.error("Adminer proxy request to {} failed", target, e);
-            writeError(response, HttpServletResponse.SC_BAD_GATEWAY, "Adminer proxy request failed");
+            }
+            writeUpstreamResponse(response, upstream);
+            return;
         }
+    }
+
+    private void writeUpstreamResponse(HttpServletResponse response, HttpResponse<byte[]> upstream) throws IOException {
+        response.setStatus(upstream.statusCode());
+        upstream.headers().map().forEach((name, values) -> {
+            String lower = name.toLowerCase();
+            if (NON_FORWARDED_HEADERS.contains(lower)) return;
+            for (String value : values) {
+                if (lower.equals("location")) {
+                    response.addHeader(name, rewriteLocation(value));
+                } else if (lower.equals("set-cookie")) {
+                    String rewritten = rewriteSetCookie(value);
+                    if (rewritten != null) {
+                        response.addHeader(name, rewritten);
+                    }
+                } else {
+                    response.addHeader(name, value);
+                }
+            }
+        });
+        byte[] upstreamBody = upstream.body();
+        response.setContentLength(upstreamBody.length);
+        response.getOutputStream().write(upstreamBody);
     }
 
     /**
@@ -310,6 +346,18 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
         if (html == null || html.isBlank()) return null;
         Matcher matcher = TOKEN_PATTERN.matcher(html);
         return matcher.find() ? matcher.group(1) : null;
+    }
+
+    /**
+     * Detects an Adminer login page in an upstream HTML response: the marker
+     * input plus a parseable token. The body scan is capped so export dumps
+     * never pay for it.
+     */
+    static boolean isLoginPage(String contentType, byte[] body) {
+        if (contentType == null || !contentType.toLowerCase().contains("text/html")) return false;
+        if (body == null || body.length == 0 || body.length > 65536) return false;
+        String html = new String(body, StandardCharsets.UTF_8);
+        return html.contains("auth[username]") && parseLoginToken(html) != null;
     }
 
     private static String encode(String value) {
