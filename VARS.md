@@ -47,6 +47,8 @@ docker compose -f compose.mysql.yaml up -d
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:pgbouncer-init` | **Must change.** Pooler admin (no host folder, static wildcard). |
 | `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | **Yes if enabled** | same | Monitor `stats_users` for `SHOW` only. |
 
+> Pooling is per-database at provision time (**Route via PgBouncer** checkbox, stored as `pooled`). No toggle after — pooled strings use `:6432`, direct stay `:9813`.
+
 ## 4. MySQL Engine
 
 | Variable | Default | Required | Where Used | Description |
