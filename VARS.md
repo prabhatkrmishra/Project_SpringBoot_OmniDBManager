@@ -41,9 +41,11 @@ docker compose -f compose.mysql.yaml up -d
 
 | Variable | Default | Required | Where Used | Description |
 |---|---|---|---|---|
-| `POSTGRES_ENABLED` | `false` | **Yes** | `application.yml:app.postgres.enabled` | `true` = enable Postgres provisioning. |
+| `POSTGRES_ENABLED` | `false` | **Yes** | `application.yml:app.postgres.enabled` | `true` = enable Postgres provisioning (+ PgBouncer sidecar, managed). |
 | `POSTGRES_ISSUED_HOST` | `` (empty) | **Yes in prod** | `application.yml:app.postgres.issued-host` → `PostgresDatabaseEngine` | Host in **issued per-DB strings**. Empty = `127.0.0.1:9813`. Set when apps on other servers. |
 | `POSTGRES_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:POSTGRES_PASSWORD` + `PostgresConfig` | **Must change.** Superuser for DDL. |
+| `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:pgbouncer-init` | **Must change.** Pooler admin (no host folder, static wildcard). |
+| `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | **Yes if enabled** | same | Monitor `stats_users` for `SHOW` only. |
 
 ## 4. MySQL Engine
 
@@ -108,7 +110,7 @@ MYSQL_ISSUED_HOST=mysql.example.com
 
 > `_TLS` vs `_SSLMODE` is intentional, not inconsistency: `_TLS` is a boolean toggle (Mongo/MySQL), `_SSLMODE` is an enum (Postgres only).
 
-### 10b. Tuning (`OVERRIDE_PGBOUNCER_*`)
+### 10b. Tuning (`OVERRIDE_PGBOUNCER_*` + pooler passwords)
 
 | Variable | Default | Where Used | Description |
 |---|---|---|---|
@@ -116,7 +118,7 @@ MYSQL_ISSUED_HOST=mysql.example.com
 | `OVERRIDE_PGBOUNCER_POOL_MODE` | `transaction` | `pgbouncer.ini:pool_mode` | Locked to `transaction`. |
 | `OVERRIDE_PGBOUNCER_MAX_CLIENT_CONN` | `1000` | `pgbouncer.ini:max_client_conn` | Leave headroom for admin (`Hikari maxPool 5`). |
 | `OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE` | `25` | `pgbouncer.ini:default_pool_size` | Keep well below `max_connections` (100). |
-| `OVERRIDE_PGBOUNCER_ADMIN_PASSWORD` | `` (auto-gen) | `userlist.txt` | Never logged. Persisted to `data/pgbouncer/.pgbouncer-admin-pass`. |
-| `OVERRIDE_PGBOUNCER_STATS_PASSWORD` | `` (auto-gen) | `userlist.txt` | `stats_users` for `SHOW` only, cannot `RELOAD`. |
+| `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | `compose.postgres.yaml:pgbouncer-init` + `app.pgbouncer.admin-password` | **Must change when Postgres enabled.** Never logged. |
+| `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | same | `stats_users` for `SHOW` only. |
 
 *Privilege scoping:* `admin_users` (reload) ≠ `stats_users` (SHOW only).

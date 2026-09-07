@@ -27,7 +27,7 @@ Most teams run MongoDB *and* PostgreSQL *and* MySQL. OmniDB Manager unifies them
 - **Backup & restore** — Mongo gzip'd canonical Extended JSON (`formatVersion:1`); Postgres & MySQL JDBC gzip'd JSON dumps (`formatVersion:1`, `tables`/`rows`/`columns`). Streaming download, replace-semantics restore with pre-validation.
 - **Encryption at rest** — `AES-256-GCM` (`ENC:v1:`) for stored per-database passwords (all engines). Key from `APP_ENCRYPTION_KEY` (base64 32B or 64 hex); plaintext fallback when blank (dev only).
 - **Hardening** — per-engine rate limit (`IP:engine`, 5/min, `trustXFF=false`), TLS (`sslmode=require` / `verify-full` + `application_name` for PG; `sslMode=REQUIRED` / `VERIFY_IDENTITY` for MySQL), `scram-sha-256` / `caching_sha2_password`, `PGDATA=/var/lib/postgresql/18/docker`, audit trail (`PROVISION/RESET_PASSWORD/DELETE/TABLE_CREATED/DROPPED/TRUNCATED/ROW_INSERTED/ROW_DELETED/BACKUP_CREATED/RESTORED/IMPORT`), Micrometer `provisioned.databases{engine}` gauge, `postgres` + `mysql` HealthIndicators.
-- **Optional PgBouncer pooling** — `PGBOUNCER_ENABLED=true` adds `pgbouncer:6432` on the same Docker network (`postgres:5432` internally, `127.0.0.1:6432` loopback). Per-DB database entries in `pgbouncer.ini` are regenerated on provision/reset/delete and `RELOAD`ed under `DatabaseLockRegistry` without dropping pools; per-DB users auth via `auth_query` (SCRAM) against `pg_shadow`, only `pgbouncer_admin`/`pgbouncer_stats` live in `userlist.txt` (`admin_users` vs `stats_users`). Issued Postgres strings swap to `PGBOUNCER_PUBLIC_HOST:6432` when enabled, otherwise direct to Postgres — Mongo/MySQL strings untouched.
+- **Optional PgBouncer pooling** — `pgbouncer:6432` runs with postgres (same network, `postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder). Per-DB opt-in on provision; pooled strings use `POSTGRES_ISSUED_HOST:6432`, direct stay `POSTGRES_ISSUED_HOST:9813` — Mongo/MySQL untouched.
 - **Brute-force protection** — login rate limit per IP+username (5/15m, 429 + `Retry-After`).
 - **Bundled UIs (optional)** — mongo-express at `/mongo-express`, Adminer at `/adminer` (Postgres), phpMyAdmin at `/phpmyadmin` (MySQL), all loopback-bound and behind app auth.
 
@@ -55,11 +55,12 @@ Most teams run MongoDB *and* PostgreSQL *and* MySQL. OmniDB Manager unifies them
 
    Edit `.env`:
    - `APP_ADMIN_USERNAME` / `APP_ADMIN_PASSWORD` — web UI login
-   - `MONGODB_ROOT_USERNAME` / `MONGODB_ROOT_PASSWORD` — Mongo root for provisioning
-   - `POSTGRES_ROOT_USER` / `POSTGRES_ROOT_PASSWORD` — Postgres superuser for DDL
-   - `MYSQL_ROOT_PASSWORD` — MySQL root for DDL
-   - `MONGO_EXPRESS_*` — mongo-express basic auth
    - `APP_ENCRYPTION_KEY` — `openssl rand -base64 32` (or `openssl rand -hex 32`)
+   - `MONGO_ENABLED` / `MONGODB_ISSUED_HOST` / `MONGODB_ROOT_PASSWORD` — Mongo (only if using Mongo)
+   - `POSTGRES_ENABLED` / `POSTGRES_ISSUED_HOST` / `POSTGRES_ROOT_PASSWORD` — Postgres (only if using Postgres)
+   - `MYSQL_ENABLED` / `MYSQL_ISSUED_HOST` / `MYSQL_ROOT_PASSWORD` — MySQL (only if using MySQL)
+
+   DB links default to the local managed instance — set `*_ISSUED_HOST` for any app not on this host, `OVERRIDE_*_URI` only for a remote database.
 
 2. Start backing services:
 
@@ -91,38 +92,21 @@ Postgres is opt-in:
 ```bash
 # .env
 POSTGRES_ENABLED=true
-POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres
-# optional public host for issued strings
-POSTGRES_PUBLIC_HOST=postgres.example.com
-POSTGRES_PUBLIC_TLS=false
-POSTGRES_PUBLIC_SSLMODE=require
+POSTGRES_ISSUED_HOST=pg.example.com
+POSTGRES_ROOT_PASSWORD=change-me-now
 ```
 
 Restart the app. Dashboard now shows Postgres tables; provision via **PostgreSQL → New Database**.
 
-#### Optional: enable PgBouncer for Postgres
+#### Pooling per database (PgBouncer, managed like pgvector)
 
-Pooling is generic — any Postgres DB provisioned through OmniDB can be pooled with zero per-DB code changes:
-
-```bash
-# .env
-PGBOUNCER_ENABLED=true
-PGBOUNCER_PORT=6432
-PGBOUNCER_POOL_MODE=transaction
-PGBOUNCER_MAX_CLIENT_CONN=1000
-PGBOUNCER_DEFAULT_POOL_SIZE=25
-PGBOUNCER_PUBLIC_HOST=pg.example.com  # optional, host in issued strings when pooled (mirrors POSTGRES_PUBLIC_HOST)
-# PGBOUNCER_ADMIN_PASSWORD / PGBOUNCER_STATS_PASSWORD auto-generated if blank (persisted under ./pgbouncer/.pgbouncer-*-pass)
-```
-
-Start with the profile-gated service (same network, `postgres:5432` internally, `127.0.0.1:6432` loopback by default):
+No flag — `pgbouncer:6432` runs with postgres (`postgres:5432` internally, `127.0.0.1:6432` loopback). Tick **Route via PgBouncer** on the provision form for that DB only:
 
 ```bash
-PGBOUNCER_ENABLED=true docker compose --profile pgbouncer -f compose.postgres.yaml up -d
-# or alongside the app: docker compose --profile pgbouncer up -d
+docker compose -f compose.postgres.yaml up -d
 ```
 
-Provisioning a Postgres DB now writes the DB to `pgbouncer.ini` and `RELOAD`s without dropping pools; per-DB users auth via `auth_query` against `pg_shadow` (SCRAM), only `pgbouncer_admin`/`pgbouncer_stats` live in `userlist.txt`. When enabled, the connection string shown on the detail page points at `PGBOUNCER_PUBLIC_HOST:6432` (or `127.0.0.1:6432` if no public host), otherwise it stays direct to Postgres — Mongo/MySQL strings are never affected. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** (`SHOW POOLS`/`SHOW STATS`, `healthy/degraded/unreachable` as a Postgres sub-section) and a `pgbouncer` entry in `/actuator/health`.
+Pooled strings use `POSTGRES_ISSUED_HOST:6432`, direct stay `POSTGRES_ISSUED_HOST:9813` — Mongo/MySQL untouched. Per-DB users auth via `auth_query` (SCRAM), only `pgbouncer_admin`/`stats` in `userlist.txt`. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** and a `pgbouncer` entry in `/actuator/health`.
 
 ### Enable MySQL
 
@@ -131,11 +115,8 @@ MySQL is opt-in (8.4 LTS):
 ```bash
 # .env
 MYSQL_ENABLED=true
-MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-# optional public host for issued strings
-MYSQL_PUBLIC_HOST=mysql.example.com
-MYSQL_PUBLIC_TLS=false
-MYSQL_PUBLIC_SSLMODE=REQUIRED
+MYSQL_ISSUED_HOST=mysql.example.com
+MYSQL_ROOT_PASSWORD=change-me-now
 ```
 
 Restart the app. Dashboard now shows MySQL tables; provision via **MySQL → New Database**. MySQL uses `caching_sha2_password` and `utf8mb4`/`utf8mb4_0900_ai_ci` by default.
@@ -210,17 +191,16 @@ App binds loopback-only; put nginx in front for HTTPS. Template at `deploy/nginx
 Same template shows exposing **MongoDB** via nginx `stream` (TCP) with TLS termination + per-IP `limit_conn`. Then:
 
 ```bash
-MONGODB_PUBLIC_HOST=your.domain.com
-MONGODB_PUBLIC_TLS=true
+MONGODB_ISSUED_HOST=your.domain.com
+OVERRIDE_MONGODB_TLS=true
 ```
 
 For Postgres TLS (enterprise):
 
 ```bash
-POSTGRES_PUBLIC_HOST=postgres.example.com
-POSTGRES_PUBLIC_TLS=true
-POSTGRES_PUBLIC_SSLMODE=verify-full
-POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=verify-full&sslrootcert=./certs/ca.crt
+POSTGRES_ISSUED_HOST=postgres.example.com
+OVERRIDE_POSTGRES_SSLMODE=verify-full
+OVERRIDE_POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=verify-full&sslrootcert=./certs/ca.crt
 ```
 
 Mount certs in `compose.postgres.yaml` (see commented `postgres` service) and set `pg_hba.conf: hostssl all all 0.0.0.0/0 scram-sha-256`. Issued strings then carry `sslmode=verify-full`.
@@ -261,10 +241,10 @@ OmniDB Manager is the **control plane** only: it provisions DBs, issues per-DB c
 
 ## Atlas / external MongoDB
 
-Set `MONGODB_URI` in `.env` to a deployment URI with root privileges:
+Set `OVERRIDE_MONGODB_URI` in `.env` to a deployment URI with root privileges:
 
 ```
-MONGODB_URI=mongodb+srv://root:root@cluster0.xxxxx.mongodb.net/?authSource=admin
+OVERRIDE_MONGODB_URI=mongodb+srv://root:root@cluster0.xxxxx.mongodb.net/?authSource=admin
 ```
 
 Run with `atlas` profile:
@@ -282,30 +262,17 @@ Issued connection strings derive from the active `spring.mongodb.uri` host.
 | Variable | Default | Description |
 |---|---|---|
 | `APP_ADMIN_USERNAME` / `APP_ADMIN_PASSWORD` | `admin` | Web UI admin login |
-| `MONGODB_ROOT_USERNAME` / `MONGODB_ROOT_PASSWORD` | `root` | Mongo root for provisioning |
-| `MONGODB_URI` | `mongodb://<root>:<pass>@127.0.0.1:9812/?authSource=admin&maxPoolSize=10` | Override for Atlas/external |
-| `MONGODB_PUBLIC_HOST` | *(derived)* | Host in issued Mongo strings (domain behind proxy) |
-| `MONGODB_PUBLIC_TLS` | `false` | Append `&tls=true` to Mongo strings |
-| `POSTGRES_ENABLED` | `false` | Enable PostgreSQL engine |
-| `POSTGRES_ROOT_USER` / `POSTGRES_ROOT_PASSWORD` | `root` | Postgres superuser for DDL |
-| `POSTGRES_URI` | `jdbc:postgresql://127.0.0.1:9813/postgres` | JDBC URL for admin DataSource |
-| `POSTGRES_PUBLIC_HOST` | *(derived)* | Host in issued Postgres strings |
-| `POSTGRES_PUBLIC_TLS` / `POSTGRES_PUBLIC_SSLMODE` | `false` / `require` | TLS for Postgres strings (`require` or `verify-full`) |
-| `PGBOUNCER_ENABLED` | `false` | Enable PgBouncer pooling for Postgres (generic, any provisioned DB) |
-| `PGBOUNCER_PORT` | `6432` | PgBouncer listen port (`127.0.0.1:6432` loopback) |
-| `PGBOUNCER_POOL_MODE` | `transaction` | Pool mode (`transaction` locked) |
-| `PGBOUNCER_MAX_CLIENT_CONN` / `PGBOUNCER_DEFAULT_POOL_SIZE` | `1000` / `25` | Pool sizing (leave headroom for `PG max_connections`) |
-| `PGBOUNCER_PUBLIC_HOST` | *(derived)* | Host in pooled Postgres strings (mirrors `POSTGRES_PUBLIC_HOST`, port swapped to `PGBOUNCER_PORT`) |
-| `PGBOUNCER_ADMIN_PASSWORD` / `PGBOUNCER_STATS_PASSWORD` | *(auto-gen)* | `admin_users` vs `stats_users` — only `stats_users` used by monitor (`SHOW`), auto-persisted if blank |
-| `MYSQL_ENABLED` | `false` | Enable MySQL engine |
-| `MYSQL_ROOT_PASSWORD` | `root` | MySQL root for DDL |
-| `MYSQL_URI` | `jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC` | JDBC URL for admin DataSource |
-| `MYSQL_PUBLIC_HOST` | *(derived)* | Host in issued MySQL strings |
-| `MYSQL_PUBLIC_TLS` / `MYSQL_PUBLIC_SSLMODE` | `false` / `REQUIRED` | TLS for MySQL strings (`REQUIRED` or `VERIFY_IDENTITY`) |
-| `PHPMYADMIN_BASE_URL` | `http://127.0.0.1:9817` | phpMyAdmin base URL |
-| `ADMINER_BASE_URL` | `http://127.0.0.1:9815` | Adminer base URL |
-| `MONGO_EXPRESS_BASE_URL` | `http://127.0.0.1:9814/mongo-express` | mongo-express base URL |
 | `APP_ENCRYPTION_KEY` | *(empty = plaintext)* | Base64 32B or 64 hex for AES-256-GCM (`ENC:v1:`) |
+| `MONGO_ENABLED` | `false` | Enable MongoDB engine |
+| `MONGODB_ISSUED_HOST` | *(empty = 127.0.0.1)* | Host in issued Mongo strings (apps on other servers) |
+| `MONGODB_ROOT_PASSWORD` | `root` | Mongo root for provisioning |
+| `POSTGRES_ENABLED` | `false` | Enable PostgreSQL engine |
+| `POSTGRES_ISSUED_HOST` | *(empty = 127.0.0.1)* | Host in issued Postgres strings |
+| `POSTGRES_ROOT_PASSWORD` | `root` | Postgres superuser for DDL |
+| `PGBOUNCER_ADMIN_PASSWORD` / `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | Pooler `admin_users` vs `stats_users` (managed, always on with Postgres) |
+| `MYSQL_ENABLED` | `false` | Enable MySQL engine |
+| `MYSQL_ISSUED_HOST` | *(empty = 127.0.0.1)* | Host in issued MySQL strings |
+| `MYSQL_ROOT_PASSWORD` | `root` | MySQL root for DDL |
 | `SERVER_ADDRESS` | `127.0.0.1` | Bind address (`0.0.0.0` to expose) |
 | `RATE_LIMIT_TRUST_XFF` | `false` | Honor `X-Forwarded-For` for rate limiters (behind trusted proxy) |
 | `app.login-rate-limit.*` | `5 / 15m` | Login brute-force window |
@@ -321,9 +288,8 @@ Controller  →  Service  →  Repository (Mongo Java driver / JdbcTemplate)
      └──── Thymeleaf views (server-rendered, th:text only)
 ```
 
-- `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit, `EncryptionService` `ENC:v1:` for all engines; Postgres hooks `PostgresPgbouncerService` to regenerate `pgbouncer.ini` + `RELOAD`).
-- `DatabaseEngine` — `MongoDatabaseEngine` (wraps `MongoDatabaseRepository`) + `PostgresDatabaseEngine` (wraps `PostgresDatabaseRepository` via `JdbcTemplate`, no `@Transactional` — `CREATE/DROP DATABASE` cannot run in a transaction; branches connection string to `PGBOUNCER_PUBLIC_HOST:6432` when `PGBOUNCER_ENABLED=true` else direct) + `MysqlDatabaseEngine` (wraps `MysqlDatabaseRepository`, backtick quoting, `caching_sha2_password`, `utf8mb4`).
-- `PostgresPgbouncerService` — regenerates `pgbouncer/pgbouncer.ini` (`*` fallback + per-DB `host=postgres dbname=...`) and `userlist.txt` (`admin_users`/`stats_users` only, per-DB users via `auth_query` SCRAM) on provision/reset/delete, `RELOAD` without dropping pools.
+- `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit, `EncryptionService` `ENC:v1:` for all engines; Postgres `pooled` flag per DB for PgBouncer).
+- `DatabaseEngine` — `MongoDatabaseEngine` + `PostgresDatabaseEngine` (via `JdbcTemplate`, no `@Transactional`; `buildPooledConnectionString` for pooled DBs via `POSTGRES_ISSUED_HOST:6432`) + `MysqlDatabaseEngine`.
 - `PostgresDatabaseRepository` — `CREATE DATABASE "db" OWNER "user" TEMPLATE template0`, `CREATE ROLE ... WITH LOGIN PASSWORD`, `pg_terminate_backend`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `quoteIdentifier`, `executeInDatabase`, `listTables`/`listRowsWithCtid` (`ctid::text AS __pg_ctid`).
 - `MysqlDatabaseRepository` — ``CREATE DATABASE `db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci``, ``CREATE USER 'u'@'%' IDENTIFIED BY ?`` + `GRANT ... ON db.*`, `information_schema` sizes/tables/columns, `quoteIdentifier` backticks, `getPrimaryKeyColumn` single-PK guard.
 - `ExplorationService` / `PostgresExplorationService` / `MysqlExplorationService` — read-only browsing, bounded pagination (50/page), JSON export, PK-aware delete.
@@ -331,8 +297,8 @@ Controller  →  Service  →  Repository (Mongo Java driver / JdbcTemplate)
 - `ManagedDatabaseRepository` — Spring Data metadata in `mongodb_admin` (stores encrypted per-DB password, `id=engine:dbName`, `countByEngineType`).
 - `SecurityConfig` — form login, CSRF on, `hasRole(ADMIN)` for `/postgres/databases/**`, `/mysql/databases/**`, `/phpmyadmin/**` and writes.
 - `ProvisionRateLimitFilter` (`IP:engine` `MONGO/POSTGRES/MYSQL`, order `-9`) + `LoginRateLimitFilter` — in-process fixed-window.
-- `PostgresHealthIndicator` + `MysqlHealthIndicator` + `PgbouncerHealthIndicator` (conditional on `PGBOUNCER_ENABLED`) + `ProvisionedDatabaseMetrics` (`provisioned.databases{engine}` `MONGO/POSTGRES/MYSQL`).
-- `PostgresMonitorService` + `PgbouncerMonitorService` — Postgres monitor `SSE /monitor/stream?engine=postgres` now includes `pgbouncer{enabled,status,pools,stats}` facet (`SHOW POOLS`/`SHOW STATS` via `stats_users`, `healthy/degraded/unreachable` with sustained `clientsWaiting` + immediate `maxWait>0.5s`).
+- `PostgresHealthIndicator` + `MysqlHealthIndicator` + `PgbouncerHealthIndicator` (always on with Postgres) + `ProvisionedDatabaseMetrics` (`provisioned.databases{engine}` `MONGO/POSTGRES/MYSQL`).
+- `PostgresMonitorService` + `PgbouncerMonitorService` — Postgres monitor `SSE /monitor/stream?engine=postgres` includes `pgbouncer{enabled,status,pools,stats}` facet (`SHOW POOLS`/`SHOW STATS` via `stats_users`).
 - `EncryptionService` / `EncryptionProperties` — AES-256-GCM `ENC:v1:` (all engines).
 - `MongoExpressProxyFilter` / `AdminerProxyFilter` / `PhpMyAdminProxyFilter` — reverse-proxy bundled UIs behind app auth.
 
@@ -342,8 +308,8 @@ Naming is validated per-engine; system databases are protected.
 
 - **DDL** — `CREATE/DROP DATABASE` runs outside transactions (auto-commit `JdbcTemplate`). `CREATE DATABASE "db" OWNER "user" TEMPLATE template0 ENCODING 'UTF8'`; `CREATE ROLE "user" WITH LOGIN PASSWORD '...'` (`scram-sha-256`); `GRANT CONNECT` + schema grants.
 - **Table/row CRUD** — `CREATE TABLE ... (col TEXT)`, `DROP TABLE IF EXISTS ... CASCADE`, `TRUNCATE ... CASCADE`, `INSERT` dynamic, `SELECT *, ctid::text AS __pg_ctid LIMIT ? OFFSET ?`, `DELETE ... WHERE ctid = ?::tid`. Columns lowercased, `distinct()`, reserved names blocked (`__pg_ctid/__ctid/ctid/__new_col/__new_val/_csrf`).
-- **Connection strings** — built from `app.postgres.public-host` or parsed `spring.datasource` host, `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb` (or `verify-full`). When `PGBOUNCER_ENABLED=true`, strings instead point at `PGBOUNCER_PUBLIC_HOST:6432` (or `POSTGRES_PUBLIC_HOST` with port swapped) — same `?sslmode`/`application_name` suffix, only host/port changes; the swap is Postgres-only, Mongo/MySQL strings are untouched.
-- **PgBouncer** — optional `pgbouncer/pgbouncer:1.23.1` on the same Docker network (`postgres:5432` internally via service name, `127.0.0.1:6432` loopback externally, profile-gated `docker compose --profile pgbouncer`). Ini `pool_mode=transaction`, `max_client_conn=1000`, `default_pool_size=25`; file `pgbouncer.ini` per-DB entries + `userlist.txt` (`admin_users`/`stats_users` only) regenerated under `DatabaseLockRegistry` and `RELOAD`ed. Monitor facet `pgbouncer{enabled,status,pools,stats}` piggybacks on `PostgresMonitorService` SSE and `PgbouncerHealthIndicator`; `SHOW` via `stats_users`, `RELOAD` via `admin_users` only.
+- **Connection strings** — built from `app.postgres.issued-host` or `127.0.0.1:9813`, `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb`. Pooled DBs use `POSTGRES_ISSUED_HOST:6432` — Postgres-only, Mongo/MySQL untouched.
+- **PgBouncer** — `pgbouncer/pgbouncer:1.23.1` same Docker network (`postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder, static wildcard `*`). Per-DB opt-in on provision; `SHOW` via `stats_users`.
 
 ## MySQL specifics
 
@@ -390,9 +356,8 @@ CI: `.github/workflows/maven.yml` — `mvn -B clean package -DargLine=-Xmx1024m`
 ```
 compose.yaml                      # orchestrator (include: mongo + postgres + mysql)
 compose.mongo.yaml                # MongoDB 8 + mongo-express (standalone: -f compose.mongo.yaml)
-compose.postgres.yaml             # PostgreSQL 18.6 + Adminer + optional PgBouncer (profile: pgbouncer, -f compose.postgres.yaml)
+compose.postgres.yaml             # PostgreSQL 18.6 + Adminer + PgBouncer (always on with Postgres)
 compose.mysql.yaml                # MySQL 8.4 + phpMyAdmin (standalone: -f compose.mysql.yaml)
-pgbouncer/pgbouncer.ini.example + userlist.txt.example  # committed templates; generated files are gitignored
 .env / .env.example               # credentials (gitignored)
 src/main/java/com/pkmprojects/mongodbserver
   MongodbserverApplication.java   # @SpringBootApplication (excludes DataSourceAutoConfiguration when PG/MySQL disabled)
@@ -403,7 +368,7 @@ src/main/java/com/pkmprojects/mongodbserver
   model/                          # AuditEvent, ManagedDatabase (id=engine:dbName, encrypted password), DatabaseEngineType
   repository/                     # MongoDatabaseRepository, PostgresDatabaseRepository, MysqlDatabaseRepository, ManagedDatabaseRepository, AuditLogRepository
   security/                       # Password generator
-  service/                        # Provisioning, Exploration, PostgresExploration, MysqlExploration, Backup, Statistics, Monitor (+ PgbouncerMonitor), Encryption, DatabaseNameValidator, PostgresPgbouncerService
+  service/                        # Provisioning, Exploration, PostgresExploration, MysqlExploration, Backup, Statistics, Monitor (+ PgbouncerMonitor), Encryption, DatabaseNameValidator
   util/                           # Json helpers
 src/main/resources
   application.yml                 # defaults (spring.mongodb.*, app.postgres.*, app.pgbouncer.*, app.mysql.*, rate-limit, management)

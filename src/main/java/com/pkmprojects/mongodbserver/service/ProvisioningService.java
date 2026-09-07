@@ -277,7 +277,7 @@ public class ProvisioningService {
             ManagedDatabase metadata = new ManagedDatabase(dbName, engineType, userName, roles, now, now, null);
             metadata.setStoredPassword(encryptPassword(password));
             if (engineType == DatabaseEngineType.POSTGRES) {
-                metadata.setPooled(form.pooled());
+                metadata.setPooled(form.isPooled());
             }
             managedDatabaseStore.save(metadata);
             audit(AuditEvent.PROVISION, dbName, engineType, userName, now);
@@ -342,12 +342,13 @@ public class ProvisioningService {
             }
             return;
         }
-        // Not provisioned: try Mongo then Postgres then MySQL
-        if (mongoEngine.isPresent() && mongoEngine.get().databaseExists(dbName)) {
+        // Not provisioned: try Mongo then Postgres then MySQL (best-effort probes —
+        // a down engine counts as "not exists", never fails the delete)
+        if (mongoEngine.isPresent() && safeDatabaseExists(mongoEngine.get(), dbName)) {
             delete(DatabaseEngineType.MONGO, dbName);
-        } else if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) {
+        } else if (postgresEngine.isPresent() && safeDatabaseExists(postgresEngine.get(), dbName)) {
             delete(DatabaseEngineType.POSTGRES, dbName);
-        } else if (mysqlEngine.isPresent() && mysqlEngine.get().databaseExists(dbName)) {
+        } else if (mysqlEngine.isPresent() && safeDatabaseExists(mysqlEngine.get(), dbName)) {
             delete(DatabaseEngineType.MYSQL, dbName);
         } else {
             // Still try Mongo delete for idempotency
@@ -539,12 +540,12 @@ public class ProvisioningService {
     }
 
     public DatabaseInfo getDatabase(String dbName) {
-        // Try Mongo first, then Postgres, then MySQL
+        // Try Mongo first, then Postgres, then MySQL (down engine = not exists)
         ManagedDatabase md = managedDatabaseStore.findByDbName(dbName).orElse(null);
         if (md != null) return getDatabase(md.getEngineType(), dbName);
-        if (mongoEngine.isPresent() && mongoEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.MONGO, dbName);
-        if (postgresEngine.isPresent() && postgresEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.POSTGRES, dbName);
-        if (mysqlEngine.isPresent() && mysqlEngine.get().databaseExists(dbName)) return getDatabase(DatabaseEngineType.MYSQL, dbName);
+        if (mongoEngine.isPresent() && safeDatabaseExists(mongoEngine.get(), dbName)) return getDatabase(DatabaseEngineType.MONGO, dbName);
+        if (postgresEngine.isPresent() && safeDatabaseExists(postgresEngine.get(), dbName)) return getDatabase(DatabaseEngineType.POSTGRES, dbName);
+        if (mysqlEngine.isPresent() && safeDatabaseExists(mysqlEngine.get(), dbName)) return getDatabase(DatabaseEngineType.MYSQL, dbName);
         throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist");
     }
 
@@ -567,6 +568,15 @@ public class ProvisioningService {
 
     String resolveConnectionHost() {
         return mongoEngine.map(MongoDatabaseEngine::resolveConnectionHost).orElse("127.0.0.1:9812");
+    }
+
+    private boolean safeDatabaseExists(DatabaseEngine engine, String dbName) {
+        try {
+            return engine.databaseExists(dbName);
+        } catch (Exception e) {
+            log.debug("Engine {} probe for '{}' failed (treating as not exists): {}", engine.type(), dbName, e.getMessage());
+            return false;
+        }
     }
 
     private void requireDatabase(String dbName, DatabaseEngineType engineType) {

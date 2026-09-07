@@ -23,19 +23,23 @@ public record CreateDatabaseForm(
         @Size(max = 128, message = "Password must be at most 128 characters")
         String password,
 
-        boolean pooled) {
+        Boolean pooled) {
 
     /**
      * Legacy 4-arg constructor defaults pooled=false for backward compat.
      */
     public CreateDatabaseForm(String dbName, DatabaseEngineType engineType, String userName, String password) {
-        this(dbName, engineType, userName, password, false);
+        this(dbName, engineType, userName, password, Boolean.FALSE);
     }
 
     /**
      * Legacy 3-arg constructor defaults to MONGO for backward compat in tests.
      */
     public CreateDatabaseForm(String dbName, String userName, String password) {
-        this(dbName, DatabaseEngineType.MONGO, userName, password, false);
+        this(dbName, DatabaseEngineType.MONGO, userName, password, Boolean.FALSE);
+    }
+
+    public boolean isPooled() {
+        return Boolean.TRUE.equals(pooled);
     }
 }

@@ -49,7 +49,7 @@ services:
     # Enterprise hardening: scram-sha-256 is PG18 default; explicit command keeps it
     # pinned even if image defaults change. TLS enabled with a CA-signed server cert
     # (certs/ dir on host, chowned to UID 999 so the read-only container can read them).
-    # Public connection strings carry sslmode=require (POSTGRES_PUBLIC_TLS=true).
+    # Public connection strings carry sslmode=require (OVERRIDE_POSTGRES_SSLMODE=require).
     command: ["postgres",
       "-c", "password_encryption=scram-sha-256",
       "-c", "ssl=on",

@@ -47,6 +47,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest
 @TestPropertySource(properties = {
         "app.mongo.enabled=true",
+        "app.postgres.enabled=false",
+        "app.mysql.enabled=false",
         "app.admin.username=admin",
         "app.admin.password=admin"
 })
