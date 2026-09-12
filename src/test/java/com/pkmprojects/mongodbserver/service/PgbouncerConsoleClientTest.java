@@ -125,9 +125,8 @@ class PgbouncerConsoleClientTest {
                 int rlen = in.readInt();
                 byte[] rbody = new byte[rlen - 4];
                 in.readFully(rbody);
-                int rn = ((rbody[0] & 0xFF) << 24) | ((rbody[1] & 0xFF) << 16)
-                        | ((rbody[2] & 0xFF) << 8) | (rbody[3] & 0xFF);
-                String clientFinal = new String(rbody, 4, rn, StandardCharsets.UTF_8);
+                // SASLResponse has no inner length — the rest IS the message.
+                String clientFinal = new String(rbody, 0, rbody.length, StandardCharsets.UTF_8);
                 // verify proof like a server would
                 String proof = after(clientFinal, ",p=");
                 String bare = clientFirst.substring("n,,".length());

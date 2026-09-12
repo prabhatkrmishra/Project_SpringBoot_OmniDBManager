@@ -295,10 +295,13 @@ public final class PgbouncerConsoleClient implements AutoCloseable {
 
         String serverFirst = readSaslContinue();
         ScramState state = ScramState.begin(password, clientFirstBare, serverFirst);
+        // SASLResponse carries the bytes bare — unlike SASLInitialResponse
+        // there is NO inner Int32 length here (the pooler consumes the rest
+        // of the message; a stray length prefix breaks parsing with
+        // 'attribute "c" expected' — bitten live).
         byte[] finalMsg = ("c=biws,r=" + state.combinedNonce + ",p=" + state.clientProofB64()).getBytes(StandardCharsets.UTF_8);
         out.writeByte('p');
-        out.writeInt(4 + 4 + finalMsg.length);
-        out.writeInt(finalMsg.length);
+        out.writeInt(4 + finalMsg.length);
         out.write(finalMsg);
         out.flush();
 
