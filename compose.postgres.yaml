@@ -173,14 +173,13 @@ services:
         # Avoid double-quote/backslash in these passwords or the line malforms
         # and logins fail closed (loud, not silent).
         authline() { u="$$1"; p="$$2"; printf '"%s" "%s"\n' "$$u" "$$p"; }
+        # NOTE: auth_query value must not contain spaces — the [databases] line
+        # is whitespace-tokenized (key=value per token), so spaces yield
+        # "syntax error in connection string" + "no such user" for every pooled
+        # login. SELECT*FROM lexes identically in PostgreSQL. (Comment kept out
+        # of the heredoc below: an unquoted $1 in there would trip set -u.)
         cat > /etc/pgbouncer/pgbouncer.ini <<INI
         [databases]
-        # NOTE: auth_query value must not contain spaces — the [databases] line is
-        # whitespace-tokenized (key=value per token), so spaces yield
-        # "syntax error in connection string" + "no such user" for every pooled
-        # login. SELECT*FROM lexes identically in PostgreSQL. $1 is PgBouncer's
-        # documented username placeholder (literal here — the \$$ escape keeps the
-        # shell heredoc from eating it).
         * = host=postgres port=5432 auth_user=$${AUTH_USER} auth_query=SELECT*FROM pgbouncer.user_lookup(\$$1)
         [pgbouncer]
         listen_port = 6432
