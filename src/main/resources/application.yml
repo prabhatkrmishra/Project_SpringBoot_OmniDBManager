@@ -108,9 +108,27 @@ app:
     issued-port: ${PGBOUNCER_ISSUED_PORT:6432}
     pool-mode: ${OVERRIDE_PGBOUNCER_POOL_MODE:transaction}
     max-client-conn: ${OVERRIDE_PGBOUNCER_MAX_CLIENT_CONN:1000}
-    default-pool-size: ${OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE:25}
+    # Conservative per-database defaults (§17): 50 DBs x 25 would exhaust a
+    # small PG (1250 backends). Budget: max_connections(100) - admin(5) -
+    # OmniDB(10) leaves ~85 for tenants; 10 pooled DBs x 5 = 50 fits.
+    default-pool-size: ${OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE:5}
+    reserve-pool-size: ${OVERRIDE_PGBOUNCER_RESERVE_POOL_SIZE:2}
+    reserve-pool-timeout: ${OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT:3}
+    max-db-connections: ${OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS:10}
     admin-password: ${PGBOUNCER_ADMIN_PASSWORD:change-me-now}
     stats-password: ${PGBOUNCER_STATS_PASSWORD:change-me-now}
+    # SCRAM credential the pooler uses as auth_user to verify per-DB logins
+    # via auth_query. Must match the pooler container's userlist (see
+    # compose.postgres.yaml pgbouncer-init) or every pooled login fails.
+    auth-password: ${PGBOUNCER_AUTH_PASSWORD:change-me-now}
+  # Single-port Database Proxy reservation (§3 target, config-only).
+  # Disabled until S-05 spike evidence + prod hostnames + :15432 cert + NSG
+  # single-port approval (S-06 gate). Two-port Nginx stays authoritative.
+  proxy:
+    enabled: ${DATABASE_PROXY_ENABLED:false}
+    port: ${DATABASE_PROXY_PORT:15432}
+    direct-host: ${DATABASE_PROXY_DIRECT_HOST:}
+    pooled-host: ${DATABASE_PROXY_POOLED_HOST:}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)

@@ -128,34 +128,71 @@ server {
 #   rotated - reset passwords to reissue TLS strings.
 # - mongod's own --maxConns guardrail still applies behind nginx.
 #
-# ── Custom public port (optional) ────────────────────────────────────────────
-# A non-standard public port quiets internet-wide scanners but is camouflage,
-# not a lock - anyone who finds it faces the same login. The real locks stay:
-# firewall allowlist (this port open ONLY to your app servers), TLS below, and
-# per-database credentials. Same shape works for Postgres/MySQL: point the
-# stream at 127.0.0.1:9813 (direct), 127.0.0.1:6432 (pooled) or 127.0.0.1:9816
-# and set the matching *_ISSUED_HOST to host:<custom-port> so issued strings
-# carry it (no new env var needed - any host:port is accepted as-is).
+# ── Postgres — two non-standard public TCP ports (direct A + pooled B) ───────
+# Postgres is exposed on TWO separate public ports, each TLS + IP allowlist.
+# DNS must be grey-cloud (DNS only) so raw TCP reaches your VPS, not Cloudflare HTTP proxy.
+#   A direct (migrations/admin, tighter allowlist) → 127.0.0.1:9813
+#   B pooled (app/workers) → 127.0.0.1:6432 → 127.0.0.1:9813 via PgBouncer
+# Non-standard port is camouflage only — the allowlist + TLS + per-DB SCRAM are the real locks.
+# Never log the real custom port — use <CUSTOM_PORT> placeholder in logs/docs.
+# Env: POSTGRES_ISSUED_HOST=pg.example.com (DNS only, no :port)
+#      POSTGRES_ISSUED_PORT=<NON_STD_1> e.g. 27431 (direct A)
+#      PGBOUNCER_ISSUED_PORT=<NON_STD_2> e.g. 27432 (pooled B)
+# pgvector stays inside the same Postgres — no extra port.
+#
+# Save as /etc/nginx/streams-enabled/postgres.conf (see DEPLOY.md §6):
+#
+# limit_conn_zone $binary_remote_addr zone=pg_direct_per_ip:10m;
+# limit_conn_zone $binary_remote_addr zone=pg_pooled_per_ip:10m;
 #
 # server {
-#     listen <custom-port> ssl;
-#     proxy_pass 127.0.0.1:9813;
-#
+#     # Direct A — DDL/migrations/break-glass (tighter allowlist)
+#     listen 27431 ssl;
 #     ssl_certificate     /etc/letsencrypt/live/pg.example.com/fullchain.pem;
 #     ssl_certificate_key /etc/letsencrypt/live/pg.example.com/privkey.pem;
-#
-#     # Per-IP guardrail, same idea as the Mongo example above.
-#     # limit_conn db_conn_per_ip 20;
+#     ssl_protocols TLSv1.2 TLSv1.3;
+#     ssl_prefer_server_ciphers on;
+#     proxy_pass 127.0.0.1:9813;
+#     proxy_timeout 1h;
+#     proxy_connect_timeout 10s;
+#     limit_conn pg_direct_per_ip 20;
+# }
+# server {
+#     # Pooled B — app/workers (only for DBs provisioned with Route via PgBouncer)
+#     listen 27432 ssl;
+#     ssl_certificate     /etc/letsencrypt/live/pg.example.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/pg.example.com/privkey.pem;
+#     ssl_protocols TLSv1.2 TLSv1.3;
+#     ssl_prefer_server_ciphers on;
+#     proxy_pass 127.0.0.1:6432;
+#     proxy_timeout 1h;
+#     proxy_connect_timeout 10s;
+#     limit_conn pg_pooled_per_ip 100;
 # }
 #
 # Validate and apply:
 #   sudo nginx -t && sudo systemctl reload nginx
-#   sudo ufw allow from <app-server-ip> to any port <custom-port> proto tcp
-# Cloud firewall (NSG / security group): same rule there — this port open ONLY
-# to your app servers, never 0.0.0.0/0. See DEPLOY.md "Custom Public DB Ports".
+#   sudo ufw allow from <MISSION_HELM_IP>/32 to any port 27431 proto tcp  # direct A — tighter
+#   sudo ufw allow from <APP_SERVER_IP>/32 to any port 27432 proto tcp    # pooled B — app/workers
+# Cloud firewall (NSG / security group): same rules there — each <NON_STD_*> allow ONLY
+# its IP (never 0.0.0.0/0), grey-cloud DNS. See DEPLOY.md §6 + "Custom Public DB Ports".
 #
 # Caveats:
 # - Some office networks block outbound ports except 80/443 - apps behind
 #   those cannot reach a custom port (that's the one case for SNI-routed 443).
 # - Cloudflare's orange cloud proxies HTTP only: keep DB hostnames on grey-cloud
 #   DNS (or Spectrum) or the TCP never arrives.
+#
+# ── Custom public port for Mongo/MySQL (optional) ────────────────────────────
+# Same shape as above but single port per engine: point the stream at
+# 127.0.0.1:9812 (Mongo) or 127.0.0.1:9816 (MySQL) and set the matching
+# *_ISSUED_HOST to host:<custom-port> so issued strings carry it
+# (no new env var needed - any host:port is accepted as-is for Mongo/MySQL).
+# Postgres always uses the two-port split above — never host:port in POSTGRES_ISSUED_HOST.
+#
+# server {
+#     listen <custom-port> ssl;
+#     proxy_pass 127.0.0.1:9812;  # or 127.0.0.1:9816 for MySQL
+#     ssl_certificate     /etc/letsencrypt/live/<host>/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/<host>/privkey.pem;
+# }

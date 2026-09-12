@@ -92,8 +92,13 @@ Postgres is opt-in:
 ```bash
 # .env
 POSTGRES_ENABLED=true
-POSTGRES_ISSUED_HOST=pg.example.com
+POSTGRES_ISSUED_HOST=pg.example.com          # DNS only, no :port
+POSTGRES_ISSUED_PORT=27431                   # public direct A -> 127.0.0.1:9813
+PGBOUNCER_ISSUED_PORT=27432                  # public pooled B -> 127.0.0.1:6432
 POSTGRES_ROOT_PASSWORD=change-me-now
+PGBOUNCER_ADMIN_PASSWORD=change-me-now
+PGBOUNCER_STATS_PASSWORD=change-me-now
+PGBOUNCER_AUTH_PASSWORD=change-me-now        # pooler auth_user credential
 ```
 
 Restart the app. Dashboard now shows Postgres tables; provision via **PostgreSQL → New Database**.
@@ -106,7 +111,7 @@ No flag — `pgbouncer:6432` runs with postgres (`postgres:5432` internally, `12
 docker compose -f compose.postgres.yaml up -d
 ```
 
-Pooled strings use `POSTGRES_ISSUED_HOST:6432`, direct stay `POSTGRES_ISSUED_HOST:9813` — Mongo/MySQL untouched. Per-DB users auth via `auth_query` (SCRAM), only `pgbouncer_admin`/`stats` in `userlist.txt`. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** and a `pgbouncer` entry in `/actuator/health`.
+Pooled strings use `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT` (e.g. `pg.example.com:27432`), direct use `POSTGRES_ISSUED_HOST` + `POSTGRES_ISSUED_PORT` (e.g. `pg.example.com:27431`) — blank host resolves to `127.0.0.1:6432` / `127.0.0.1:9813` for local dev. Mongo/MySQL untouched. Per-DB users auth via `auth_query` (`pgbouncer.user_lookup`, SCRAM) as least-privilege `pgbouncer_auth`; `userlist.txt` holds only `pgbouncer_admin`/`stats` (md5) plus the plain-text auth_user entry SCRAM requires. The detail page shows **pooled auth ok/missing** with a one-click repair for pre-existing pooled DBs. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** and a `pgbouncer` entry in `/actuator/health`.
 
 ### Enable MySQL
 
@@ -207,7 +212,7 @@ Mount certs in `compose.postgres.yaml` (see commented `postgres` service) and se
 
 ### Custom public port (optional)
 
-Any engine can be served on a non-standard public port instead of `27017`/`5432`/`3306`: add a matching `stream` server (`listen <custom-port> ssl` → `proxy_pass 127.0.0.1:9812|9813|6432-pooled|9816`), open that port **only to your app servers** in the firewall, and set `*_ISSUED_HOST` to `host:<custom-port>` — issued strings then carry it with no extra variable. The odd port only quiets scanners; the allowlist, TLS, and per-database credentials are the actual locks. See `deploy/nginx.conf.example`.
+MongoDB/MySQL can each be served on a non-standard public port instead of `27017`/`3306`: add a matching `stream` server (`listen <custom-port> ssl` → `proxy_pass 127.0.0.1:9812|9816`), open that port **only to your app servers** in the firewall, and set `*_ISSUED_HOST` to `host:<custom-port>` — issued strings then carry it with no extra variable. Postgres **always** uses its two-port split (`POSTGRES_ISSUED_HOST` DNS-only + `POSTGRES_ISSUED_PORT`/`PGBOUNCER_ISSUED_PORT`, see DEPLOY.md §6) — never `host:port` in `POSTGRES_ISSUED_HOST`. The odd port only quiets scanners; the allowlist, TLS, and per-database credentials are the actual locks. See `deploy/nginx.conf.example`.
 
 ## Using the provisioned database
 
@@ -236,8 +241,16 @@ jdbc:postgresql://127.0.0.1:9813/myapp?sslmode=require&ApplicationName=omnidb
 With `verify-full`:
 
 ```
-postgresql://myapp_user:MyStrongPass@postgres.example.com:5432/myapp?sslmode=verify-full&sslrootcert=/path/to/ca.crt&application_name=omnidb
+postgresql://myapp_user:***@postgres.example.com:5432/myapp?sslmode=verify-full&sslrootcert=/path/to/ca.crt&application_name=omnidb
 ```
+
+Pooled databases add a second string through PgBouncer (`PGBOUNCER_ISSUED_PORT`):
+
+```
+postgresql://myapp_user:***@pg.example.com:27432/myapp?sslmode=require&application_name=omnidb
+```
+
+Use pooled for app/workers, direct for DDL/migrations only.
 
 ### Direct connection — not a proxy
 
@@ -292,9 +305,9 @@ Controller  →  Service  →  Repository (Mongo Java driver / JdbcTemplate)
      └──── Thymeleaf views (server-rendered, th:text only)
 ```
 
-- `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit, `EncryptionService` `ENC:v1:` for all engines; Postgres `pooled` flag per DB for PgBouncer).
-- `DatabaseEngine` — `MongoDatabaseEngine` + `PostgresDatabaseEngine` (via `JdbcTemplate`, no `@Transactional`; `buildPooledConnectionString` for pooled DBs via `POSTGRES_ISSUED_HOST:6432`) + `MysqlDatabaseEngine`.
-- `PostgresDatabaseRepository` — `CREATE DATABASE "db" OWNER "user" TEMPLATE template0`, `CREATE ROLE ... WITH LOGIN PASSWORD`, `pg_terminate_backend`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `quoteIdentifier`, `executeInDatabase`, `listTables`/`listRowsWithCtid` (`ctid::text AS __pg_ctid`).
+- `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit, `EncryptionService` `ENC:v1:` for all engines; Postgres `pooled` flag per DB for PgBouncer, `repairPooledAuth` backfill for the `auth_query` lookup).
+- `DatabaseEngine` — `MongoDatabaseEngine` + `PostgresDatabaseEngine` (via `JdbcTemplate`, no `@Transactional`; `buildPooledConnectionString` for pooled DBs via `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT`, `installPooledAuth`/`isPooledAuthInstalled` for the pooler lookup) + `MysqlDatabaseEngine`.
+- `PostgresDatabaseRepository` — `CREATE DATABASE "db" OWNER "user" TEMPLATE template0`, `CREATE ROLE ... WITH LOGIN PASSWORD`, `pg_terminate_backend`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `quoteIdentifier`, `executeInDatabase`, `listTables`/`listRowsWithCtid` (`ctid::text AS __pg_ctid`); pooled-auth: `ensureAuthRole` (least-privilege `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE`), `installAuthLookup` (`pgbouncer.user_lookup`, `SECURITY DEFINER`, `REVOKE FROM PUBLIC`), `isAuthLookupInstalled` probe.
 - `MysqlDatabaseRepository` — ``CREATE DATABASE `db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci``, ``CREATE USER 'u'@'%' IDENTIFIED BY ?`` + `GRANT ... ON db.*`, `information_schema` sizes/tables/columns, `quoteIdentifier` backticks, `getPrimaryKeyColumn` single-PK guard.
 - `ExplorationService` / `PostgresExplorationService` / `MysqlExplorationService` — read-only browsing, bounded pagination (50/page), JSON export, PK-aware delete.
 - `PostgresBackupService` / `MysqlBackupService` / `BackupService` — gzip'd JSON dumps (`formatVersion:1`), streaming, replace-semantics restore.
@@ -312,8 +325,8 @@ Naming is validated per-engine; system databases are protected.
 
 - **DDL** — `CREATE/DROP DATABASE` runs outside transactions (auto-commit `JdbcTemplate`). `CREATE DATABASE "db" OWNER "user" TEMPLATE template0 ENCODING 'UTF8'`; `CREATE ROLE "user" WITH LOGIN PASSWORD '...'` (`scram-sha-256`); `GRANT CONNECT` + schema grants.
 - **Table/row CRUD** — `CREATE TABLE ... (col TEXT)`, `DROP TABLE IF EXISTS ... CASCADE`, `TRUNCATE ... CASCADE`, `INSERT` dynamic, `SELECT *, ctid::text AS __pg_ctid LIMIT ? OFFSET ?`, `DELETE ... WHERE ctid = ?::tid`. Columns lowercased, `distinct()`, reserved names blocked (`__pg_ctid/__ctid/ctid/__new_col/__new_val/_csrf`).
-- **Connection strings** — built from `app.postgres.issued-host` or `127.0.0.1:9813`, `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb`. Pooled DBs use `POSTGRES_ISSUED_HOST:6432` — Postgres-only, Mongo/MySQL untouched.
-- **PgBouncer** — `edoburu/pgbouncer:v1.24.1-p1` same Docker network (`postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder, static wildcard `*`). Per-DB opt-in on provision; `SHOW` via `stats_users`.
+- **Connection strings** — built from `app.postgres.issued-host` (DNS-only) + `app.postgres.issued-port`, or derived `127.0.0.1:9813` locally; `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb`. Pooled DBs use the same host + `app.pgbouncer.issued-port` — Postgres-only, Mongo/MySQL untouched.
+- **PgBouncer** — `edoburu/pgbouncer:v1.24.1-p1` same Docker network (`postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder, static wildcard `*` with `auth_user=pgbouncer_auth` + `auth_query=pgbouncer.user_lookup`). Pool sizes templated from the same env as the app. Per-DB opt-in on provision; `SHOW` via `stats_users`.
 
 ## MySQL specifics
 

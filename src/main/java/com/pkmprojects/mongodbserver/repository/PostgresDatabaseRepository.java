@@ -310,6 +310,69 @@ public class PostgresDatabaseRepository {
         target.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO " + quoteIdentifier(userName));
     }
 
+    // ── PgBouncer auth_query support ────────────────────────────────────
+    // Pooled logins verify via auth_user + auth_query: the pooler connects as
+    // a least-privilege role and calls pgbouncer.user_lookup(username) inside
+    // the target database to fetch the SCRAM verifier. The function is
+    // per-database (auth_query runs inside the target DB); the role is
+    // cluster-wide and idempotent. Installed at provision time for pooled DBs.
+
+    public void ensureAuthRole(String authUser, String authPassword) {
+        String escaped = escapePassword(authPassword);
+        String quoted = quoteIdentifier(authUser);
+        Integer exists = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM pg_roles WHERE rolname = ?", Integer.class, authUser);
+        // Explicit NOSUPERUSER/NOCREATEDB/NOCREATEROLE: this role only needs
+        // LOGIN + CONNECT + EXECUTE on the lookup function — never DDL.
+        if (exists != null && exists > 0) {
+            jdbcTemplate.execute("ALTER ROLE " + quoted + " WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + escaped + "'");
+        } else {
+            jdbcTemplate.execute("CREATE ROLE " + quoted + " WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '" + escaped + "'");
+        }
+    }
+
+    public void installAuthLookup(String dbName, String authUser) {
+        // CONNECT is granted from the cluster connection; everything else
+        // runs inside the target database where auth_query executes.
+        jdbcTemplate.execute("GRANT CONNECT ON DATABASE " + quoteIdentifier(dbName) + " TO " + quoteIdentifier(authUser));
+        JdbcTemplate target = jdbcFor(dbName);
+        target.execute("CREATE SCHEMA IF NOT EXISTS pgbouncer");
+        // Fixed body — no variable interpolation, names go through
+        // quoteIdentifier above. SECURITY DEFINER owner is the provisioning
+        // superuser so the function can read pg_authid; callers only get the
+        // verifier for the single username they ask about. Expired
+        // (rolvaliduntil) and non-login roles resolve to NULL = auth fails.
+        target.execute(
+                "CREATE OR REPLACE FUNCTION pgbouncer.user_lookup(in i_username text, out uname text, out phash text) "
+                        + "RETURNS record AS $$ "
+                        + "BEGIN "
+                        + "SELECT rolname, CASE WHEN rolvaliduntil < now() THEN NULL ELSE rolpassword END "
+                        + "FROM pg_authid WHERE rolname = i_username AND rolcanlogin INTO uname, phash; "
+                        + "RETURN; "
+                        + "END; $$ LANGUAGE plpgsql SECURITY DEFINER "
+                        + "SET search_path = pg_catalog, pg_temp");
+        // New functions default to PUBLIC execute — close that first, then
+        // open EXECUTE to the auth role alone. USAGE on the schema lets the
+        // pooler resolve the qualified name. No table grants anywhere.
+        target.execute("REVOKE ALL ON FUNCTION pgbouncer.user_lookup(text) FROM PUBLIC");
+        target.execute("GRANT USAGE ON SCHEMA pgbouncer TO " + quoteIdentifier(authUser));
+        target.execute("GRANT EXECUTE ON FUNCTION pgbouncer.user_lookup(text) TO " + quoteIdentifier(authUser));
+    }
+
+    public boolean isAuthLookupInstalled(String dbName) {
+        try {
+            Integer c = jdbcFor(dbName).queryForObject(
+                    "SELECT COUNT(*) FROM pg_catalog.pg_proc p "
+                            + "JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace "
+                            + "WHERE n.nspname = 'pgbouncer' AND p.proname = 'user_lookup'",
+                    Integer.class);
+            return c != null && c > 0;
+        } catch (Exception e) {
+            log.debug("isAuthLookupInstalled({}) probe failed", dbName, e);
+            return false;
+        }
+    }
+
     public void updateUserPassword(String dbName, String userName, String newPassword) {
         String escaped = escapePassword(newPassword);
         String quoted = quoteIdentifier(userName);

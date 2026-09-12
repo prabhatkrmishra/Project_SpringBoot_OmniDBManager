@@ -47,6 +47,9 @@ public class ProvisionRateLimitFilter extends OncePerRequestFilter {
                 || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/rows/delete");
         boolean isBackupRestore = path.matches(".*/(mongo|postgres|mysql)/databases/[^/]+/(backup|restore)")
                 || path.matches(".*/databases/[^/]+/(backup|restore)");
+        // Postgres per-DB feature installs: pgvector extension + PgBouncer
+        // auth_query lookup. Both are admin-only DDL-ish writes like reset.
+        boolean isPgFeatureInstall = path.matches(".*/postgres/databases/[^/]+/(vector|pooled-auth)");
         boolean isCollectionCreate = path.matches(".*/databases/[^/]+/collections");
         boolean isImport = path.matches(".*/databases/[^/]+/collections/[^/]+/import");
         boolean isPgTableWrite = path.matches(".*/postgres/databases/[^/]+/tables")
@@ -55,7 +58,7 @@ public class ProvisionRateLimitFilter extends OncePerRequestFilter {
         boolean isMysqlTableWrite = path.matches(".*/mysql/databases/[^/]+/tables")
                 || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/truncate")
                 || path.matches(".*/mysql/databases/[^/]+/tables/[^/]+/rows");
-        return !(isProvision || isReset || isDelete || isBackupRestore || isCollectionCreate || isImport || isPgTableWrite || isMysqlTableWrite);
+        return !(isProvision || isReset || isDelete || isBackupRestore || isCollectionCreate || isImport || isPgTableWrite || isMysqlTableWrite || isPgFeatureInstall);
     }
 
     @Override

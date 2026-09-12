@@ -1,14 +1,16 @@
 # DEPLOY — OmniDB Manager Deployment Guide
 
-> **General guideline** for deploying OmniDB Manager on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. A single public port `443` multiplexes the Manager UI (HTTPS) and Postgres (TLS) through Nginx `stream` + `ssl_preread` (ALPN). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>` to your environment.
+> **General guideline** for deploying OmniDB Manager on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. Manager UI on `443` (HTTPS); Postgres on two non-standard public TCP ports `A` direct → `127.0.0.1:9813` (migrations/admin) and `B` pooled → `127.0.0.1:6432` (app/workers) via Nginx `stream` (TLS + IP allowlist, grey-cloud DNS). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<NON_STD_1>`/`<NON_STD_2>` (e.g. `27431`/`27432`) to your environment.
 
 ## Architecture
 
 ```
 Internet:443 (<YOUR_DOMAIN>)
-  → Nginx stream (ssl_preread on, port 443)
-    ├─ ALPN h2 / http/1.1 → 127.0.0.1:8443 → Nginx http → 127.0.0.1:9811 (OmniDB Manager, Java 25)
-    └─ ALPN empty (Postgres wire) → 127.0.0.1:9813 (pgvector container, ssl=on)
+  → Nginx http (127.0.0.1:8443 ssl) → 127.0.0.1:9811 (OmniDB Manager, Java 25)
+Internet:<NON_STD_1> (pg.example.com, grey-cloud, TLS, allowlist)
+  → Nginx stream → 127.0.0.1:9813 (pgvector container, ssl=on) — direct A
+Internet:<NON_STD_2> (pg.example.com, grey-cloud, TLS, allowlist)
+  → Nginx stream → 127.0.0.1:6432 (PgBouncer, pool_mode=transaction) → 127.0.0.1:9813 — pooled B
 
 Internet:80 → Nginx http → 301 https://$host$request_uri (only for /.well-known/acme-challenge)
 ```
@@ -18,23 +20,24 @@ All engines run as Docker containers, loopback-bound only. The Manager provision
 | Component | Container / Process | Listen (loopback) | Public |
 |---|---|---|---|
 | OmniDB Manager | `omnidb.service` (Java 25) | `127.0.0.1:9811` | via `https://<YOUR_DOMAIN>/login` |
-| MongoDB 8 | `omnidb-mongo` | `127.0.0.1:9812` | via `MONGODB_PUBLIC_HOST` |
+| MongoDB 8 | `omnidb-mongo` | `127.0.0.1:9812` | via `MONGODB_ISSUED_HOST` |
 | mongo-express | `omnidb-mongo-express` | `127.0.0.1:9814` | via app proxy `/mongo-express` |
-| PostgreSQL 18 (pgvector) | `omnidb-postgres` | `127.0.0.1:9813` | via `<YOUR_DOMAIN>:443` (stream) |
+| PostgreSQL 18 (pgvector) | `omnidb-postgres` | `127.0.0.1:9813` | via `pg.example.com:<NON_STD_1>` (direct A, TLS, allowlist) |
+| PgBouncer 1.24.1 | `omnidb-pgbouncer` | `127.0.0.1:6432` | via `pg.example.com:<NON_STD_2>` (pooled B, TLS, allowlist) |
 | Adminer | `omnidb-adminer` | `127.0.0.1:9815` | via app proxy `/adminer` |
-| MySQL 8.4 | `omnidb-mysql` | `127.0.0.1:9816` | via `MYSQL_PUBLIC_HOST` |
+| MySQL 8.4 | `omnidb-mysql` | `127.0.0.1:9816` | via `MYSQL_ISSUED_HOST` |
 | phpMyAdmin | `omnidb-phpmyadmin` | `127.0.0.1:9817` | via app proxy `/phpmyadmin` |
-| Nginx stream | — | `0.0.0.0:443` | `<YOUR_DOMAIN>:443` |
+| Nginx stream | — | `0.0.0.0:<NON_STD_1>, 0.0.0.0:<NON_STD_2>` | `pg.example.com:<NON_STD_1>/<NON_STD_2>` |
 | Nginx http | — | `127.0.0.1:8443` ssl | your sites |
 
-> **Single-port 443** cleanly multiplexes the Manager UI (HTTP ALPN) and Postgres (TLS, empty ALPN). MongoDB and MySQL use their own wire protocols and are exposed via their own public ports/streams (see §6.2/§6.3) — they do not ride the same 443 ALPN multiplex as Postgres.
+> **Two Postgres links:** `A` direct (`<NON_STD_1>` → `127.0.0.1:9813`) for DDL/migrations/break-glass (tighter IP allowlist); `B` pooled (`<NON_STD_2>` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both require TLS (`sslmode=require`/`verify-full`) + per-DB `SCRAM-SHA-256` + IP allowlist. Non-standard port is camouflage only — never a substitute for the allowlist. DNS must be grey-cloud (DNS only) so TCP reaches your VPS, not Cloudflare HTTP proxy. MongoDB/MySQL use their own public ports/streams (see §5.2/§5.3).
 
 ## 1. Prerequisites
 
 - VPS (Ubuntu 24.04 recommended), user with `sudo`, SSH key
-- Domain `<YOUR_DOMAIN>` with DNS `A` record → `<YOUR_VPS_IP>` (DNS only / grey cloud if using Cloudflare — raw DB ports cannot go via Cloudflare HTTP proxy)
-- Only `443` + `80` (for Let's Encrypt) + `22` open. DB ports (`5432`, `27017`, `3306`) never public.
-- If other sites already use `443` on the same VPS, they will be moved to `127.0.0.1:8443` to free `443` for `stream` (step 6).
+- Domain `<YOUR_DOMAIN>` + `pg.example.com` with DNS `A` records → `<YOUR_VPS_IP>` (DNS only / grey cloud if using Cloudflare — raw DB TCP cannot go via Cloudflare HTTP proxy, must be grey-cloud)
+- Only `443` + `80` (for Let's Encrypt) + `22` open by default. DB loopback ports (`9812`, `9813`, `9816`, `6432`) never public. Postgres public ports `<NON_STD_1>` (e.g. `27431` direct) + `<NON_STD_2>` (e.g. `27432` pooled) are opened **only** to your app servers via IP allowlist (never `0.0.0.0/0`) — see §6 and `deploy/nginx.conf.example`.
+- If other sites already use `443` on the same VPS, they will be moved to `127.0.0.1:8443` so `443` stays for the Manager UI (step 6).
 
 Verify DNS:
 
@@ -98,7 +101,7 @@ docker ps --format '{{.Names}} {{.Status}}'
 
 ## 4. Environment (.env)
 
-Copy `.env.example` → `.env` and fill real values. **Key rule:** `*_URI` is the **Manager → DB root link** on `127.0.0.1` (never public DNS); `*_PUBLIC_HOST` is what your **apps** dial in the issued strings.
+Copy `.env.example` → `.env` and fill real values. **Key rule:** `*_URI` is the **Manager → DB root link** on `127.0.0.1` (never public DNS); `*_ISSUED_HOST` (+ `*_ISSUED_PORT` for Postgres) is what your **apps** dial in the issued strings.
 
 ```bash
 cp .env.example .env
@@ -123,42 +126,37 @@ SERVER_COOKIE_SAME_SITE=lax
 
 # === MongoDB engine ===
 MONGO_ENABLED=true
-MONGODB_ROOT_USERNAME=root
 MONGODB_ROOT_PASSWORD=<MONGO_ROOT_PASSWORD>
-MONGODB_URI=mongodb://root:<MONGO_ROOT_PASSWORD>@127.0.0.1:9812/?authSource=admin&maxPoolSize=10
-MONGO_EXPRESS_USERNAME=admin
-MONGO_EXPRESS_PASSWORD=<MONGO_EXPRESS_PASSWORD>
-MONGODB_PUBLIC_HOST=mongo.example.com
-MONGODB_PUBLIC_TLS=false
+MONGODB_ISSUED_HOST=mongo.example.com
+# OVERRIDE_MONGODB_TLS=true  # if stream TLS on (see §5.2)
 
 # === PostgreSQL engine ===
 POSTGRES_ENABLED=true
-POSTGRES_ROOT_USER=postgres
 POSTGRES_ROOT_PASSWORD=<POSTGRES_ROOT_PASSWORD>
-POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?user=postgres&password=<POSTGRES_ROOT_PASSWORD>&sslmode=require&connectTimeout=5&socketTimeout=10
-POSTGRES_PUBLIC_HOST=<YOUR_DOMAIN>:443
-POSTGRES_PUBLIC_TLS=true
-POSTGRES_PUBLIC_SSLMODE=require
+POSTGRES_ISSUED_HOST=pg.example.com          # DNS only, no :port
+POSTGRES_ISSUED_PORT=27431                   # public direct A -> 127.0.0.1:9813 (migrations/admin)
+PGBOUNCER_ISSUED_PORT=27432                  # public pooled B -> 127.0.0.1:6432 (app/workers)
+PGBOUNCER_ADMIN_PASSWORD=<PGBOUNCER_ADMIN_PASSWORD>
+PGBOUNCER_STATS_PASSWORD=<PGBOUNCER_STATS_PASSWORD>
+# OVERRIDE_POSTGRES_SSLMODE=require  # or verify-full with CA (see §10)
 
 # === MySQL engine ===
 MYSQL_ENABLED=true
 MYSQL_ROOT_PASSWORD=<MYSQL_ROOT_PASSWORD>
-MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000
-MYSQL_PUBLIC_HOST=mysql.example.com
-MYSQL_PUBLIC_TLS=false
-MYSQL_PUBLIC_SSLMODE=REQUIRED
+MYSQL_ISSUED_HOST=mysql.example.com
+# OVERRIDE_MYSQL_TLS=false  # if stream TLS on (see §5.3)
 
 # === Encryption at rest (AES-256-GCM) ===
 APP_ENCRYPTION_KEY=<BASE64_32_BYTES>
 ```
 
-> **Manager → DB vs issued strings:** `*_URI` stays `127.0.0.1` (Manager and DB on the same host via Docker). `*_PUBLIC_HOST` is what your apps dial. Never give the root `*_URI` to your apps. See `VARS.md` for the full variable reference.
+> **Manager → DB vs issued strings:** `*_URI` stays `127.0.0.1` (Manager and DB on the same host via Docker). `*_ISSUED_HOST`/`*_ISSUED_PORT` is what your apps dial. Never give the root `*_URI` to your apps. Postgres uses two public ports: `POSTGRES_ISSUED_PORT` (direct `A` → `127.0.0.1:9813`) and `PGBOUNCER_ISSUED_PORT` (pooled `B` → `127.0.0.1:6432`). See `VARS.md` for the full variable reference.
 
 ## 5. TLS per Engine
 
-### 5.1 PostgreSQL (container certs, single 443)
+### 5.1 PostgreSQL — two links (direct A + pooled B, both TLS)
 
-Generate a CA + server cert, enable `ssl=on` in `compose.postgres.yaml`, and require `hostssl` in `pg_hba.conf`. Full steps in §10 below (or the `postgres` service comments in `compose.postgres.yaml`). Issued strings carry `sslmode=require` (or `verify-full` with the CA).
+Postgres runs with `ssl=on` (self-signed CA or Let's Encrypt) and `hostssl` in `pg_hba.conf`. Two public TCP ports expose it: `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS at Nginx (`listen <NON_STD_*> ssl`) with the same cert, and both require IP allowlist + `sslmode=require`/`verify-full` + per-DB `SCRAM-SHA-256`. Full steps in §10 and `deploy/nginx.conf.example`. Issued strings carry `sslmode=require` (or `verify-full` with CA) and the port from `POSTGRES_ISSUED_PORT` / `PGBOUNCER_ISSUED_PORT`. Non-standard port is camouflage only — the allowlist + TLS + per-DB credentials are the real locks. DNS must be grey-cloud (DNS only).
 
 ### 5.2 MongoDB
 
@@ -178,8 +176,8 @@ stream {
 Then in `.env`:
 
 ```env
-MONGODB_PUBLIC_HOST=mongo.example.com
-MONGODB_PUBLIC_TLS=true        # issued strings get &tls=true
+MONGODB_ISSUED_HOST=mongo.example.com
+OVERRIDE_MONGODB_TLS=true        # issued strings get &tls=true
 ```
 
 ### 5.3 MySQL
@@ -200,43 +198,57 @@ stream {
 Then in `.env`:
 
 ```env
-MYSQL_PUBLIC_HOST=mysql.example.com
-MYSQL_PUBLIC_SSLMODE=REQUIRED        # or VERIFY_IDENTITY with a CA truststore
+MYSQL_ISSUED_HOST=mysql.example.com
+OVERRIDE_MYSQL_TLS=true        # issued strings get ?sslMode=REQUIRED (or VERIFY_IDENTITY with CA)
 ```
 
-## 6. Nginx — Stream Multiplex on 443 (Only Public Port)
+## 6. Nginx — Manager UI on 443 + Postgres on two non-standard ports
 
-Move all existing `443` http servers to `127.0.0.1:8443` (internal), let `stream` own public `443`.
+Manager UI stays on `443` via `127.0.0.1:8443` (plain `http` reverse proxy, no `stream` multiplex). Postgres is exposed on **two** separate public TCP ports via `stream` — `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS and are IP-allowlisted (never `0.0.0.0/0`); DNS must be grey-cloud (DNS only) so TCP reaches your VPS.
 
 ```bash
 # Move any existing sites that listen on 443 to 127.0.0.1:8443
 # Example: sudo sed -i "s/listen 443 ssl http2;/listen 127.0.0.1:8443 ssl http2;/g" /etc/nginx/sites-enabled/<OTHER_SITE>
 
-# Create stream.conf — ALPN multiplex (app + Postgres on 443)
-sudo tee /etc/nginx/stream.conf > /dev/null <<'STREAM'
-stream {
-    map $ssl_preread_alpn_protocols $upstream {
-        ~\bh2\b 127.0.0.1:8443;
-        ~\bhttp/1\.1\b 127.0.0.1:8443;
-        default 127.0.0.1:9813;   # Postgres container (not system 5432)
-    }
-    server {
-        listen 443;
-        ssl_preread on;
-        proxy_pass $upstream;
-        proxy_timeout 1h;
-        proxy_connect_timeout 10s;
-    }
+# One-time: enable stream module and include dir
+sudo apt install -y libnginx-mod-stream
+sudo mkdir -p /etc/nginx/streams-enabled
+# Add to the TOP LEVEL of /etc/nginx/nginx.conf (after the http {} block):
+#   stream {
+#       include /etc/nginx/streams-enabled/*.conf;
+#   }
+# Ensure it is after `include /etc/nginx/modules-enabled/*.conf;` and before `http {`.
+
+# Create Postgres streams — two non-standard ports, each TLS + allowlist
+sudo tee /etc/nginx/streams-enabled/postgres.conf > /dev/null <<'STREAM'
+# Direct A — migrations/admin (tighter allowlist)
+server {
+    listen 27431 ssl;
+    ssl_certificate     /etc/letsencrypt/live/pg.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pg.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    proxy_pass 127.0.0.1:9813;
+    proxy_timeout 1h;
+    proxy_connect_timeout 10s;
+    # Optional per-IP guardrail
+    # limit_conn pg_direct_per_ip 20;
+}
+# Pooled B — app/workers
+server {
+    listen 27432 ssl;
+    ssl_certificate     /etc/letsencrypt/live/pg.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pg.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    proxy_pass 127.0.0.1:6432;
+    proxy_timeout 1h;
+    proxy_connect_timeout 10s;
+    # limit_conn pg_pooled_per_ip 100;
 }
 STREAM
 
-# Include stream before http (after modules)
-sudo sed -i "/include \/etc\/nginx\/stream.conf;/d" /etc/nginx/nginx.conf
-sudo sed -i "/^http {/i include /etc/nginx/stream.conf;" /etc/nginx/nginx.conf
-head -15 /etc/nginx/nginx.conf
-# → include /etc/nginx/modules-enabled/*.conf; ... include /etc/nginx/stream.conf; http {
-
-# Create/update site for <YOUR_DOMAIN> (80 + 127.0.0.1:8443)
+# Create/update site for <YOUR_DOMAIN> (80 + 127.0.0.1:8443) — Manager UI only
 sudo tee /etc/nginx/sites-available/<YOUR_DOMAIN> > /dev/null <<'NGINX'
 server {
     listen 80;
@@ -285,17 +297,22 @@ sudo sed -i "s/listen 0.0.0.0:8443/listen 127.0.0.1:8443/g" /etc/nginx/sites-ena
 
 sudo nginx -t && sudo systemctl reload nginx
 # If "bind() to 127.0.0.1:8443 failed (98: Address already in use)" → systemctl stop nginx; fix; systemctl start nginx
-ss -tlnp | grep -E "443|8443|9811|9812|9813|9816"
-# → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443 (http), 127.0.0.1:9811..9817 (containers)
+ss -tlnp | grep -E "443|8443|9811|9812|9813|9816|27431|27432|6432"
+# → 0.0.0.0:80, 0.0.0.0:27431 (stream direct), 0.0.0.0:27432 (stream pooled), 127.0.0.1:8443 (http), 127.0.0.1:9811..9817 + 127.0.0.1:6432 (containers)
 ```
 
-> **Note:** `/actuator/*` is blocked at the proxy above (`location ^~ /actuator/` + `location = /actuator` → 404), so it is never reachable via the public name. On the box itself it still requires the manager login (form login, `ADMIN` role) — open `http://127.0.0.1:9811/actuator/health` in a logged-in browser, or `curl` with the `JSESSIONID` cookie from a prior `POST /login`. Defense in depth: the app itself requires `hasRole("ADMIN")` for actuator, so even a direct hit on the app port never answers anonymously.
+> **Note:** `/actuator/*` is blocked at the proxy above (`location ^~ /actuator/` + `location = /actuator` → 404) on both `80` and `127.0.0.1:8443`, so it is never reachable via the public name. On the box itself it still requires the manager login (form login, `ADMIN` role) — open `http://127.0.0.1:9811/actuator/health` in a logged-in browser, or `curl` with the `JSESSIONID` cookie from a prior `POST /login`. Defense in depth: the app itself requires `hasRole("ADMIN")` for actuator, so even a direct hit on the app port never answers anonymously. Postgres streams above are **not** HTTP — they are raw TCP with TLS; actuator blocking does not apply there, but they are protected by TLS + IP allowlist + per-DB `SCRAM-SHA-256`.
 
-Verify SNI:
+Verify SNI (Manager UI):
 
 ```bash
 echo | openssl s_client -connect 127.0.0.1:8443 -servername <YOUR_DOMAIN> 2>&1 | openssl x509 -noout -subject
 # → CN = <YOUR_DOMAIN>
+# Postgres direct/pooled (replace with your real ports):
+echo | openssl s_client -connect pg.example.com:27431 -servername pg.example.com 2>&1 | openssl x509 -noout -subject
+# → CN = pg.example.com
+echo | openssl s_client -connect pg.example.com:27432 -servername pg.example.com 2>&1 | openssl x509 -noout -subject
+# → CN = pg.example.com
 ```
 
 ## 7. OmniDB Manager — Systemd Service
@@ -357,20 +374,24 @@ GRANT SELECT,INSERT,UPDATE,DELETE,CREATE,ALTER,INDEX,DROP ON `<DB_NAME>`.* TO '<
 SQL
 ```
 
-## 9. Verification — All via 443
+## 9. Verification
 
 ```bash
-# Manager UI via 443 stream → 8443 → 9811
+# Manager UI via 127.0.0.1:8443 → 9811
 curl -k -s https://<YOUR_DOMAIN>/login | head -20
 # → <!DOCTYPE html> ... Sign in · DB Manager
 
-# Postgres via 443 stream → 9813 (ALPN empty, TLS)
-PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=<YOUR_DOMAIN> port=443 dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user, current_database(), now();"
+# Postgres direct A (migrations/admin) via <NON_STD_1> → 9813
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=27431 dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user, current_database(), now();"
 # → <DB_USER> | <DB_NAME> | 1 row
 
+# Postgres pooled B (app/workers) via <NON_STD_2> → 6432 → 9813
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=27432 dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user;"
+# → <DB_USER> (1 row)
+
 # Ports
-ss -tlnp | grep -E "443|8443|9811|9812|9813|9816|80"
-# → 0.0.0.0:80, 0.0.0.0:443 (stream), 127.0.0.1:8443, 127.0.0.1:9811..9817
+ss -tlnp | grep -E "443|8443|9811|9812|9813|9816|27431|27432|6432|80"
+# → 0.0.0.0:80, 0.0.0.0:27431 (stream direct), 0.0.0.0:27432 (stream pooled), 127.0.0.1:8443, 127.0.0.1:9811..9817 + 127.0.0.1:6432
 ```
 
 ## Connection Strings
@@ -385,11 +406,14 @@ MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval
 **Issued per-DB strings (what your apps use, via public DNS):**
 ```
 # MongoDB
-mongodb://<DB_USER>:<DB_PASSWORD>@mongo.example.com/<DB_NAME>?authSource=<DB_NAME>        # + &tls=true if MONGODB_PUBLIC_TLS=true
+mongodb://<DB_USER>:<DB_PASSWORD>@mongo.example.com/<DB_NAME>?authSource=<DB_NAME>        # + &tls=true if OVERRIDE_MONGODB_TLS=true
 
-# PostgreSQL (via 443)
-postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=require&application_name=omnidb
-# verify-full: postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=verify-full&sslrootcert=/path/to/ca.crt&application_name=omnidb
+# PostgreSQL direct A (migrations/admin) — POSTGRES_ISSUED_PORT (e.g. 27431)
+postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27431/<DB_NAME>?sslmode=require&application_name=omnidb
+# verify-full: postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27431/<DB_NAME>?sslmode=verify-full&sslrootcert=/path/to/ca.crt&application_name=omnidb
+
+# PostgreSQL pooled B (app/workers) — PGBOUNCER_ISSUED_PORT (e.g. 27432), only for DBs with Route via PgBouncer
+postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27432/<DB_NAME>?sslmode=require&application_name=omnidb
 
 # MySQL
 mysql://<DB_USER>:<DB_PASSWORD>@mysql.example.com:3306/<DB_NAME>?sslMode=REQUIRED
@@ -402,72 +426,73 @@ https://<YOUR_DOMAIN>/login
 # user <ADMIN_USER> / <ADMIN_PASSWORD> (from APP_ADMIN_USERNAME/PASSWORD)
 ```
 
-## Custom Public DB Ports (Alternative to §6)
+## Custom Public DB Ports
 
-Use this instead of the 443 multiplex when a separate, non-standard public
-port per engine is preferred (quieter than well-known ports — camouflage, not
-a lock; the allowlist + TLS + per-DB credentials below are the actual locks).
-Each engine gets **one** public port; every database on that engine shares it
-(databases are distinguished by dbname + credentials, not by port). Enabling a
-database in OmniDB opens nothing by itself — traffic flows only once the
-stream server (§6-style, one per port — see `deploy/nginx.conf.example`) and
-the firewall rules below both exist.
+Postgres **always** uses two non-standard public TCP ports (see §6): `<NON_STD_1>` (e.g. `27431`) direct `A` → `127.0.0.1:9813` and `<NON_STD_2>` (e.g. `27432`) pooled `B` → `127.0.0.1:6432`. MongoDB and MySQL optionally use a single custom port each. Each engine gets one public port (Postgres gets two, one per link); every database on that engine shares it (databases are distinguished by dbname + credentials, not by port). Enabling a database in OmniDB opens nothing by itself — traffic flows only once the stream servers (§6) and the firewall rules below both exist. Non-standard port is camouflage only — the allowlist + TLS + per-DB credentials are the real locks.
 
-| Engine | Stream target (loopback) | Public port | `*_ISSUED_HOST` value | Notes |
+| Engine | Stream target (loopback) | Public port | Env vars | Notes |
 |---|---|---|---|---|
-| MongoDB | `127.0.0.1:9812` | `<CUSTOM_PORT>` | `mongo.example.com:<CUSTOM_PORT>` | `OVERRIDE_MONGODB_TLS=true` for `&tls=true` |
-| PostgreSQL direct | `127.0.0.1:9813` | `<CUSTOM_PORT>` | `pg.example.com:<CUSTOM_PORT>` | `?sslmode=require` (or `verify-full` with CA) |
-| PostgreSQL pooled | `127.0.0.1:6432` | `<CUSTOM_PORT>` | same host, port swapped automatically | Only for DBs provisioned with **Route via PgBouncer** |
-| MySQL | `127.0.0.1:9816` | `<CUSTOM_PORT>` | `mysql.example.com:<CUSTOM_PORT>` | `?sslMode=REQUIRED` with `OVERRIDE_MYSQL_TLS=true` |
+| MongoDB | `127.0.0.1:9812` | `<CUSTOM_PORT>` | `MONGODB_ISSUED_HOST=mongo.example.com:<CUSTOM_PORT>` | `OVERRIDE_MONGODB_TLS=true` for `&tls=true` |
+| PostgreSQL direct `A` | `127.0.0.1:9813` | `<NON_STD_1>` e.g. `27431` | `POSTGRES_ISSUED_HOST=pg.example.com` + `POSTGRES_ISSUED_PORT=<NON_STD_1>` | `?sslmode=require` (or `verify-full` with CA), tighter allowlist |
+| PostgreSQL pooled `B` | `127.0.0.1:6432` | `<NON_STD_2>` e.g. `27432` | same `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT=<NON_STD_2>` | Only for DBs provisioned with **Route via PgBouncer** |
+| MySQL | `127.0.0.1:9816` | `<CUSTOM_PORT>` | `MYSQL_ISSUED_HOST=mysql.example.com:<CUSTOM_PORT>` | `OVERRIDE_MYSQL_TLS=true` for `?sslMode=REQUIRED` |
 
-Use a **different** `<CUSTOM_PORT>` per engine — one port cannot serve two
-engines without SNI routing (see §6). Pooled and direct Postgres must also
-differ from each other.
+Use a **different** `<CUSTOM_PORT>` per engine — one port cannot serve two engines without SNI routing. Pooled and direct Postgres must also differ from each other (`<NON_STD_1>` ≠ `<NON_STD_2>`).
 
 ### NSG / security-group rules (one per public DB port)
 
-Default-deny everything inbound; allow each custom port **only** from your app
-servers (never `0.0.0.0/0`). Host-level `ufw` stays as a second layer (see
-`deploy/nginx.conf.example`).
+Default-deny everything inbound; allow each custom port **only** from your app servers (never `0.0.0.0/0`). Host-level `ufw` stays as a second layer (see `deploy/nginx.conf.example`). Each `<NON_STD_*>` allow only the MissionHelm IP (or your app server IP), grey-cloud DNS, never `0.0.0.0/0`.
 
 ```bash
-# Azure NSG (one rule per port; lower priority number wins):
+# Azure NSG — Postgres direct A (tighter allowlist, e.g. only MissionHelm IP):
 az network nsg rule create \
   --resource-group <RESOURCE_GROUP> --nsg-name <NSG_NAME> \
-  --name allow-db-<ENGINE> --priority 110 \
-  --source-address-prefixes <APP_SERVER_IP>/32 \
-  --destination-port-ranges <CUSTOM_PORT> \
+  --name allow-pg-direct --priority 110 \
+  --source-address-prefixes <MISSION_HELM_IP>/32 \
+  --destination-port-ranges <NON_STD_1> \
   --destination-address-prefixes '*' \
   --access Allow --protocol Tcp --direction Inbound
 
-# AWS security group equivalent:
+# Azure NSG — Postgres pooled B (app/workers):
+az network nsg rule create \
+  --resource-group <RESOURCE_GROUP> --nsg-name <NSG_NAME> \
+  --name allow-pg-pooled --priority 111 \
+  --source-address-prefixes <APP_SERVER_IP>/32 \
+  --destination-port-ranges <NON_STD_2> \
+  --destination-address-prefixes '*' \
+  --access Allow --protocol Tcp --direction Inbound
+
+# AWS security group equivalents:
 aws ec2 authorize-security-group-ingress \
   --group-id <SECURITY_GROUP_ID> \
-  --protocol tcp --port <CUSTOM_PORT> --cidr <APP_SERVER_IP>/32
+  --protocol tcp --port <NON_STD_1> --cidr <MISSION_HELM_IP>/32
+aws ec2 authorize-security-group-ingress \
+  --group-id <SECURITY_GROUP_ID> \
+  --protocol tcp --port <NON_STD_2> --cidr <APP_SERVER_IP>/32
 ```
 
-Portal path is the same rule: inbound, TCP, port `<CUSTOM_PORT>`,
-source `<APP_SERVER_IP>/32`, allow. Keep `80`/`443`/`22` as §2 already has
-them; `9811..9817` and `6432` stay loopback-only (no cloud rule at all).
+Portal path is the same rule: inbound, TCP, port `<NON_STD_*>`, source `<APP_SERVER_IP>/32` (or `<MISSION_HELM_IP>/32` for direct), allow. Keep `80`/`443`/`22` as §2 already has them; `9811..9817` and `6432` stay loopback-only (no cloud rule at all). `pgvector` stays inside the same Postgres — no extra port.
 
 ### How enabled databases pick up the ports
 
-1. Add the stream server(s) and reload nginx (`sudo nginx -t && sudo systemctl reload nginx`).
-2. Add the NSG rule(s) above and set the matching `*_ISSUED_HOST` values in
-   `~/omnidb/.env` (host **with** `:<CUSTOM_PORT>`), then restart the jar.
-3. Provision (or open the detail page of) a database — the issued string now
-   carries the custom port. Strings are snapshots: apps holding an older
-   string keep dialing the old port until they adopt the new one, so change
-   ports only when ready to rotate client configs (password reset reissues).
+1. Add the two stream servers (§6) and reload nginx (`sudo nginx -t && sudo systemctl reload nginx`).
+2. Add the NSG rules above and set `POSTGRES_ISSUED_HOST` (DNS only) + `POSTGRES_ISSUED_PORT=<NON_STD_1>` + `PGBOUNCER_ISSUED_PORT=<NON_STD_2>` in `~/omnidb/.env`, then restart the jar. For Mongo/MySQL, set `*_ISSUED_HOST` to `host:<CUSTOM_PORT>`.
+3. Provision (or open the detail page of) a database — the issued string now carries the custom port. Strings are snapshots: apps holding an older string keep dialing the old port until they adopt the new one, so change ports only when ready to rotate client configs (password reset reissues).
 
 Verify (replace placeholders; Postgres shown, others analogous):
 
 ```bash
-echo | openssl s_client -connect pg.example.com:<CUSTOM_PORT> -servername pg.example.com 2>&1 | openssl x509 -noout -subject
-# → CN = pg.example.com (proves TLS terminates on your stream)
+echo | openssl s_client -connect pg.example.com:<NON_STD_1> -servername pg.example.com 2>&1 | openssl x509 -noout -subject
+# → CN = pg.example.com (proves TLS terminates on your stream, direct A)
 
-PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=<CUSTOM_PORT> dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user;"
-# → <DB_USER> (1 row)
+echo | openssl s_client -connect pg.example.com:<NON_STD_2> -servername pg.example.com 2>&1 | openssl x509 -noout -subject
+# → CN = pg.example.com (pooled B)
+
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=<NON_STD_1> dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user;"
+# → <DB_USER> (1 row, direct)
+
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=<NON_STD_2> dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user;"
+# → <DB_USER> (1 row, pooled — only for DBs with Route via PgBouncer)
 ```
 
 ## 10. Docker Container Postgres (pgvector) with TLS
@@ -485,10 +510,14 @@ openssl genrsa -out ca.key 2048
 openssl req -x509 -new -nodes -key ca.key -sha256 -days 3650 \
   -subj "/CN=OmniDB PostgreSQL CA" -out ca.crt
 
-# Server key + CSR (SAN covers the public host + localhost)
+# Server key + CSR (SAN covers both public names + localhost).
+# The Manager UI (<YOUR_DOMAIN>) and the two Postgres streams
+# (pg.example.com) terminate TLS separately — either issue one cert with
+# both DNS names as SANs, or separate certs per stream block. A single-name
+# cert on the wrong name gives TLS name mismatch on the other link.
 openssl genrsa -out server.key 2048
 chmod 600 server.key
-openssl req -new -key server.key -subj "/CN=<YOUR_DOMAIN>" -out server.csr
+openssl req -new -key server.key -subj "/CN=pg.example.com" -out server.csr
 
 cat > san.cnf <<'EOF'
 [req]
@@ -498,8 +527,9 @@ req_extensions = v3_req
 [v3_req]
 subjectAltName = @alt_names
 [alt_names]
-DNS.1 = <YOUR_DOMAIN>
-DNS.2 = localhost
+DNS.1 = pg.example.com
+DNS.2 = <YOUR_DOMAIN>
+DNS.3 = localhost
 IP.1 = 127.0.0.1
 EOF
 
@@ -539,18 +569,27 @@ sudo docker exec omnidb-postgres sed -i \
   /var/lib/postgresql/18/docker/pg_hba.conf
 ```
 
-### 10.4 Point nginx stream at the container
+### 10.4 Point nginx streams at the containers
 
-The stream `default` route must target the container port `9813`, not the system `5432` (see §6).
+Two `stream` servers expose Postgres (see §6): direct `A` (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) and pooled `B` (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`). Both terminate TLS at Nginx and are IP-allowlisted. Neither is the system `5432`.
 
 ### 10.5 Update .env
 
 ```bash
-# App's own connection must now use TLS (container requires hostssl)
-POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?user=postgres&password=<POSTGRES_PASSWORD>&sslmode=require&connectTimeout=5&socketTimeout=10
-# Issued per-DB strings carry sslmode=require
-POSTGRES_PUBLIC_TLS=true
-POSTGRES_PUBLIC_SSLMODE=require
+# App's own connection must now use TLS (container requires hostssl).
+# Keep the URI credential-free: PostgresConfig logs in as root with
+# POSTGRES_ROOT_PASSWORD separately — embedding user=/password= here
+# duplicates the credential and the two can drift apart silently.
+OVERRIDE_POSTGRES_URI=jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=require&connectTimeout=5&socketTimeout=10
+POSTGRES_ROOT_PASSWORD=<POSTGRES_ROOT_PASSWORD>
+# Issued per-DB strings carry sslmode=require + the two public ports
+POSTGRES_ISSUED_HOST=pg.example.com          # DNS only, no :port
+POSTGRES_ISSUED_PORT=27431                   # direct A -> 127.0.0.1:9813
+PGBOUNCER_ISSUED_PORT=27432                  # pooled B -> 127.0.0.1:6432
+OVERRIDE_POSTGRES_SSLMODE=require            # or verify-full with CA
+# Pooler auth_user credential (must match the running pooler container's
+# userlist — pooled logins fail if these disagree; see §10.8)
+PGBOUNCER_AUTH_PASSWORD=<PGBOUNCER_AUTH_PASSWORD>
 ```
 
 ### 10.6 Recreate container + restart app
@@ -565,13 +604,18 @@ sudo systemctl restart omnidb
 ### 10.7 Verify
 
 ```bash
-# SSL connection succeeds
-PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=require&application_name=omnidb" \
+# SSL connection succeeds — direct A (migrations/admin)
+PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27431/<DB_NAME>?sslmode=require&application_name=omnidb" \
+  -c "SELECT ssl, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
+# → t | TLS_AES_256_GCM_SHA384
+
+# Pooled B (app/workers) — only for DBs with Route via PgBouncer
+PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27432/<DB_NAME>?sslmode=require&application_name=omnidb" \
   -c "SELECT ssl, cipher FROM pg_stat_ssl WHERE pid = pg_backend_pid();"
 # → t | TLS_AES_256_GCM_SHA384
 
 # Non-SSL connection is rejected (proves SSL enforced)
-PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMAIN>:443/<DB_NAME>?sslmode=disable" -c "SELECT 1;"
+PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27431/<DB_NAME>?sslmode=disable" -c "SELECT 1;"
 # → FATAL: no pg_hba.conf entry ... no encryption
 ```
 
@@ -583,11 +627,12 @@ PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@<YOUR_DOMA
 | `FATAL: no pg_hba.conf entry ... no encryption` | SSL is enforced (`hostssl`), client connected without TLS | Use `sslmode=require` (or `verify-full`); never `sslmode=disable` |
 | `FATAL: private key file ... has group or world access` | Wrong perms on cert key | `chown 999:999`, `chmod 600` on `~/omnidb/certs/server.key` |
 | `bind() to 127.0.0.1:8443 failed (98: Address already in use)` | Old nginx still on `0.0.0.0:8443` | `systemctl stop nginx`, fix `listen` to `127.0.0.1:8443`, `systemctl start nginx` |
-| `unknown directive "stream"` | `libnginx-mod-stream` not installed or `include` before `load_module` | `apt install libnginx-mod-stream`, ensure `include /etc/nginx/stream.conf;` is after `include /etc/nginx/modules-enabled/*.conf;` and before `http {` |
-| `curl https://<YOUR_DOMAIN>` shows wrong cert | SNI mismatch, `8443` still `0.0.0.0:8443` | Ensure all `8443` are `127.0.0.1:8443`, `stream` owns `443` |
+| `unknown directive "stream"` | `libnginx-mod-stream` not installed or bad include placement | `apt install libnginx-mod-stream`, ensure the `stream { include /etc/nginx/streams-enabled/*.conf; }` block is top-level after `include /etc/nginx/modules-enabled/*.conf;` and before `http {` |
+| `curl https://<YOUR_DOMAIN>` shows wrong cert | SNI mismatch between the Manager cert and the Postgres stream certs | Use one SAN cert covering both names, or separate certs per stream block (see §10.1) |
 | `omnidb: UnsupportedClassVersionError class file version 69.0` | Jar needs Java 25, VPS has 21 | `apt install openjdk-25-jdk`, `update-alternatives --config java` |
-| `<YOUR_DOMAIN>:5432` timeout | Only `443` is public, `5432` closed | Use `<YOUR_DOMAIN>:443` with `sslmode=require` |
-| `MongoTimeoutError` / `ECONNREFUSED` on issued Mongo string | `MONGODB_PUBLIC_HOST` wrong or port not exposed | Set `MONGODB_PUBLIC_HOST` + expose Mongo via Nginx `stream` (§5.2) |
+| `pg.example.com:<NON_STD_2>` pooled login `password authentication failed` | Pooler `auth_user` credential mismatch, or lookup function missing on that DB | Check `PGBOUNCER_AUTH_PASSWORD` matches the running pooler container, then use the detail page **Install pooled auth** button (see §10.8) |
+| `FATAL: auth_query error` in pooler logs | `pgbouncer.user_lookup(text)` missing on the target DB | Same fix — per-DB repair via the detail page; verify with `isPooledAuthInstalled` probe |
+| `MongoTimeoutError` / `ECONNREFUSED` on issued Mongo string | `MONGODB_ISSUED_HOST` wrong or port not exposed | Set `MONGODB_ISSUED_HOST` + expose Mongo via Nginx `stream` (§5.2) |
 | `Public Key Retrieval is not allowed` (MySQL) | Missing `allowPublicKeyRetrieval=true` | Add `&allowPublicKeyRetrieval=true` to the JDBC URI |
 | `Unable to determine zone_id for <YOUR_DOMAIN>` | Cloudflare token for wrong zone | Use `webroot` with port 80, or create token for correct zone |
 
@@ -601,13 +646,23 @@ sudo certbot renew --dry-run
 
 ## Files Changed on VPS
 
-- `/etc/nginx/nginx.conf` — added `include /etc/nginx/stream.conf;` before `http {`
-- `/etc/nginx/stream.conf` — new, ALPN multiplex `443` → `8443`/`9813` (app + Postgres container)
-- `/etc/nginx/sites-available/<YOUR_DOMAIN>` — new, `80` + `127.0.0.1:8443`
-- Other sites' configs — `443` → `127.0.0.1:8443` (to free `443` for stream)
+- `/etc/nginx/nginx.conf` — top-level `stream { include /etc/nginx/streams-enabled/*.conf; }` after modules, before `http {`
+- `/etc/nginx/streams-enabled/postgres.conf` — new, two TLS stream servers: `<NON_STD_1>` → `127.0.0.1:9813` (direct A), `<NON_STD_2>` → `127.0.0.1:6432` (pooled B)
+- `/etc/nginx/sites-available/<YOUR_DOMAIN>` — new, `80` + `127.0.0.1:8443` (Manager UI only)
+- Other sites' configs — `443` → `127.0.0.1:8443` (443 stays with the Manager UI; Postgres uses the two non-standard ports)
 - `/etc/systemd/system/omnidb.service` — new, `WorkingDirectory ~/omnidb`, `ExecStart java -jar omnidb-manager-*.jar`
 - `~/omnidb/.env` — all engine root URIs + public hosts + TLS flags
 - `~/omnidb/compose*.yaml` — engine containers (mongo/postgres/mysql + admin UIs)
 - `~/omnidb/certs/` — `ca.key`, `ca.crt`, `server.key`, `server.crt` (Postgres TLS, chowned to UID 999)
 - Container `pg_hba.conf` (`/var/lib/postgresql/18/docker/pg_hba.conf`) — `host` → `hostssl` catch-all rule
-- `iptables` — `INPUT` allow `80`, `443`
+- `iptables` — `INPUT` allow `80`, `443`, plus `<NON_STD_1>`/`<NON_STD_2>` allowlisted to app-server IPs only
+
+### 10.8 Pooled-auth repair (existing pooled DBs)
+
+Databases provisioned pooled before the `auth_query` path existed have the
+pooled flag but no `pgbouncer.user_lookup(text)` function, so pooled logins
+fail. The detail page shows **pooled auth missing** for these and offers
+**Install pooled auth** (admin only, idempotent — skips when already
+installed). New provisions install it automatically. Password rotation needs
+no pooler reload: `auth_query` reads the live SCRAM verifier from
+`pg_authid`, so a reset takes effect on the next pooled login.

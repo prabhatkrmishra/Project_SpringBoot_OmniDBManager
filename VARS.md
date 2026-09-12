@@ -48,6 +48,7 @@ docker compose -f compose.mysql.yaml up -d
 | `POSTGRES_ROOT_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:POSTGRES_PASSWORD` + `PostgresConfig` | **Must change.** Superuser for DDL. |
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | **Yes if enabled** | `compose.postgres.yaml:pgbouncer-init` | **Must change.** Pooler admin (no host folder, static wildcard). |
 | `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | **Yes if enabled** | same | Monitor `stats_users` for `SHOW` only. |
+| `PGBOUNCER_AUTH_PASSWORD` | `change-me-now` | **Yes if Postgres enabled** | `application.yml:app.pgbouncer.auth-password` → `PostgresDatabaseEngine.installPooledAuth` + `compose.postgres.yaml:pgbouncer-init` userlist | **Must change.** SCRAM credential for the pooler `auth_user` (`pgbouncer_auth`). Written plain-text into the pooler `userlist.txt` (required form for `auth_type=scram-sha-256`); file stays 600/pooler-owned in a named volume. Must match the running pooler container or every pooled login fails. Avoid `"`/`\` in this value. |
 
 > Pooling is per-database at provision time (**Route via PgBouncer** checkbox, stored as `pooled`). No toggle after — pooled strings use `PGBOUNCER_ISSUED_PORT` (default `6432`), direct use `POSTGRES_ISSUED_PORT` (default `5432`). When `POSTGRES_ISSUED_HOST` blank, both resolve to `127.0.0.1:9813` / `127.0.0.1:6432` for local dev.
 
@@ -121,8 +122,16 @@ MYSQL_ISSUED_HOST=mysql.example.com
 | `OVERRIDE_PGBOUNCER_PORT` | `6432` | `app.pgbouncer.port` + `compose.postgres.yaml:pgbouncer.ports` | Loopback `127.0.0.1:6432`. Same Docker network as `postgres` (`postgres:5432` internally). |
 | `OVERRIDE_PGBOUNCER_POOL_MODE` | `transaction` | `pgbouncer.ini:pool_mode` | Locked to `transaction`. |
 | `OVERRIDE_PGBOUNCER_MAX_CLIENT_CONN` | `1000` | `pgbouncer.ini:max_client_conn` | Leave headroom for admin (`Hikari maxPool 5`). |
-| `OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE` | `25` | `pgbouncer.ini:default_pool_size` | Keep well below `max_connections` (100). |
+| `OVERRIDE_PGBOUNCER_DEFAULT_POOL_SIZE` | `5` | `pgbouncer.ini:default_pool_size` | Conservative §17 budget: `max_connections`(100) − admin(5) − OmniDB(10) leaves ~85 for tenants. Was `25` (50 DBs × 25 = 1250 backends). |
+| `OVERRIDE_PGBOUNCER_RESERVE_POOL_SIZE` | `2` | `pgbouncer.ini:reserve_pool_size` | Burst headroom per DB. |
+| `OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT` | `3` | `pgbouncer.ini:reserve_pool_timeout` | Seconds to use reserve pool. |
+| `OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS` | `10` | `pgbouncer.ini:max_db_connections` | Hard cap per DB (was `50`). |
+| `DATABASE_PROXY_ENABLED` | `false` | `database.proxy.enabled` | S-06 gate: keep `false` until S-05 evidence + prod hostnames + `:15432` cert + NSG single-port approval. Two-port Nginx stays authoritative. |
+| `DATABASE_PROXY_PORT` | `15432` | `database.proxy.port` | Single public TCP port (target). |
+| `DATABASE_PROXY_DIRECT_HOST` | `` | `database.proxy.direct-host` | e.g. `db.example.com`. Must differ from pooled-host when enabled. |
+| `DATABASE_PROXY_POOLED_HOST` | `` | `database.proxy.pooled-host` | e.g. `pool.example.com`. Unknown SNI is rejected, never falls back. |
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | `compose.postgres.yaml:pgbouncer-init` + `app.pgbouncer.admin-password` | **Must change when Postgres enabled.** Never logged. |
 | `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | same | `stats_users` for `SHOW` only. |
+| `PGBOUNCER_AUTH_PASSWORD` | `change-me-now` | `compose.postgres.yaml:pgbouncer-init` userlist + `app.pgbouncer.auth-password` | **Must change when Postgres enabled.** Pooler `auth_user` SCRAM credential; must match the running container. |
 
-*Privilege scoping:* `admin_users` (reload) ≠ `stats_users` (SHOW only).
+*Privilege scoping:* `admin_users` (reload) ≠ `stats_users` (SHOW only) ≠ `pgbouncer_auth` (`LOGIN` + `CONNECT` on pooled DBs + `EXECUTE` on `pgbouncer.user_lookup` only — never superuser, never table grants).

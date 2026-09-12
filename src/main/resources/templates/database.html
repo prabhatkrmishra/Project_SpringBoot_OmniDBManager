@@ -40,6 +40,10 @@
                                   th:if="${database.provisioned}">provisioned</span>
                             <span class="badge badge-soft-secondary ms-2"
                                   th:if="${!database.provisioned}">external</span>
+                            <span class="badge badge-soft-success ms-2"
+                                  th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and isPooled == true and pooledAuthInstalled == true}">pooled auth ok</span>
+                            <span class="badge badge-soft-warning ms-2"
+                                  th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and isPooled == true and pooledAuthInstalled != true}">pooled auth missing</span>
                         </h2>
                         <div class="d-flex gap-2 align-items-center">
                             <span class="badge badge-soft-info" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and vectorEnabled}" th:title="${vectorVersion != null ? 'pgvector ' + vectorVersion : 'pgvector'}">pgvector<span th:if="${vectorVersion != null}" th:text="' ' + ${vectorVersion}"></span></span>
@@ -164,6 +168,12 @@
                                 </button>
                             </div>
                             <div class="form-text">Alternate — direct Postgres (<code>sslmode=require</code>), use for DDL/migrations only</div>
+                        </div>
+                        <div class="mb-3" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and isPooled == true and pooledAuthInstalled != true and canWrite}">
+                            <div class="alert alert-warning small mb-2">Pooled logins will fail until the PgBouncer lookup is installed on this database.</div>
+                            <form method="post" th:action="@{/postgres/databases/{name}/pooled-auth(name=${database.dbName})}">
+                                <button class="btn btn-sm btn-outline-warning" type="submit"><i class="bi bi-wrench"></i> Install pooled auth</button>
+                            </form>
                         </div>
                         <div class="row g-3">
                             <div class="col-sm-6">

@@ -183,7 +183,7 @@ class ProvisioningServicePostgresTest {
     @Test
     void provisionPostgresWithTlsIncludesSslmodeInConnectionString() {
         PostgresDatabaseEngine tlsEngine = new PostgresDatabaseEngine(postgresRepo, env,
-                "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com:5432", "require");
+                "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 5432, "require");
         ProvisioningService tlsService = new ProvisioningService(mongoRepo, managedRepo, auditRepo, new DatabaseNameValidator(),
                 passwordGen, Clock.fixed(NOW, ZoneOffset.UTC), env, publisher,
                 new DatabaseLockRegistry(), new MongoDatabaseEngine(mongoRepo, env), tlsEngine, postgresRepo, null);
@@ -361,5 +361,107 @@ class ProvisioningServicePostgresTest {
         assertThatThrownBy(() -> noPg.provision(new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "pass12345")))
                 .isInstanceOf(ProvisioningException.class)
                 .hasMessageContaining("Postgres is not enabled");
+    }
+
+    // ── pooled provision + repair ───────────────────────────────────
+
+    private ProvisioningService pooledService(PostgresDatabaseEngine pooledEngine) {
+        return new ProvisioningService(mongoRepo, managedRepo, auditRepo, new DatabaseNameValidator(),
+                passwordGen, Clock.fixed(NOW, ZoneOffset.UTC), env, publisher,
+                new DatabaseLockRegistry(), new MongoDatabaseEngine(mongoRepo, env), pooledEngine, postgresRepo, null);
+    }
+
+    private PostgresDatabaseEngine pooledTestEngine() {
+        var props = new com.pkmprojects.mongodbserver.config.PgbouncerProperties(6432, 27432, "transaction", 1000, 25, "admin", "stats", "authsecret");
+        return new PostgresDatabaseEngine(postgresRepo, env,
+                "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require", props);
+    }
+
+    private ManagedDatabase pooledMetadata() {
+        ManagedDatabase md = new ManagedDatabase("myapp", DatabaseEngineType.POSTGRES, "myapp_user", List.of("CONNECT:myapp"), NOW, NOW, null);
+        md.setStoredPassword("mypass");
+        md.setPooled(true);
+        return md;
+    }
+
+    @Test
+    void provisionPooledInstallsPooledAuthAndIssuesPooledString() {
+        when(passwordGen.generate(16)).thenReturn("generatedPass123");
+        ProvisioningService pooled = pooledService(pooledTestEngine());
+
+        DatabaseInfo info = pooled.provision(new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "", Boolean.TRUE));
+
+        verify(postgresRepo).ensureAuthRole("pgbouncer_auth", "authsecret");
+        verify(postgresRepo).installAuthLookup("myapp", "pgbouncer_auth");
+        ArgumentCaptor<ManagedDatabase> cap = ArgumentCaptor.forClass(ManagedDatabase.class);
+        verify(managedRepo).save(cap.capture());
+        assertThat(cap.getValue().isPooled()).isTrue();
+        assertThat(info.connectionString()).contains("pg.example.com:27432");
+    }
+
+    @Test
+    void provisionDirectSkipsPooledAuth() {
+        DatabaseInfo info = service.provision(new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "mysecret123"));
+
+        verify(postgresRepo, never()).ensureAuthRole(any(), any());
+        verify(postgresRepo, never()).installAuthLookup(any(), any());
+        assertThat(info.connectionString()).contains("127.0.0.1:9813");
+    }
+
+    @Test
+    void repairPooledAuthInstallsWhenMissing() {
+        when(postgresRepo.databaseExists("myapp")).thenReturn(true);
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp")).thenReturn(Optional.of(pooledMetadata()));
+        when(postgresRepo.isAuthLookupInstalled("myapp")).thenReturn(false);
+        ProvisioningService pooled = pooledService(pooledTestEngine());
+
+        pooled.repairPooledAuth(DatabaseEngineType.POSTGRES, "myapp");
+
+        verify(postgresRepo).ensureAuthRole("pgbouncer_auth", "authsecret");
+        verify(postgresRepo).installAuthLookup("myapp", "pgbouncer_auth");
+    }
+
+    @Test
+    void repairPooledAuthSkipsWhenAlreadyInstalled() {
+        when(postgresRepo.databaseExists("myapp")).thenReturn(true);
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp")).thenReturn(Optional.of(pooledMetadata()));
+        when(postgresRepo.isAuthLookupInstalled("myapp")).thenReturn(true);
+        ProvisioningService pooled = pooledService(pooledTestEngine());
+
+        pooled.repairPooledAuth(DatabaseEngineType.POSTGRES, "myapp");
+
+        verify(postgresRepo, never()).ensureAuthRole(any(), any());
+        verify(postgresRepo, never()).installAuthLookup(any(), any());
+    }
+
+    @Test
+    void repairPooledAuthRefusesDirectDatabase() {
+        ManagedDatabase md = pooledMetadata();
+        md.setPooled(false);
+        when(postgresRepo.databaseExists("myapp")).thenReturn(true);
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp")).thenReturn(Optional.of(md));
+
+        assertThatThrownBy(() -> service.repairPooledAuth(DatabaseEngineType.POSTGRES, "myapp"))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("not pooled");
+        verify(postgresRepo, never()).installAuthLookup(any(), any());
+    }
+
+    @Test
+    void repairPooledAuthThrowsWhenNotProvisioned() {
+        when(postgresRepo.databaseExists("myapp")).thenReturn(true);
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.repairPooledAuth(DatabaseEngineType.POSTGRES, "myapp"))
+                .isInstanceOf(DatabaseNotFoundException.class);
+    }
+
+    @Test
+    void isPooledAuthInstalledDelegatesToProbe() {
+        ProvisioningService pooled = pooledService(pooledTestEngine());
+        when(postgresRepo.isAuthLookupInstalled("myapp")).thenReturn(true);
+
+        assertThat(pooled.isPooledAuthInstalled(DatabaseEngineType.POSTGRES, "myapp")).isTrue();
+        assertThat(service.isPooledAuthInstalled(DatabaseEngineType.MONGO, "myapp")).isFalse();
     }
 }

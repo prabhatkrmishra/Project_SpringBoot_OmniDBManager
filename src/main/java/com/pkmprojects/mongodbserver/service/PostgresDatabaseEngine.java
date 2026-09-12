@@ -137,6 +137,50 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         postgresDatabaseRepository.grantPrivileges(dbName, userName);
     }
 
+    /**
+     * Installs the PgBouncer {@code auth_query} path for a pooled database:
+     * cluster-wide least-privilege auth role + per-database lookup function.
+     * Requires pooler config (throws when pooling is not configured) and a
+     * non-blank auth password (never installs with a default/empty secret).
+     */
+    public void installPooledAuth(String dbName) {
+        if (pgbouncerProperties == null) {
+            throw new IllegalStateException("Pooling is not configured for database '" + dbName + "' — app.pgbouncer is missing");
+        }
+        String authPassword = pgbouncerProperties.authPassword();
+        if (authPassword == null || authPassword.isBlank()) {
+            throw new IllegalStateException("Refusing to install pooled auth for '" + dbName + "' with a blank PGBOUNCER_AUTH_PASSWORD");
+        }
+        postgresDatabaseRepository.ensureAuthRole(
+                com.pkmprojects.mongodbserver.config.PgbouncerProperties.AUTH_USER, authPassword);
+        postgresDatabaseRepository.installAuthLookup(
+                dbName, com.pkmprojects.mongodbserver.config.PgbouncerProperties.AUTH_USER);
+    }
+
+    public boolean isPooledAuthInstalled(String dbName) {
+        return postgresDatabaseRepository.isAuthLookupInstalled(dbName);
+    }
+
+    @Override
+    public com.pkmprojects.mongodbserver.model.DatabaseConnections connectionEndpoints(
+            String dbName, String userName, String password, boolean pooled) {
+        com.pkmprojects.mongodbserver.model.SslMode mode =
+                com.pkmprojects.mongodbserver.model.SslMode.parse(sslmode,
+                        com.pkmprojects.mongodbserver.model.SslMode.REQUIRE);
+        com.pkmprojects.mongodbserver.model.ConnectionEndpoint direct =
+                new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                        resolveDirectHost(), issuedPort, dbName, userName, password, mode,
+                        com.pkmprojects.mongodbserver.model.ConnectionMode.DIRECT, null);
+        if (!pooled) return new com.pkmprojects.mongodbserver.model.DatabaseConnections(direct, null);
+        int pooledPort = pgbouncerProperties != null ? pgbouncerProperties.issuedPort() : 6432;
+        com.pkmprojects.mongodbserver.model.ConnectionEndpoint pooledEp =
+                new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                        resolvePooledHost(), pooledPort, dbName, userName, password, mode,
+                        com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED,
+                        com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
+        return new com.pkmprojects.mongodbserver.model.DatabaseConnections(direct, pooledEp);
+    }
+
     public boolean isVectorAvailable() {
         return postgresDatabaseRepository.isVectorAvailable();
     }

@@ -152,4 +152,45 @@ class PostgresDatabaseRepositoryUnitTest {
         org.mockito.Mockito.verify(jdbc).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.startsWith("CREATE ROLE \"bob\"") && sql.contains("LOGIN") && sql.contains("'secret123'")));
         org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.startsWith("ALTER ROLE")));
     }
+
+    // ── PgBouncer auth_query support ────────────────────────────────────
+
+    @Test
+    void ensureAuthRoleCreatesLeastPrivilegeRoleWhenMissing() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(0);
+        repo.ensureAuthRole("pgbouncer_auth", "secret1234");
+        org.mockito.Mockito.verify(jdbc).execute((String) org.mockito.Mockito.argThat((String sql) ->
+                sql.startsWith("CREATE ROLE \"pgbouncer_auth\"")
+                        && sql.contains("LOGIN")
+                        && sql.contains("NOSUPERUSER")
+                        && sql.contains("NOCREATEDB")
+                        && sql.contains("NOCREATEROLE")
+                        && sql.contains("'secret1234'")));
+    }
+
+    @Test
+    void ensureAuthRoleAltersExistingRole() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(1);
+        repo.ensureAuthRole("pgbouncer_auth", "secret1234");
+        org.mockito.Mockito.verify(jdbc).execute((String) org.mockito.Mockito.argThat((String sql) ->
+                sql.startsWith("ALTER ROLE \"pgbouncer_auth\"") && sql.contains("NOSUPERUSER")));
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.Mockito.argThat((String sql) -> sql.startsWith("CREATE ROLE")));
+    }
+
+    @Test
+    void ensureAuthRoleRejectsPasswordWithMetacharacters() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new PostgresDatabaseRepository(jdbc, "jdbc:postgresql://127.0.0.1:9813/postgres", "root", "root");
+        assertThatThrownBy(() -> repo.ensureAuthRole("pgbouncer_auth", "pass;word"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disallowed SQL metacharacters");
+    }
 }

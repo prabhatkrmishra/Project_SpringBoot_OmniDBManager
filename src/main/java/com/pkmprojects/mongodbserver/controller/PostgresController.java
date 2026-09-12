@@ -100,7 +100,7 @@ public class PostgresController {
             addProvisionHostAttributes(model);
             return "provision-postgres";
         }
-        CreateDatabaseForm withEngine = new CreateDatabaseForm(form.dbName(), DatabaseEngineType.POSTGRES, form.userName(), form.password());
+        CreateDatabaseForm withEngine = new CreateDatabaseForm(form.dbName(), DatabaseEngineType.POSTGRES, form.userName(), form.password(), form.pooled());
         DatabaseInfo created = provisioningService.provision(withEngine);
         if (enableVector) {
             try {
@@ -153,6 +153,19 @@ public class PostgresController {
         return "redirect:/postgres/databases/" + dbName;
     }
 
+    @PostMapping("/databases/{dbName}/pooled-auth")
+    @PreAuthorize("hasRole('ADMIN')")
+    public String repairPooledAuth(@PathVariable String dbName, RedirectAttributes redirectAttributes) {
+        try {
+            provisioningService.repairPooledAuth(DatabaseEngineType.POSTGRES, dbName);
+            redirectAttributes.addFlashAttribute("flashSuccess", "Pooled auth installed on '" + dbName + "' — pooled logins can now verify via PgBouncer");
+        } catch (Exception e) {
+            log.warn("repairPooledAuth failed for '{}'", dbName, e);
+            redirectAttributes.addFlashAttribute("flashError", "Could not install pooled auth on '" + dbName + "'");
+        }
+        return "redirect:/postgres/databases/" + dbName;
+    }
+
     @GetMapping("/databases/{dbName}")
     public String detail(@PathVariable String dbName, Model model) {
         var db = provisioningService.getDatabase(DatabaseEngineType.POSTGRES, dbName);
@@ -171,6 +184,7 @@ public class PostgresController {
         model.addAttribute("vectorAvailable", provisioningService.isVectorAvailable());
         model.addAttribute("vectorEnabled", provisioningService.isVectorEnabled(DatabaseEngineType.POSTGRES, dbName));
         model.addAttribute("vectorVersion", provisioningService.vectorVersion(DatabaseEngineType.POSTGRES, dbName));
+        model.addAttribute("pooledAuthInstalled", provisioningService.isPooledAuthInstalled(DatabaseEngineType.POSTGRES, dbName));
         if (!model.containsAttribute("resetForm")) model.addAttribute("resetForm", new ResetPasswordForm(""));
         // Pooled link only when this DB was provisioned with pooling — compute alternate string for display
         boolean isPooled = false;

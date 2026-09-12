@@ -1,0 +1,36 @@
+# S-05 spike evidence — NOT active. Do not include in compose until S-06 gate passes:
+# prod direct/pooled-hostname + :15432 cert + NSG single-port approval.
+#
+# Single-port SNI split for PostgreSQL (plan §§3-5, §56):
+#   db.example.com:15432   -> postgres:5432  (DIRECT, full session)
+#   pool.example.com:15432 -> pgbouncer:6432 -> postgres:5432 (POOLED, transaction)
+#   unknown SNI            -> reject (no fallback to postgres).
+#
+# Requires: stream_ssl_preread module, TLS from clients (so SNI exists),
+# TLS passthrough to backends (proxy never sees passwords), certs covering
+# both hostnames on the backends.
+#
+# stream {
+#     map $ssl_preread_server_name $pg_backend {
+#         db.example.com    postgres_direct;
+#         pool.example.com  postgres_pooled;
+#         default           blackhole;
+#     }
+#     upstream postgres_direct { server postgres:5432; }
+#     upstream postgres_pooled { server pgbouncer:6432; }
+#     server {
+#         listen 15432;
+#         ssl_preread on;
+#         proxy_pass $pg_backend;
+#         proxy_connect_timeout 10s;
+#         proxy_timeout 1h;
+#     }
+#     # blackhole upstream intentionally absent -> connection refused, logged
+#     # with $ssl_preread_server_name for SNI-failure audit.
+# }
+#
+# S-05 finding: Nginx stream+ssl_preread fits this repo (Nginx precedent in
+# deploy/nginx.conf.example); HAProxy tcp-request+req.ssl_sni is the fallback
+# if passthrough cert handling proves cleaner there. JDBC sends SNI = hostname
+# when sslmode=require/verify-full, so both drivers under test qualify.
+# Cutover stays blocked on prod hostnames + wildcard/SAN cert + NSG 15432-only.

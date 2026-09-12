@@ -232,6 +232,14 @@ public class ProvisioningService {
                     engine.createDatabase(dbName, userName);
                     pgDbCreated = true;
                     engine.grantPrivileges(dbName, userName);
+                    if (form.isPooled()) {
+                        // Pooled DBs need the auth_query path or every pooled
+                        // login fails: least-privilege auth role + per-DB
+                        // lookup function. Runs after grants so the target DB
+                        // exists. Failure here fails provisioning — a pooled
+                        // record without the lookup is worse than no record.
+                        engine.installPooledAuth(dbName);
+                    }
                 } else if (engineType == DatabaseEngineType.MYSQL) {
                     engine.createUser(dbName, userName, password);
                     mysqlUserCreated = true;
@@ -633,6 +641,60 @@ public class ProvisioningService {
     private static String safeMessage(Throwable t) {
         String m = t.getMessage();
         return (m == null || m.isBlank()) ? t.getClass().getSimpleName() : m;
+    }
+
+    /**
+     * Repairs (or verifies) the PgBouncer {@code auth_query} path for an
+     * already-provisioned pooled database: least-privilege auth role +
+     * per-database lookup function. Idempotent — skips when the lookup
+     * already exists. Only meaningful for pooled records; refuses direct
+     * ones so the repair button cannot misconfigure a direct database.
+     */
+    public void repairPooledAuth(DatabaseEngineType engineType, String dbName) {
+        if (engineType != DatabaseEngineType.POSTGRES) throw new ProvisioningException("Pooled auth repair is only available for PostgreSQL");
+        String n = dbName.trim();
+        nameValidator.validatePostgresDatabaseName(n);
+        databaseLocks.withLock(lockKey(engineType, n), () -> {
+            requireDatabase(n, engineType);
+            ManagedDatabase md = managedDatabaseStore.findByEngineTypeAndDbName(engineType, n)
+                    .orElseThrow(() -> new DatabaseNotFoundException("Database '" + n + "' is not provisioned in " + engineType));
+            if (!md.isPooled()) {
+                throw new ProvisioningException("Database '" + n + "' is not pooled — pooled auth does not apply");
+            }
+            DatabaseEngine pg = engineFor(engineType);
+            if (pg.isPooledAuthInstalled(n)) {
+                log.info("Pooled auth already installed on '{}' — skipping", n);
+                return;
+            }
+            try {
+                pg.installPooledAuth(n);
+            } catch (Exception e) {
+                String detail = e instanceof org.springframework.dao.DataAccessException dae
+                        ? safeMessage(dae.getMostSpecificCause())
+                        : safeMessage(e);
+                try {
+                    audit(AuditEvent.POOLED_AUTH_ENABLE_FAILED, n, engineType, null, clock.instant());
+                } catch (Exception auditEx) {
+                    log.warn("Could not record POOLED_AUTH_ENABLE_FAILED audit for '{}'", n, auditEx);
+                }
+                throw new ProvisioningException("Could not install pooled auth on '" + n + "': " + detail, e);
+            }
+            audit(AuditEvent.POOLED_AUTH_ENABLED, n, engineType, null, clock.instant());
+            log.info("Repaired pooled auth on database '{}'", n);
+        });
+    }
+
+    public boolean isPooledAuthInstalled(DatabaseEngineType engineType, String dbName) {
+        if (engineType != DatabaseEngineType.POSTGRES) return false;
+        if (postgresEngine.isEmpty()) return false;
+        nameValidator.validatePostgresDatabaseName(dbName);
+        try { return postgresEngine.get().isPooledAuthInstalled(dbName); } catch (org.springframework.dao.DataAccessException e) {
+            log.warn("isPooledAuthInstalled({}) failed", dbName, e);
+            return false;
+        } catch (Exception e) {
+            log.warn("isPooledAuthInstalled({}) failed unexpectedly", dbName, e);
+            return false;
+        }
     }
 
     public boolean isVectorEnabled(DatabaseEngineType engineType, String dbName) {

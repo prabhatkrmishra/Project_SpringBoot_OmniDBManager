@@ -1,5 +1,6 @@
 package com.pkmprojects.mongodbserver.service;
 
+import com.pkmprojects.mongodbserver.config.PgbouncerProperties;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
 class PostgresDatabaseEngineTest {
@@ -20,6 +23,15 @@ class PostgresDatabaseEngineTest {
 
     private PostgresDatabaseEngine engine(String uri, String issuedHost, String sslmode) {
         return new PostgresDatabaseEngine(postgresDatabaseRepository, environment, uri, issuedHost, sslmode);
+    }
+
+    private PostgresDatabaseEngine directEngine(String uri, String issuedHost, int issuedPort, String sslmode) {
+        return new PostgresDatabaseEngine(postgresDatabaseRepository, environment, uri, issuedHost, issuedPort, sslmode);
+    }
+
+    private PostgresDatabaseEngine pooledEngine(String uri, String issuedHost, int directPort, int pooledPort, String sslmode) {
+        PgbouncerProperties props = new PgbouncerProperties(6432, pooledPort, "transaction", 1000, 25, "admin", "stats", "authsecret");
+        return new PostgresDatabaseEngine(postgresDatabaseRepository, environment, uri, issuedHost, directPort, sslmode, props);
     }
 
     @Test
@@ -37,17 +49,33 @@ class PostgresDatabaseEngineTest {
 
     @Test
     void buildConnectionStringWithTlsRequire() {
-        PostgresDatabaseEngine e = engine("jdbc:postgresql://127.0.0.1:9813/postgres", "postgres.example.com:5432", "require");
+        PostgresDatabaseEngine e = directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "postgres.example.com", 5432, "require");
         String cs = e.buildConnectionString("myuser", "mypass", "mydb");
         assertThat(cs).isEqualTo("postgresql://myuser:mypass@postgres.example.com:5432/mydb?sslmode=require&application_name=omnidb");
     }
 
     @Test
+    void buildConnectionStringWithCustomDirectPort() {
+        PostgresDatabaseEngine e = directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require");
+        String cs = e.buildConnectionString("myuser", "mypass", "mydb");
+        assertThat(cs).isEqualTo("postgresql://myuser:mypass@pg.example.com:27431/mydb?sslmode=require&application_name=omnidb");
+    }
+
+    @Test
     void buildConnectionStringWithTlsVerifyFull() {
-        PostgresDatabaseEngine e = engine("jdbc:postgresql://127.0.0.1:9813/postgres", "postgres.example.com:5432", "verify-full");
+        PostgresDatabaseEngine e = directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "postgres.example.com", 5432, "verify-full");
         String cs = e.buildConnectionString("myuser", "mypass", "mydb");
         assertThat(cs).contains("sslmode=verify-full");
         assertThat(cs).contains("application_name=omnidb");
+    }
+
+    @Test
+    void buildConnectionStringStripsLegacyHostPort() {
+        // Legacy POSTGRES_ISSUED_HOST=host:port is stripped with a warning;
+        // the port comes from POSTGRES_ISSUED_PORT instead.
+        PostgresDatabaseEngine e = directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com:9999", 27431, "require");
+        String cs = e.buildConnectionString("myuser", "mypass", "mydb");
+        assertThat(cs).isEqualTo("postgresql://myuser:mypass@pg.example.com:27431/mydb?sslmode=require&application_name=omnidb");
     }
 
     @Test
@@ -110,5 +138,67 @@ class PostgresDatabaseEngineTest {
     void uriEncodeHandlesUtf8() {
         // é = 0xC3 0xA9 in UTF-8
         assertThat(PostgresDatabaseEngine.uriEncode("café")).isEqualTo("caf%C3%A9");
+    }
+
+    @Test
+    void buildPooledConnectionStringUsesPublicPooledPort() {
+        PostgresDatabaseEngine e = pooledEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, 27432, "require");
+        String cs = e.buildPooledConnectionString("myuser", "mypass", "mydb");
+        assertThat(cs).isEqualTo("postgresql://myuser:mypass@pg.example.com:27432/mydb?sslmode=require&application_name=omnidb");
+    }
+
+    @Test
+    void buildPooledConnectionStringLocalDev() {
+        PostgresDatabaseEngine e = pooledEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "", 5432, 6432, "require");
+        String cs = e.buildPooledConnectionString("myuser", "mypass", "mydb");
+        assertThat(cs).isEqualTo("postgresql://myuser:mypass@127.0.0.1:6432/mydb?sslmode=require&application_name=omnidb");
+    }
+
+    @Test
+    void resolveDirectAndPooledHostsSplit() {
+        PostgresDatabaseEngine e = pooledEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, 27432, "require");
+        assertThat(e.resolveDirectHost()).isEqualTo("pg.example.com:27431");
+        assertThat(e.resolvePooledHost()).isEqualTo("pg.example.com:27432");
+    }
+
+    @Test
+    void resolvePooledHostStripsLegacyPort() {
+        PostgresDatabaseEngine e = pooledEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com:5432", 27431, 27432, "require");
+        assertThat(e.resolvePooledHost()).isEqualTo("pg.example.com:27432");
+    }
+
+    @Test
+    void constructorRejectsInvalidDirectPort() {
+        assertThatThrownBy(() -> directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 0, "require"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.postgres.issued-port");
+        assertThatThrownBy(() -> directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 70000, "require"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.postgres.issued-port");
+    }
+
+    @Test
+    void constructorRejectsInvalidPooledPort() {
+        PgbouncerProperties bad = new PgbouncerProperties(6432, 0, "transaction", 1000, 25, "admin", "stats", "authsecret");
+        assertThatThrownBy(() -> new PostgresDatabaseEngine(postgresDatabaseRepository, environment,
+                "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require", bad))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("app.pgbouncer.issued-port");
+    }
+
+    @Test
+    void installPooledAuthDelegatesToRepository() {
+        PostgresDatabaseEngine e = pooledEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, 27432, "require");
+        e.installPooledAuth("myapp");
+        verify(postgresDatabaseRepository).ensureAuthRole("pgbouncer_auth", "authsecret");
+        verify(postgresDatabaseRepository).installAuthLookup("myapp", "pgbouncer_auth");
+    }
+
+    @Test
+    void installPooledAuthWithoutPoolerConfigThrows() {
+        PostgresDatabaseEngine e = engine("jdbc:postgresql://127.0.0.1:9813/postgres", "", "require");
+        assertThatThrownBy(() -> e.installPooledAuth("myapp"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Pooling is not configured");
     }
 }
