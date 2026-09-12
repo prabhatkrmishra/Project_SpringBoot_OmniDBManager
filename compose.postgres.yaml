@@ -165,10 +165,12 @@ services:
         RESERVE_POOL_SIZE="$${OVERRIDE_PGBOUNCER_RESERVE_POOL_SIZE:-2}"
         RESERVE_POOL_TIMEOUT="$${OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT:-3}"
         MAX_DB_CONNECTIONS="$${OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS:-10}"
-        md5line() { u="$$1"; p="$$2"; h=$$(printf '%s%s' "$$p" "$$u" | md5sum | cut -d' ' -f1); printf '"%s" "md5%s"\n' "$$u" "$$h"; }
-        # auth_user entry is plain-text (SCRAM requirement — see above).
-        # Avoid double-quote/backslash in PGBOUNCER_AUTH_PASSWORD or this
-        # line malforms and pooled logins fail closed (loud, not silent).
+        # ALL secrets are plain-text: with auth_type=scram-sha-256 the pooler
+        # cannot do SCRAM from an md5 hash ("user has MD5 secret" — breaks the
+        # stats healthcheck AND the admin console used for PAUSE/RESUME/
+        # RECONNECT). File stays 600, pooler-uid-owned, in a named volume.
+        # Avoid double-quote/backslash in these passwords or the line malforms
+        # and logins fail closed (loud, not silent).
         authline() { u="$$1"; p="$$2"; printf '"%s" "%s"\n' "$$u" "$$p"; }
         cat > /etc/pgbouncer/pgbouncer.ini <<INI
         [databases]
@@ -225,7 +227,7 @@ services:
         server_tls_protocols = secure
         TLSINI
         fi
-                { md5line "$$ADMIN_USER" "$$PGBOUNCER_ADMIN_PASSWORD"; md5line "$$STATS_USER" "$$PGBOUNCER_STATS_PASSWORD"; authline "$$AUTH_USER" "$$PGBOUNCER_AUTH_PASSWORD"; } > /etc/pgbouncer/userlist.txt
+                { authline "$$ADMIN_USER" "$$PGBOUNCER_ADMIN_PASSWORD"; authline "$$STATS_USER" "$$PGBOUNCER_STATS_PASSWORD"; authline "$$AUTH_USER" "$$PGBOUNCER_AUTH_PASSWORD"; } > /etc/pgbouncer/userlist.txt
         chmod 600 /etc/pgbouncer/userlist.txt
         # The pgbouncer image runs as uid:gid 70:70, so hand it ownership of
         # the credentials file (stays 600) — otherwise it fails to open auth_file
