@@ -61,7 +61,7 @@ class ProvisioningPooledLifecycleTest {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         var props = new com.pkmprojects.mongodbserver.config.PgbouncerProperties(
-                6432, 27432, "transaction", 1000, 5, "admin", "stats", "authsecret");
+                6432, 27432, "transaction", 1000, 5, 2, 3, 10, "admin", "stats", "authsecret");
         var engine = new PostgresDatabaseEngine(postgresRepo, env,
                 "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require", props);
         pooled = new ProvisioningService(mongoRepo, managedRepo, auditRepo, new DatabaseNameValidator(),

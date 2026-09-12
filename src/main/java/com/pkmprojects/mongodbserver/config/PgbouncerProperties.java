@@ -39,15 +39,15 @@ public record PgbouncerProperties(
         return STATS_USER;
     }
 
-    /** Compact canonical constructor keeps backward-compat for 8-arg test dtype. */
+    /**
+     * Default pool mode. NOTE: do NOT add a second constructor overload —
+     * Spring Boot only applies record constructor binding with a single
+     * canonical constructor; an overload silently falls back to JavaBean
+     * instantiation and the whole application context fails to start
+     * ("No default constructor found").
+     */
     public PgbouncerProperties {
         if (poolMode == null || poolMode.isBlank()) poolMode = "transaction";
     }
 
-    /** Legacy 8-arg shape used by older tests/config — fills conservative §17 defaults. */
-    public PgbouncerProperties(int port, int issuedPort, String poolMode, int maxClientConn,
-            int defaultPoolSize, String adminPassword, String statsPassword, String authPassword) {
-        this(port, issuedPort, poolMode, maxClientConn, defaultPoolSize,
-                2, 3, 10, adminPassword, statsPassword, authPassword);
-    }
 }

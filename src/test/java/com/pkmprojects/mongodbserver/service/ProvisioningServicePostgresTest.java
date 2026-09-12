@@ -375,7 +375,7 @@ class ProvisioningServicePostgresTest {
     }
 
     private PostgresDatabaseEngine pooledTestEngine() {
-        var props = new com.pkmprojects.mongodbserver.config.PgbouncerProperties(6432, 27432, "transaction", 1000, 25, "admin", "stats", "authsecret");
+        var props = new com.pkmprojects.mongodbserver.config.PgbouncerProperties(6432, 27432, "transaction", 1000, 25, 2, 3, 10, "admin", "stats", "authsecret");
         return new PostgresDatabaseEngine(postgresRepo, env,
                 "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require", props);
     }

@@ -30,7 +30,7 @@ class PostgresDatabaseEngineTest {
     }
 
     private PostgresDatabaseEngine pooledEngine(String uri, String issuedHost, int directPort, int pooledPort, String sslmode) {
-        PgbouncerProperties props = new PgbouncerProperties(6432, pooledPort, "transaction", 1000, 25, "admin", "stats", "authsecret");
+        PgbouncerProperties props = new PgbouncerProperties(6432, pooledPort, "transaction", 1000, 25, 2, 3, 10, "admin", "stats", "authsecret");
         return new PostgresDatabaseEngine(postgresDatabaseRepository, environment, uri, issuedHost, directPort, sslmode, props);
     }
 
@@ -179,7 +179,7 @@ class PostgresDatabaseEngineTest {
 
     @Test
     void constructorRejectsInvalidPooledPort() {
-        PgbouncerProperties bad = new PgbouncerProperties(6432, 0, "transaction", 1000, 25, "admin", "stats", "authsecret");
+        PgbouncerProperties bad = new PgbouncerProperties(6432, 0, "transaction", 1000, 25, 2, 3, 10, "admin", "stats", "authsecret");
         assertThatThrownBy(() -> new PostgresDatabaseEngine(postgresDatabaseRepository, environment,
                 "jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require", bad))
                 .isInstanceOf(IllegalArgumentException.class)
