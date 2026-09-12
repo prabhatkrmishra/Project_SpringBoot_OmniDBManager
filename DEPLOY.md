@@ -1,6 +1,6 @@
-# DEPLOY — OmniDB Manager Deployment Guide
+# General guideline
 
-> **General guideline** for deploying OmniDB Manager on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. Manager UI on `443` (HTTPS); Postgres on two non-standard public TCP ports `A` direct → `127.0.0.1:9813` (migrations/admin) and `B` pooled → `127.0.0.1:6432` (app/workers) via Nginx `stream` (TLS + IP allowlist, grey-cloud DNS). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<NON_STD_1>`/`<NON_STD_2>` (e.g. `27431`/`27432`) to your environment.
+> **For deploying OmniDB Manager** on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. Manager UI on `443` (HTTPS); Postgres on two non-standard public TCP ports `A` direct → `127.0.0.1:9813` (migrations/admin) and `B` pooled → `127.0.0.1:6432` (app/workers) via Nginx `stream` (TLS + IP allowlist, grey-cloud DNS). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<NON_STD_1>`/`<NON_STD_2>` (e.g. `27431`/`27432`) to your environment.
 
 ## Architecture
 
@@ -206,7 +206,7 @@ OVERRIDE_MYSQL_TLS=true        # issued strings get ?sslMode=REQUIRED (or VERIFY
 
 Manager UI stays on `443` via `127.0.0.1:8443` (plain `http` reverse proxy, no `stream` multiplex). Postgres is exposed on **two** separate public TCP ports via `stream` — `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS and are IP-allowlisted (never `0.0.0.0/0`); DNS must be grey-cloud (DNS only) so TCP reaches your VPS.
 
-> **Future: single-port SNI proxy.** The planned end-state serves both links on one public port `:15432` (`db.*` → Postgres, `pool.*` → PgBouncer, unknown SNI rejected). Do **not** cut over yet — see `deploy/s06-cutover-gate.md` (19 checks: proxy health, SNI routing, TLS, isolation, failure semantics) and `deploy/database-proxy.stream.conf`. Until every box passes, this two-port section stays authoritative.
+> **S-06 single-host TLS bridge (implemented, cutover gate pending).** One public hostname + one public port `:15432` serve BOTH modes via `options=-c omnidb.mode=<direct|pooled>` (see `deploy/s06-bridge-gate.md` for the live checklist and `deploy/db-proxy/` for the bridge). The old pooled-only nginx passthrough (`deploy/database-proxy.stream.conf`, superseded — see `deploy/s06-cutover-gate.md` header) and the dual-hostname SNI plan are retired. Do **not** cut over production until every bridge-gate box passes.
 
 ```bash
 # Move any existing sites that listen on 443 to 127.0.0.1:8443
