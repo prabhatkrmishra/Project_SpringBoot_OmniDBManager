@@ -45,9 +45,17 @@ public class ConnectionValidationService {
         var conns = engine.connectionEndpoints(dbName, user, password, true);
         if (conns.pooled() == null) return new PooledValidation(false, ValidationPath.NONE);
         if (run("pooled", conns.pooled())) return new PooledValidation(true, ValidationPath.PUBLIC);
+        // Loopback sslmode must match pooler reality, not the public contract:
+        // proxy on => pooler terminates client TLS (require); proxy off =>
+        // pooler is plaintext (two-port TLS-termination model) so require
+        // would fail closed against 127.0.0.1:6432. Same-host hop — no
+        // security lost; SCRAM + auth_query are still fully exercised.
+        var loopbackSsl = engine.isProxyMode()
+                ? conns.pooled().sslMode()
+                : com.pkmprojects.mongodbserver.model.SslMode.DISABLE;
         var loopback = new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
                 "127.0.0.1:" + conns.pooled().port(), conns.pooled().port(),
-                dbName, user, password, conns.pooled().sslMode(),
+                dbName, user, password, loopbackSsl,
                 com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED,
                 com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
         if (run("pooled-loopback", loopback)) return new PooledValidation(true, ValidationPath.LOOPBACK);

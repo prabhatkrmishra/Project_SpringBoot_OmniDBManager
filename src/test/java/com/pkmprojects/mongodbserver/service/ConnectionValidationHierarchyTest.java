@@ -41,9 +41,12 @@ class ConnectionValidationHierarchyTest {
             super(engine, new PostgresConnectionStringBuilder());
         }
 
+        ConnectionEndpoint loopbackEndpoint;
+
         @Override
         protected boolean run(String mode, ConnectionEndpoint endpoint) {
             attempted.add(mode);
+            if (mode.equals("pooled-loopback")) loopbackEndpoint = endpoint;
             return mode.equals("pooled") ? publicOk : loopbackOk;
         }
     }
@@ -83,6 +86,20 @@ class ConnectionValidationHierarchyTest {
         var r = s.validatePooledDetailed("myapp", "u", "p");
         assertThat(r.healthy()).isFalse();
         assertThat(r.path()).isEqualTo(ConnectionValidationService.ValidationPath.NONE);
+    }
+
+    @Test
+    void loopbackSslModeFollowsPoolerReality() {
+        // proxy off (plaintext pooler): loopback must be DISABLE or require
+        // fails closed against 127.0.0.1:6432 and provisioning can never pass
+        Scripted off = scripted(false, true, true);
+        off.validatePooledDetailed("myapp", "u", "p");
+        assertThat(off.loopbackEndpoint.sslMode()).isEqualTo(SslMode.DISABLE);
+        // proxy on (pooler terminates client TLS): loopback keeps require
+        when(engine.isProxyMode()).thenReturn(true);
+        Scripted on = scripted(false, true, true);
+        on.validatePooledDetailed("myapp", "u", "p");
+        assertThat(on.loopbackEndpoint.sslMode()).isEqualTo(SslMode.REQUIRE);
     }
 
     @Test
