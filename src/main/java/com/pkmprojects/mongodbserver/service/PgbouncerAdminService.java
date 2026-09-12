@@ -86,9 +86,22 @@ public class PgbouncerAdminService {
         return proxyProperties != null && proxyProperties.isConfigured() ? "require" : "disable";
     }
 
+    // NOTE: assumeMinServerVersion suppresses the driver's connect-time
+    // `SET extra_float_digits` probe, which the pgbouncer *console* database
+    // rejects with "SET failed" (proven live — every PAUSE/RESUME/RECONNECT
+    // died on it while psql worked). Tenant databases accept SET, so only
+    // the console URLs need this. Server is PG18; 9.0 is just the driver's
+    // "don't probe" floor.
+    static final String ASSUME_VERSION = "&assumeMinServerVersion=9.0";
+
+    /** JDBC URL for the pooler console — package-visible for tests. */
+    String adminJdbcUrl() {
+        return "jdbc:postgresql://127.0.0.1:" + properties.port()
+                + "/pgbouncer?sslmode=" + poolerSslMode() + ASSUME_VERSION + "&connectTimeout=2&socketTimeout=5";
+    }
+
     private Connection openAdminConnection() throws Exception {
-        String url = "jdbc:postgresql://127.0.0.1:" + properties.port()
-                + "/pgbouncer?sslmode=" + poolerSslMode() + "&connectTimeout=2&socketTimeout=5";
+        String url = adminJdbcUrl();
         String pass = properties.adminPassword();
         return DriverManager.getConnection(url, properties.adminUser(), pass == null ? "" : pass);
     }

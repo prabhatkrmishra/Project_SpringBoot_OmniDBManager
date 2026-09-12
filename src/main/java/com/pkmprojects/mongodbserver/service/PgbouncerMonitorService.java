@@ -155,7 +155,10 @@ public class PgbouncerMonitorService {
 
     private Connection openAdminConnection() throws Exception {
         // pgbouncer virtual database — connect to 127.0.0.1:port/pgbouncer with stats user
-        String url = "jdbc:postgresql://127.0.0.1:" + properties.port() + "/pgbouncer?sslmode=" + poolerSslMode() + "&connectTimeout=2&socketTimeout=3";
+        // Same console-SET suppression as PgbouncerAdminService.ASSUME_VERSION
+        // (SHOW POOLS via JDBC died with "SET failed" live).
+        String url = "jdbc:postgresql://127.0.0.1:" + properties.port() + "/pgbouncer?sslmode=" + poolerSslMode()
+                + PgbouncerAdminService.ASSUME_VERSION + "&connectTimeout=2&socketTimeout=3";
         String user = properties.statsUser();
         String pass = resolveStatsPassword();
         return DriverManager.getConnection(url, user, pass);
