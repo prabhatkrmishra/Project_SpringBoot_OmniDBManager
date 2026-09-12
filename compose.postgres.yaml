@@ -276,6 +276,7 @@ services:
     tmpfs:
       - /tmp
       - /var/cache/nginx
+      - /var/log/nginx
       - /run
       - /run-rendered
     ports:
