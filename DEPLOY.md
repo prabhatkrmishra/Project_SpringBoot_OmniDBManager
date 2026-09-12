@@ -1,5 +1,21 @@
 # DEPLOY — OmniDB Manager Deployment Guide
 
+> **PRODUCTION (live since 2026-09-12, replaces the two-port design below for
+> PostgreSQL):** single public hostname `db.missionhelmai.com`, single public
+> port TCP `:14291`, pooled-only. `db.missionhelmai.com:14291` → Nginx stream
+> (plain TCP passthrough, TLS untouched end-to-end) → PgBouncer `:6432`
+> (client TLS required) → PostgreSQL `:5432`. Direct PostgreSQL has NO public
+> route (loopback on-box, SSH tunnel from outside). Issued app strings look
+> like `postgresql://user:pass@db.missionhelmai.com:14291/db?sslmode=require`.
+> SNI routing was deliberately NOT used: stock PG clients open with cleartext
+> SSLRequest before any TLS exists, so passive SNI inspection deadlocks them;
+> with one backend there is nothing to select and SCRAM is the boundary (see
+> `deploy/s06-cutover-gate.md` for the full live-verified checklist, and
+> `deploy/database-proxy.stream.conf` for the why-not-SNI record).
+> The `A`/`B` two-port sections below remain as the generic alternative, but
+> they do NOT describe this deployment.
+
+
 > **General guideline** for deploying OmniDB Manager on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. Manager UI on `443` (HTTPS); Postgres on two non-standard public TCP ports `A` direct → `127.0.0.1:9813` (migrations/admin) and `B` pooled → `127.0.0.1:6432` (app/workers) via Nginx `stream` (TLS + IP allowlist, grey-cloud DNS). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<NON_STD_1>`/`<NON_STD_2>` (e.g. `27431`/`27432`) to your environment.
 
 ## Architecture
