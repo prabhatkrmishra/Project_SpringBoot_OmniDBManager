@@ -29,7 +29,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
 
     // Single-port proxy (S-06). Setter-injected optional so all existing
     // constructors/tests keep working; null = legacy two-port behavior.
-    // When configured, public strings carry only proxy hostname + :15432.
+    // When configured, pooled strings carry only proxy hostname + public port; direct stays internal in pooled-only shape.
     private volatile com.pkmprojects.mongodbserver.config.DatabaseProxyProperties proxyProperties;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -183,10 +183,15 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
                 com.pkmprojects.mongodbserver.model.SslMode.parse(sslmode,
                         com.pkmprojects.mongodbserver.model.SslMode.REQUIRE);
         if (isProxyMode()) {
-            com.pkmprojects.mongodbserver.model.ConnectionEndpoint direct =
-                    new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+            // Dual-link serves direct via proxy; pooled-only public keeps direct
+            // on the internal address (no public direct route exists).
+            com.pkmprojects.mongodbserver.model.ConnectionEndpoint direct = proxyProperties.directViaProxy()
+                    ? new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
                             proxyProperties.directHost().trim() + ":" + proxyProperties.port(),
                             proxyProperties.port(), dbName, userName, password, mode,
+                            com.pkmprojects.mongodbserver.model.ConnectionMode.DIRECT, null)
+                    : new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                            resolveDirectHost(), issuedPort, dbName, userName, password, mode,
                             com.pkmprojects.mongodbserver.model.ConnectionMode.DIRECT, null);
             if (!pooled) return new com.pkmprojects.mongodbserver.model.DatabaseConnections(direct, null);
             com.pkmprojects.mongodbserver.model.ConnectionEndpoint pooledEp =
@@ -229,9 +234,9 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
 
     @Override
     public String buildConnectionString(String userName, String password, String dbName) {
-        // S-06: proxy mode issues only proxy hostname + :15432 (structurally
-        // distinct branch — no port swapping on a previous URL).
-        String host = isProxyMode()
+        // Proxy mode: pooled-only public keeps direct on the internal address
+        // (no public direct route exists); dual-link serves direct via proxy.
+        String host = (isProxyMode() && proxyProperties.directViaProxy())
                 ? proxyProperties.directHost().trim() + ":" + proxyProperties.port()
                 : resolveDirectHost();
         String encodedUser = uriEncode(userName);

@@ -45,12 +45,14 @@ public class PostgresConnectionEndpointFactory {
     }
 
     public ConnectionEndpoint direct(String dbName, String user, String password) {
-        if (isProxyMode()) {
+        if (isProxyMode() && proxyProperties.directViaProxy()) {
             return new ConnectionEndpoint(
                     proxyProperties.directHost().trim() + ":" + proxyProperties.port(),
                     proxyProperties.port(), dbName, user, password,
                     sslMode, ConnectionMode.DIRECT, null);
         }
+        // Pooled-only public: direct intentionally stays on the internal
+        // address (loopback on-box; SSH tunnel from outside).
         return new ConnectionEndpoint(publicHost(issuedPort), issuedPort, dbName, user, password,
                 sslMode, ConnectionMode.DIRECT, null);
     }

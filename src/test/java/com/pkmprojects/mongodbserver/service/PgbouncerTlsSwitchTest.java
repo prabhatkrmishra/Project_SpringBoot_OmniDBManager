@@ -38,11 +38,18 @@ class PgbouncerTlsSwitchTest {
     @Test
     void adminStaysDisableWhenProxyPresentButUnconfigured() {
         var svc = new PgbouncerAdminService(props());
-        // enabled but hostnames missing/differ-check fails -> legacy two-port behavior
-        svc.setProxyProperties(new DatabaseProxyProperties(false, 15432, "db.example.com", "pool.example.com"));
+        // enabled but pooled hostname missing -> pooler stays plaintext
+        svc.setProxyProperties(new DatabaseProxyProperties(false, 15432, "", "pool.example.com"));
         assertThat(svc.poolerSslMode()).isEqualTo("disable");
-        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, "same.example.com", "same.example.com"));
+        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, "", ""));
         assertThat(svc.poolerSslMode()).isEqualTo("disable");
+    }
+
+    @Test
+    void adminUsesRequireInPooledOnlyPublicShape() {
+        var svc = new PgbouncerAdminService(props());
+        svc.setProxyProperties(new DatabaseProxyProperties(true, 14291, "", "db.example.com"));
+        assertThat(svc.poolerSslMode()).isEqualTo("require");
     }
 
     @Test
@@ -62,5 +69,12 @@ class PgbouncerTlsSwitchTest {
         var svc = new PgbouncerMonitorService(props());
         svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, "", ""));
         assertThat(svc.poolerSslMode()).isEqualTo("disable");
+    }
+
+    @Test
+    void monitorUsesRequireInPooledOnlyPublicShape() {
+        var svc = new PgbouncerMonitorService(props());
+        svc.setProxyProperties(new DatabaseProxyProperties(true, 14291, "", "db.example.com"));
+        assertThat(svc.poolerSslMode()).isEqualTo("require");
     }
 }

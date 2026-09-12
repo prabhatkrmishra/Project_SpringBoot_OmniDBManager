@@ -213,6 +213,22 @@ class PostgresDatabaseEngineTest {
     }
 
     @Test
+    void pooledOnlyPublicServesPooledViaProxyAndKeepsDirectInternal() {
+        PostgresDatabaseEngine e = directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require");
+        e.setProxyProperties(new com.pkmprojects.mongodbserver.config.DatabaseProxyProperties(
+                true, 14291, "", "db.missionhelmai.com"));
+        assertThat(e.buildPooledConnectionString("myuser", "mypass", "mydb"))
+                .isEqualTo("postgresql://myuser:mypass@db.missionhelmai.com:14291/mydb?sslmode=require&application_name=omnidb");
+        // direct has no public route: internal address, never the public hostname
+        assertThat(e.buildConnectionString("myuser", "mypass", "mydb")).doesNotContain("db.missionhelmai.com");
+        var conns = e.connectionEndpoints("mydb", "myuser", "mypass", true);
+        assertThat(conns.pooled().host()).isEqualTo("db.missionhelmai.com:14291");
+        assertThat(conns.direct().host()).doesNotContain("db.missionhelmai.com");
+        assertThat(conns.direct().username()).isEqualTo(conns.pooled().username());
+        assertThat(conns.direct().database()).isEqualTo(conns.pooled().database());
+    }
+
+    @Test
     void proxyDisabledKeepsLegacyTwoPortStrings() {
         PostgresDatabaseEngine e = pooledEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, 27432, "require");
         e.setProxyProperties(new com.pkmprojects.mongodbserver.config.DatabaseProxyProperties(

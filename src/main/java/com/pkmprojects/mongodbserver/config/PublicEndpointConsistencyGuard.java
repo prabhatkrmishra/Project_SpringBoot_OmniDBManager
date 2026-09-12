@@ -39,15 +39,21 @@ public class PublicEndpointConsistencyGuard implements ApplicationRunner {
             log.info("DatabaseProxy disabled — two-port Nginx (direct+pooled) stays authoritative (S-06 gate not passed)");
             return;
         }
-        if (proxy.directHost() == null || proxy.directHost().isBlank())
-            throw new IllegalStateException("database.proxy.direct-host is required when proxy enabled");
         if (proxy.pooledHost() == null || proxy.pooledHost().isBlank())
             throw new IllegalStateException("database.proxy.pooled-host is required when proxy enabled");
-        if (proxy.directHost().trim().equalsIgnoreCase(proxy.pooledHost().trim()))
-            throw new IllegalStateException("database.proxy.direct-host and pooled-host must differ");
+        if (proxy.directHost() != null && !proxy.directHost().isBlank()
+                && proxy.directHost().trim().equalsIgnoreCase(proxy.pooledHost().trim()))
+            throw new IllegalStateException("database.proxy.direct-host and pooled-host must differ — "
+                    + "one hostname cannot serve both links (SNI cannot split it); "
+                    + "leave direct-host blank for pooled-only public");
         if (proxy.port() < 1 || proxy.port() > 65535)
             throw new IllegalStateException("database.proxy.port must be 1..65535");
-        log.info("DatabaseProxy configured :{} direct={} pooled={} (SNI split, unknown-SNI deny expected)", proxy.port(),
-                proxy.directHost(), proxy.pooledHost());
+        if (proxy.isPooledOnlyPublic()) {
+            log.info("DatabaseProxy pooled-only public :{} pooled={} (direct has no public route; unknown-SNI deny expected)",
+                    proxy.port(), proxy.pooledHost());
+        } else {
+            log.info("DatabaseProxy configured :{} direct={} pooled={} (SNI split, unknown-SNI deny expected)", proxy.port(),
+                    proxy.directHost(), proxy.pooledHost());
+        }
     }
 }

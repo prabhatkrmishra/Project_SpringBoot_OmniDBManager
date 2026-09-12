@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
  * {@code SELECT 1}. Exercises the real PgBouncer route for pooled (not just
  * {@code SHOW POOLS}) and the direct route for migrations. Until the
  * single-port proxy lands, pooled validation uses the internal-equivalent
- * pooled address; the same method will target {@code pool.host:15432} after
+ * pooled address; the same method targets {@code pooled-host:14291} once
  * S-06 without caller changes.
  */
 @Service
@@ -35,7 +35,7 @@ public class ConnectionValidationService {
 
     /**
      * Tiered pooled proof (§29 + review hierarchy). {@code PUBLIC} exercises
-     * the full app contract (DNS → NSG → proxy :15432 → SNI → pooler → PG);
+     * the full app contract (DNS → NSG → proxy :14291 → SNI → pooler → PG);
      * {@code LOOPBACK} proves only tenant → pooler → PG with tenant SCRAM
      * (same pooler, same {@code auth_query}) — necessary but <b>not
      * equivalent</b> to the production path. Callers must log the path and
@@ -56,7 +56,7 @@ public class ConnectionValidationService {
 
     /** Which tier proved pooled health — see {@link #validatePooledDetailed}. */
     public enum ValidationPath {
-        /** Full public route (DNS → proxy :15432 → SNI → pooler → PG). */
+        /** Full public route (DNS → proxy :14291 → SNI → pooler → PG). */
         PUBLIC,
         /** Same pooler + auth_query + tenant SCRAM via loopback; proxy hop unproven. */
         LOOPBACK,

@@ -121,12 +121,13 @@ app:
     # via auth_query. Must match the pooler container's userlist (see
     # compose.postgres.yaml pgbouncer-init) or every pooled login fails.
     auth-password: ${PGBOUNCER_AUTH_PASSWORD:change-me-now}
-  # Single-port Database Proxy reservation (§3 target, config-only).
-  # Disabled until S-05 spike evidence + prod hostnames + :15432 cert + NSG
-  # single-port approval (S-06 gate). Two-port Nginx stays authoritative.
+  # Single-port Database Proxy (TLS passthrough + SNI routing).
+  # Disabled until the cutover gate passes (deploy/s06-cutover-gate.md).
+  # Pooled-only public shape: set pooled-host only; direct stays internal.
+  # (Set a *different* direct-host for the dual-link shape.)
   proxy:
     enabled: ${DATABASE_PROXY_ENABLED:false}
-    port: ${DATABASE_PROXY_PORT:15432}
+    port: ${DATABASE_PROXY_PORT:14291}
     direct-host: ${DATABASE_PROXY_DIRECT_HOST:}
     pooled-host: ${DATABASE_PROXY_POOLED_HOST:}
   encryption:

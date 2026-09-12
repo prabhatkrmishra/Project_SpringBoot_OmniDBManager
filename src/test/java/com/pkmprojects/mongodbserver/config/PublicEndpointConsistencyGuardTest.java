@@ -25,10 +25,18 @@ class PublicEndpointConsistencyGuardTest {
     }
 
     @Test
-    void enabledProxyRequiresBothHostnames() {
+    void enabledProxyRequiresPooledHostname() {
         var guard = new PublicEndpointConsistencyGuard(
-                new DatabaseProxyProperties(true, 15432, "db.example.com", ""), props());
-        assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
+                new DatabaseProxyProperties(true, 15432, "", ""), props());
+        assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pooled-host");
+    }
+
+    @Test
+    void blankDirectHostMeansPooledOnlyPublic() {
+        var guard = new PublicEndpointConsistencyGuard(
+                new DatabaseProxyProperties(true, 14291, "", "db.example.com"), props());
+        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
     }
 
     @Test
