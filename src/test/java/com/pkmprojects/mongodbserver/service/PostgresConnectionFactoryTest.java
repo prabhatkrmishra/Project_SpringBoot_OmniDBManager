@@ -23,11 +23,37 @@ class PostgresConnectionFactoryTest {
     }
 
     @Test
+    void hostnameSelectsModeNeverIdentity() {
+        // SNI-identity contract (S-06 audit): same database + same role +
+        // same password on either hostname; only host/port/mode differ.
+        // Authorization still comes from PostgreSQL per (role, db), never
+        // from the hostname, username shape, or packet heuristics.
+        var conns = factory().both("customer_db", "tenant_role", "s3cret", true);
+        assertThat(conns.direct().database()).isEqualTo(conns.pooled().database());
+        assertThat(conns.direct().username()).isEqualTo(conns.pooled().username());
+        assertThat(conns.direct().password()).isEqualTo(conns.pooled().password());
+        assertThat(conns.direct().mode().name()).isEqualTo("DIRECT");
+        assertThat(conns.pooled().mode().name()).isEqualTo("POOLED");
+        assertThat(conns.direct().host()).isNotEqualTo(conns.pooled().host());
+    }
+
+    @Test
     void builderProducesUriAndJdbc() {
         var b = new PostgresConnectionStringBuilder();
         var conns = factory().both("customer_db", "u", "p", true);
         assertThat(b.toUri(conns.direct())).startsWith("postgresql://u:p@pg.example.com:27431/customer_db");
         assertThat(b.toJdbc(conns.direct())).startsWith("jdbc:postgresql://");
+    }
+
+    @Test
+    void proxyModeUsesSinglePortDualHostname() {
+        var f = factory();
+        f.setProxyProperties(new com.pkmprojects.mongodbserver.config.DatabaseProxyProperties(
+                true, 15432, "db.example.com", "pool.example.com"));
+        var conns = f.both("customer_db", "u", "p", true);
+        assertThat(conns.direct().host()).isEqualTo("db.example.com:15432");
+        assertThat(conns.pooled().host()).isEqualTo("pool.example.com:15432");
+        assertThat(conns.direct().username()).isEqualTo(conns.pooled().username());
     }
 
     @Test

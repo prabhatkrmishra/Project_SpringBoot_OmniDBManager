@@ -60,6 +60,30 @@ public class ProvisioningService {
     private final Optional<MysqlDatabaseEngine> mysqlEngine;
     private final Optional<MysqlDatabaseRepository> mysqlRepository;
     private final EncryptionService encryptionService;
+    // Optional collaborators for pooled lifecycle (S-07/S-09). Setter-injected
+    // so all legacy/test constructors keep working; absent = previous behavior
+    // (install without live tenant validation, no Bouncer eviction).
+    private volatile ConnectionValidationService connectionValidationService;
+    private volatile PgbouncerAdminService pgbouncerAdminService;
+    // Unique-role generator (S-02). Setter-injected so legacy/test constructors
+    // keep working; null = lazily defaulted (stateless) so provisioning is safe
+    // even when the setter was never called. POSTGRES-only; Mongo/MySQL untouched.
+    private volatile PostgresRoleNameGenerator postgresRoleNameGenerator;
+
+    @Autowired(required = false)
+    public void setConnectionValidationService(ConnectionValidationService connectionValidationService) {
+        this.connectionValidationService = connectionValidationService;
+    }
+
+    @Autowired(required = false)
+    public void setPgbouncerAdminService(PgbouncerAdminService pgbouncerAdminService) {
+        this.pgbouncerAdminService = pgbouncerAdminService;
+    }
+
+    @Autowired(required = false)
+    public void setPostgresRoleNameGenerator(PostgresRoleNameGenerator postgresRoleNameGenerator) {
+        this.postgresRoleNameGenerator = postgresRoleNameGenerator;
+    }
 
     @Autowired
     public ProvisioningService(@Autowired(required = false) MongoDatabaseRepository mongoDatabaseRepository,
@@ -221,17 +245,25 @@ public class ProvisioningService {
                     : requestedPassword;
 
             DatabaseEngine engine = engineFor(engineType);
+            // S-02: PG roles are cluster-wide — a second database requesting an
+            // already-taken role must NOT reuse/ALTER it (would rotate the other
+            // tenant's password). Keep the requested name when free; otherwise
+            // mint omni_<db>_<rand6> until free (bounded, fail-closed).
+            String effectiveUser = userName;
+            if (engineType == DatabaseEngineType.POSTGRES) {
+                effectiveUser = resolveUniquePostgresRole(dbName, userName);
+            }
             boolean pgUserCreated = false;
             boolean pgDbCreated = false;
             boolean mysqlUserCreated = false;
             boolean mysqlDbCreated = false;
             try {
                 if (engineType == DatabaseEngineType.POSTGRES) {
-                    engine.createUser(dbName, userName, password);
+                    engine.createUser(dbName, effectiveUser, password);
                     pgUserCreated = true;
-                    engine.createDatabase(dbName, userName);
+                    engine.createDatabase(dbName, effectiveUser);
                     pgDbCreated = true;
-                    engine.grantPrivileges(dbName, userName);
+                    engine.grantPrivileges(dbName, effectiveUser);
                     if (form.isPooled()) {
                         // Pooled DBs need the auth_query path or every pooled
                         // login fails: least-privilege auth role + per-DB
@@ -239,6 +271,24 @@ public class ProvisioningService {
                         // exists. Failure here fails provisioning — a pooled
                         // record without the lookup is worse than no record.
                         engine.installPooledAuth(dbName);
+                        // End-to-end proof with tenant creds (§29): pooler +
+                        // auth_query + SCRAM, not just SHOW POOLS. Skipped when
+                        // no validator is wired (unit tests, PG-disabled).
+                        // Failure fails provisioning — the catch below drops
+                        // the half-created database + role.
+                        if (connectionValidationService != null) {
+                            var result = connectionValidationService.validatePooledDetailed(dbName, effectiveUser, password);
+                            if (!result.healthy()) {
+                                throw new ProvisioningException(
+                                        "Pooled validation failed for '" + dbName + "' — pooled logins cannot authenticate via PgBouncer");
+                            }
+                            if (result.path() != ConnectionValidationService.ValidationPath.PUBLIC) {
+                                // LOOPBACK proves pooler + SCRAM but not DNS/NSG/proxy/SNI —
+                                // honest confidence level, full proof only via PUBLIC after S-06.
+                                log.warn("Provisioned pooled database '{}' — pooled health proven via {} path only, public proxy path unproven",
+                                        dbName, result.path());
+                            }
+                        }
                     }
                 } else if (engineType == DatabaseEngineType.MYSQL) {
                     engine.createUser(dbName, userName, password);
@@ -263,7 +313,7 @@ public class ProvisioningService {
                         try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up partially created PG database '{}'", dbName, ce); }
                     }
                     if (pgUserCreated) {
-                        try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created PG role '{}'", userName, ce); }
+                        try { engine.dropUser(dbName, effectiveUser); } catch (Exception ce) { log.warn("Could not clean up partially created PG role '{}'", effectiveUser, ce); }
                     }
                 } else if (engineType == DatabaseEngineType.MYSQL) {
                     if (mysqlDbCreated) {
@@ -290,22 +340,61 @@ public class ProvisioningService {
             } else {
                 roles = List.of("readWrite:" + dbName);
             }
-            ManagedDatabase metadata = new ManagedDatabase(dbName, engineType, userName, roles, now, now, null);
+            ManagedDatabase metadata = new ManagedDatabase(dbName, engineType, effectiveUser, roles, now, now, null);
             metadata.setStoredPassword(encryptPassword(password));
             if (engineType == DatabaseEngineType.POSTGRES) {
                 metadata.setPooled(form.isPooled());
             }
             managedDatabaseStore.save(metadata);
-            audit(AuditEvent.PROVISION, dbName, engineType, userName, now);
+            audit(AuditEvent.PROVISION, dbName, engineType, effectiveUser, now);
             if (engineType == DatabaseEngineType.POSTGRES && metadata.isPooled()) {
-                log.info("Provisioned {} database '{}' with user '{}' (pooled via PgBouncer)", engineType, dbName, userName);
+                log.info("Provisioned {} database '{}' with user '{}' (pooled via PgBouncer)", engineType, dbName, effectiveUser);
             } else {
-                log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, userName);
+                log.info("Provisioned {} database '{}' with user '{}'", engineType, dbName, effectiveUser);
             }
 
             return toInfo(dbName, metadata, collectionCount(dbName, engineType), null, 0L)
-                    .withConnectionString(buildConnectionStringFor(engineType, engine, userName, password, dbName, metadata.isPooled()));
+                    .withConnectionString(buildConnectionStringFor(engineType, engine, effectiveUser, password, dbName, metadata.isPooled()));
         });
+    }
+
+    /**
+     * S-02 provision-time uniquify. Returns the requested name when no live
+     * role collides; otherwise a generated {@code omni_<db>_<rand6>} name
+     * verified free via {@code pg_roles}. Probe failures fail OPEN toward the
+     * requested name (provisioning itself remains authoritative — CREATE ROLE
+     * still errors loudly on a real collision) so a monitoring outage can
+     * never block provisioning. Existing databases are never renamed.
+     */
+    String resolveUniquePostgresRole(String dbName, String requestedUser) {
+        if (postgresRepository.isEmpty()) return requestedUser;
+        PostgresDatabaseRepository repo = postgresRepository.get();
+        boolean taken;
+        try {
+            taken = repo.roleExists(requestedUser);
+        } catch (Exception e) {
+            log.warn("S-02 role probe failed for '{}' — provisioning with requested name", requestedUser, e);
+            return requestedUser;
+        }
+        if (!taken) return requestedUser;
+        PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
+                ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
+        for (int i = 0; i < 5; i++) {
+            String candidate = gen.generate(dbName);
+            boolean candidateTaken;
+            try {
+                candidateTaken = repo.roleExists(candidate);
+            } catch (Exception e) {
+                log.warn("S-02 role probe failed for candidate on '{}' — failing closed", dbName, e);
+                throw new ProvisioningException("Could not verify a unique role for database '" + dbName + "'");
+            }
+            if (!candidateTaken) {
+                log.info("Postgres role '{}' already exists (cluster-wide) — provisioning '{}' with unique role '{}'",
+                        requestedUser, dbName, candidate);
+                return candidate;
+            }
+        }
+        throw new ProvisioningException("Could not mint a unique Postgres role for database '" + dbName + "' (role '" + requestedUser + "' is taken)");
     }
 
     public DatabaseInfo resetPassword(String dbName, ResetPasswordForm form) {
@@ -347,6 +436,26 @@ public class ProvisioningService {
             managedDatabaseStore.save(metadata);
             audit(AuditEvent.RESET_PASSWORD, dbName, engineType, metadata.getUserName(), metadata.getLastPasswordResetAt());
             log.info("Reset password for user '{}' on database '{}' ({})", metadata.getUserName(), dbName, engineType);
+
+            // Pooled rotation (§34): pooled server connections authenticated
+            // under the old password stay usable until re-established.
+            // RECONNECT closes them (best-effort — rotation already committed,
+            // so validate-and-warn instead of throwing on failure).
+            if (engineType == DatabaseEngineType.POSTGRES && metadata.isPooled()) {
+                if (pgbouncerAdminService != null && !pgbouncerAdminService.reconnectDb(dbName)) {
+                    log.warn("Password rotated on pooled database '{}' but PgBouncer RECONNECT failed — pooled backends may serve stale auth until recycled", dbName);
+                }
+                if (connectionValidationService != null) {
+                    var rotationCheck = connectionValidationService.validatePooledDetailed(
+                            dbName, metadata.getUserName(), password);
+                    if (!rotationCheck.healthy()) {
+                        log.warn("Password rotated on '{}' but pooled validation failed — check PgBouncer auth_query path", dbName);
+                    } else if (rotationCheck.path() != ConnectionValidationService.ValidationPath.PUBLIC) {
+                        log.warn("Password rotated on '{}' — pooled health proven via {} path only, public proxy path unproven",
+                                dbName, rotationCheck.path());
+                    }
+                }
+            }
 
             return toInfo(dbName, metadata, collectionCount(dbName, engineType), null, 0L)
                     .withConnectionString(buildConnectionStringFor(engineType, engineFor(engineType), metadata.getUserName(), password, dbName, metadata.isPooled()));
@@ -401,15 +510,53 @@ public class ProvisioningService {
                 });
                 metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
             } else {
-                try { engine.dropDatabase(dbName); } catch (Exception e) {
-                    log.warn("Failed to drop {} database '{}': {}", engineType, dbName, e.getMessage());
-                }
-                metadata.ifPresent(m -> {
-                    try { engine.dropUser(dbName, m.getUserName()); } catch (Exception e) {
-                        log.warn("Failed to drop {} role/user '{}': {}", engineType, m.getUserName(), e.getMessage());
+                // Pooled delete lifecycle (§33, formal machine):
+                //   ACTIVE → DELETING → PAUSE pooled DB → terminate PG sessions
+                //   → evict OmniDB pool → DROP DATABASE → DROP ROLE
+                //   → delete metadata → RESUME pooled DB → DELETED.
+                // PAUSE blocks *new* pooled traffic; pg_terminate_backend
+                // inside dropDatabase clears *existing* backends (including
+                // pooler-held server connections) — PAUSE alone does not
+                // guarantee that, hence the ordering. PAUSE (not KILL) is
+                // deliberate: in-flight app queries drain instead of being
+                // severed, with the identical end-state after DROP+RESUME.
+                // Best-effort pooler steps — invariant: PgBouncer unavailable
+                // must never turn a direct-path delete into a failed delete
+                // (§57). RESUME is unconditional in finally (also on partial
+                // failure) so held clients fail cleanly instead of hanging.
+                boolean pooledPaused = engineType == DatabaseEngineType.POSTGRES
+                        && pgbouncerAdminService != null
+                        && metadata.map(ManagedDatabase::isPooled).orElse(false)
+                        && pgbouncerAdminService.pauseDb(dbName);
+                // Failure arm is terminal for this attempt: the role and the
+                // metadata are preserved, the failure is recorded, and the
+                // error surfaces as recoverable (retry-safe: PAUSE, terminate
+                // and evict are all idempotent). Invariant: never delete the
+                // role or the metadata unless DROP DATABASE has succeeded —
+                // otherwise PostgreSQL keeps a database OmniDB no longer
+                // knows, with its role possibly gone (orphan/desync).
+                try {
+                    try {
+                        engine.dropDatabase(dbName);
+                    } catch (Exception e) {
+                        try {
+                            audit(AuditEvent.DELETE_FAILED, dbName, engineType,
+                                    metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
+                        } catch (Exception auditEx) {
+                            log.warn("Could not record DELETE_FAILED audit for '{}'", dbName, auditEx);
+                        }
+                        throw new ProvisioningException("Could not drop " + engineType + " database '" + dbName
+                                + "' — database, role and metadata preserved for retry", e);
                     }
-                });
-                metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
+                    metadata.ifPresent(m -> {
+                        try { engine.dropUser(dbName, m.getUserName()); } catch (Exception e) {
+                            log.warn("Failed to drop {} role/user '{}': {}", engineType, m.getUserName(), e.getMessage());
+                        }
+                    });
+                    metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
+                } finally {
+                    if (pooledPaused) pgbouncerAdminService.resumeDb(dbName);
+                }
             }
             audit(AuditEvent.DELETE, dbName, engineType, metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
             log.info("Deleted {} database '{}'", engineType, dbName);
@@ -678,6 +825,24 @@ public class ProvisioningService {
                     log.warn("Could not record POOLED_AUTH_ENABLE_FAILED audit for '{}'", n, auditEx);
                 }
                 throw new ProvisioningException("Could not install pooled auth on '" + n + "': " + detail, e);
+            }
+            // Prove the repaired path with a real tenant login when possible —
+            // never report pooled healthy untested (§28).
+            if (connectionValidationService != null) {
+                String plain = decryptStoredPassword(md.getStoredPassword());
+                var result = plain == null ? null : connectionValidationService.validatePooledDetailed(n, md.getUserName(), plain);
+                if (result == null || !result.healthy()) {
+                    try {
+                        audit(AuditEvent.POOLED_AUTH_ENABLE_FAILED, n, engineType, null, clock.instant());
+                    } catch (Exception auditEx) {
+                        log.warn("Could not record POOLED_AUTH_ENABLE_FAILED audit for '{}'", n, auditEx);
+                    }
+                    throw new ProvisioningException(
+                            "Pooled auth installed on '" + n + "' but pooled validation failed — pooled logins cannot authenticate yet");
+                }
+                if (result.path() != ConnectionValidationService.ValidationPath.PUBLIC) {
+                    log.warn("Repaired pooled auth on '{}' — proven via {} path only, public proxy path unproven", n, result.path());
+                }
             }
             audit(AuditEvent.POOLED_AUTH_ENABLED, n, engineType, null, clock.instant());
             log.info("Repaired pooled auth on database '{}'", n);

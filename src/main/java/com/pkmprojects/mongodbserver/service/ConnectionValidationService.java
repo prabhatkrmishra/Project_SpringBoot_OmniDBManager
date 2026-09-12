@@ -30,12 +30,45 @@ public class ConnectionValidationService {
     }
 
     public boolean validatePooled(String dbName, String user, String password) {
-        var conns = engine.connectionEndpoints(dbName, user, password, true);
-        if (conns.pooled() == null) return false;
-        return run("pooled", conns.pooled());
+        return validatePooledDetailed(dbName, user, password).healthy();
     }
 
-    private boolean run(String mode, com.pkmprojects.mongodbserver.model.ConnectionEndpoint ep) {
+    /**
+     * Tiered pooled proof (§29 + review hierarchy). {@code PUBLIC} exercises
+     * the full app contract (DNS → NSG → proxy :15432 → SNI → pooler → PG);
+     * {@code LOOPBACK} proves only tenant → pooler → PG with tenant SCRAM
+     * (same pooler, same {@code auth_query}) — necessary but <b>not
+     * equivalent</b> to the production path. Callers must log the path and
+     * only the {@code PUBLIC} tier proves the complete contract after S-06.
+     */
+    public PooledValidation validatePooledDetailed(String dbName, String user, String password) {
+        var conns = engine.connectionEndpoints(dbName, user, password, true);
+        if (conns.pooled() == null) return new PooledValidation(false, ValidationPath.NONE);
+        if (run("pooled", conns.pooled())) return new PooledValidation(true, ValidationPath.PUBLIC);
+        var loopback = new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                "127.0.0.1:" + conns.pooled().port(), conns.pooled().port(),
+                dbName, user, password, conns.pooled().sslMode(),
+                com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED,
+                com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
+        if (run("pooled-loopback", loopback)) return new PooledValidation(true, ValidationPath.LOOPBACK);
+        return new PooledValidation(false, ValidationPath.NONE);
+    }
+
+    /** Which tier proved pooled health — see {@link #validatePooledDetailed}. */
+    public enum ValidationPath {
+        /** Full public route (DNS → proxy :15432 → SNI → pooler → PG). */
+        PUBLIC,
+        /** Same pooler + auth_query + tenant SCRAM via loopback; proxy hop unproven. */
+        LOOPBACK,
+        /** No tier proved health. */
+        NONE
+    }
+
+    public record PooledValidation(boolean healthy, ValidationPath path) {
+    }
+
+    /** Protected so tests can stub tiers without live PostgreSQL. */
+    protected boolean run(String mode, com.pkmprojects.mongodbserver.model.ConnectionEndpoint ep) {
         String jdbc = strings.toJdbc(ep);
         // Never log the URI (contains password) — host/db/mode only.
         // DriverManager keeps this compile-safe: the PG driver is a

@@ -1,6 +1,7 @@
 package com.pkmprojects.mongodbserver.service;
 
 import com.pkmprojects.mongodbserver.config.PgbouncerProperties;
+import com.pkmprojects.mongodbserver.config.DatabaseProxyProperties;
 import com.pkmprojects.mongodbserver.model.ConnectionEndpoint;
 import com.pkmprojects.mongodbserver.model.ConnectionMode;
 import com.pkmprojects.mongodbserver.model.DatabaseConnections;
@@ -21,6 +22,7 @@ public class PostgresConnectionEndpointFactory {
     private final int issuedPort;
     private final SslMode sslMode;
     private final PgbouncerProperties pgbouncerProperties;
+    private volatile DatabaseProxyProperties proxyProperties;
 
     public PostgresConnectionEndpointFactory(
             @Value("${app.postgres.issued-host:}") String issuedHost,
@@ -33,12 +35,33 @@ public class PostgresConnectionEndpointFactory {
         this.pgbouncerProperties = pgbouncerProperties;
     }
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setProxyProperties(DatabaseProxyProperties proxyProperties) {
+        this.proxyProperties = proxyProperties;
+    }
+
+    boolean isProxyMode() {
+        return proxyProperties != null && proxyProperties.isConfigured();
+    }
+
     public ConnectionEndpoint direct(String dbName, String user, String password) {
+        if (isProxyMode()) {
+            return new ConnectionEndpoint(
+                    proxyProperties.directHost().trim() + ":" + proxyProperties.port(),
+                    proxyProperties.port(), dbName, user, password,
+                    sslMode, ConnectionMode.DIRECT, null);
+        }
         return new ConnectionEndpoint(publicHost(issuedPort), issuedPort, dbName, user, password,
                 sslMode, ConnectionMode.DIRECT, null);
     }
 
     public ConnectionEndpoint pooled(String dbName, String user, String password) {
+        if (isProxyMode()) {
+            return new ConnectionEndpoint(
+                    proxyProperties.pooledHost().trim() + ":" + proxyProperties.port(),
+                    proxyProperties.port(), dbName, user, password,
+                    sslMode, ConnectionMode.POOLED, PoolMode.TRANSACTION);
+        }
         int port = pgbouncerProperties != null ? pgbouncerProperties.issuedPort() : 6432;
         return new ConnectionEndpoint(publicHost(port), port, dbName, user, password,
                 sslMode, ConnectionMode.POOLED, PoolMode.TRANSACTION);

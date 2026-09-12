@@ -29,6 +29,14 @@ public class PgbouncerMonitorService {
     private static final Logger log = LoggerFactory.getLogger(PgbouncerMonitorService.class);
 
     private final PgbouncerProperties properties;
+    // Same proxy-TLS switch as PgbouncerAdminService (S-06): passthrough proxy
+    // => pooler requires client TLS => stats polling must use sslmode=require.
+    private volatile com.pkmprojects.mongodbserver.config.DatabaseProxyProperties proxyProperties;
+
+    @Autowired(required = false)
+    public void setProxyProperties(com.pkmprojects.mongodbserver.config.DatabaseProxyProperties proxyProperties) {
+        this.proxyProperties = proxyProperties;
+    }
     private final AtomicInteger consecutiveDegraded = new AtomicInteger(0);
 
     // Thresholds — configurable via app.pgbouncer.thresholds.* (defaults match spec)
@@ -140,9 +148,14 @@ public class PgbouncerMonitorService {
         return "healthy";
     }
 
+    /** sslmode for pooler stats connections: require iff the TLS-passthrough proxy is configured. */
+    String poolerSslMode() {
+        return proxyProperties != null && proxyProperties.isConfigured() ? "require" : "disable";
+    }
+
     private Connection openAdminConnection() throws Exception {
         // pgbouncer virtual database — connect to 127.0.0.1:port/pgbouncer with stats user
-        String url = "jdbc:postgresql://127.0.0.1:" + properties.port() + "/pgbouncer?sslmode=disable&connectTimeout=2&socketTimeout=3";
+        String url = "jdbc:postgresql://127.0.0.1:" + properties.port() + "/pgbouncer?sslmode=" + poolerSslMode() + "&connectTimeout=2&socketTimeout=3";
         String user = properties.statsUser();
         String pass = resolveStatsPassword();
         return DriverManager.getConnection(url, user, pass);

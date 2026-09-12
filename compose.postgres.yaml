@@ -123,6 +123,9 @@ services:
       - /tmp
     volumes:
       - pgbouncer-data:/etc/pgbouncer
+      # Host certs (same ./certs dir the postgres service uses). Read-only;
+      # staged into the volume only when the proxy TLS gate is on.
+      - ./certs:/host-certs:ro
     environment:
       PGBOUNCER_ADMIN_PASSWORD: ${PGBOUNCER_ADMIN_PASSWORD:-change-me-now}
       PGBOUNCER_STATS_PASSWORD: ${PGBOUNCER_STATS_PASSWORD:-change-me-now}
@@ -141,6 +144,13 @@ services:
       OVERRIDE_PGBOUNCER_RESERVE_POOL_SIZE: ${OVERRIDE_PGBOUNCER_RESERVE_POOL_SIZE:-2}
       OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT: ${OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT:-3}
       OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS: ${OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS:-10}
+      # S-06 pooler-TLS gate: mirrors DatabaseProxyProperties.isConfigured().
+      # Set DATABASE_PROXY_ENABLED=true ONLY together with both hostnames
+      # (cutover gate preconditions) — enabling it switches the pooler to
+      # client_tls_sslmode=require because the proxy uses TLS passthrough.
+      DATABASE_PROXY_ENABLED: ${DATABASE_PROXY_ENABLED:-false}
+      DATABASE_PROXY_DIRECT_HOST: ${DATABASE_PROXY_DIRECT_HOST:-}
+      DATABASE_PROXY_POOLED_HOST: ${DATABASE_PROXY_POOLED_HOST:-}
     command:
       - sh
       - -c
@@ -180,13 +190,95 @@ services:
         admin_users = pgbouncer_admin
         stats_users = pgbouncer_stats
         INI
-        { md5line "$$ADMIN_USER" "$$PGBOUNCER_ADMIN_PASSWORD"; md5line "$$STATS_USER" "$$PGBOUNCER_STATS_PASSWORD"; authline "$$AUTH_USER" "$$PGBOUNCER_AUTH_PASSWORD"; } > /etc/pgbouncer/userlist.txt
+        # S-06 pooled-route TLS. Two legs (see deploy/database-proxy.stream.conf):
+        #   leg 1 (client->proxy->pooler): TLS passthrough, terminates at PgBouncer.
+        #   leg 2 (pooler->postgres): pooler is the TLS client (server_tls_*).
+        # Gate mirrors DatabaseProxyProperties.isConfigured(): enabled + both
+        # hostnames set + different. verify-full is deliberately NOT used for the
+        # backend leg: the pooler dials internal hostname `postgres`, which the
+        # public-SAN cert does not cover — `require` gives encryption without a
+        # hostname check that could never pass. Fail CLOSED when enabled but the
+        # cert files are missing (never silently run plaintext as public-TLS).
+        if [ "$${DATABASE_PROXY_ENABLED:-false}" = "true" ] && [ -n "$${DATABASE_PROXY_DIRECT_HOST:-}" ] && [ -n "$${DATABASE_PROXY_POOLED_HOST:-}" ] && [ "$${DATABASE_PROXY_DIRECT_HOST}" != "$${DATABASE_PROXY_POOLED_HOST}" ]; then
+          mkdir -p /etc/pgbouncer/certs
+          if [ -f /host-certs/pool.crt ] && [ -f /host-certs/pool.key ]; then
+            cp /host-certs/pool.crt /etc/pgbouncer/certs/pool.crt
+            cp /host-certs/pool.key /etc/pgbouncer/certs/pool.key
+          elif [ -f /host-certs/server.crt ] && [ -f /host-certs/server.key ]; then
+            echo "pgbouncer-init: no pool.crt/pool.key — reusing server.crt/server.key (SAN must cover pooled hostname)"
+            cp /host-certs/server.crt /etc/pgbouncer/certs/pool.crt
+            cp /host-certs/server.key /etc/pgbouncer/certs/pool.key
+          else
+            echo "FATAL: DATABASE_PROXY_ENABLED=true but no pool.{crt,key} or server.{crt,key} in ./certs — refusing plaintext pooler" >&2
+            exit 1
+          fi
+          if [ -f /host-certs/ca.crt ]; then cp /host-certs/ca.crt /etc/pgbouncer/certs/ca.crt; fi
+          chmod 644 /etc/pgbouncer/certs/pool.crt
+          chmod 600 /etc/pgbouncer/certs/pool.key
+          chown 70:70 /etc/pgbouncer/certs/pool.crt /etc/pgbouncer/certs/pool.key
+          cat >> /etc/pgbouncer/pgbouncer.ini <<'TLSINI'
+        client_tls_sslmode = require
+        client_tls_cert_file = /etc/pgbouncer/certs/pool.crt
+        client_tls_key_file = /etc/pgbouncer/certs/pool.key
+        client_tls_protocols = secure
+        server_tls_sslmode = require
+        server_tls_protocols = secure
+        TLSINI
+        fi
+                { md5line "$$ADMIN_USER" "$$PGBOUNCER_ADMIN_PASSWORD"; md5line "$$STATS_USER" "$$PGBOUNCER_STATS_PASSWORD"; authline "$$AUTH_USER" "$$PGBOUNCER_AUTH_PASSWORD"; } > /etc/pgbouncer/userlist.txt
         chmod 600 /etc/pgbouncer/userlist.txt
         # The pgbouncer image runs as uid:gid 70:70, so hand it ownership of
         # the credentials file (stays 600) — otherwise it fails to open auth_file
         # and every pooled login breaks. Numeric id because busybox has no
         # postgres name entry. The ini stays root-owned 644 (world-readable).
         chown 70:70 /etc/pgbouncer/userlist.txt
+  # S-06 single-port Database Proxy (Nginx stream + ssl_preread SNI split).
+  # INACTIVE until the cutover gate passes (deploy/s06-cutover-gate.md):
+  # keep this service commented until prod hostnames + :15432 SAN cert +
+  # NSG single-port approval all land. Manager + validation keep using the
+  # two-port model while disabled. No tenant passwords here — TLS passthrough
+  # only; PostgreSQL stays the auth authority. Unknown SNI has no route.
+  # database-proxy:
+  #   image: nginx:1.27-alpine  # TODO: pin digest via `docker buildx imagetools inspect` at deploy
+  #   container_name: omnidb-database-proxy
+  #   restart: unless-stopped
+  #   read_only: true
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   cap_drop:
+  #     - ALL
+  #   tmpfs:
+  #     - /tmp
+  #     - /var/cache/nginx
+  #     - /run
+  #     - /run-rendered
+  #   ports:
+  #     - "${DATABASE_PROXY_BIND:-127.0.0.1}:${DATABASE_PROXY_PORT:-15432}:15432"
+  #   environment:
+  #     DATABASE_PROXY_DIRECT_HOST: ${DATABASE_PROXY_DIRECT_HOST:-db.example.com}
+  #     DATABASE_PROXY_POOLED_HOST: ${DATABASE_PROXY_POOLED_HOST:-pool.example.com}
+  #   volumes:
+  #     # Template uses envsubst placeholders ONLY for the two hostnames
+  #     # (nginx-native $vars are $$-escaped); rendered at container start.
+  #     - ./deploy/database-proxy.stream.conf:/tpl/nginx.conf.tpl:ro
+  #   command:
+  #     - sh
+  #     - -c
+  #     - |
+  #       set -eu
+  #       envsubst < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
+  #       exec nginx -c /run-rendered/nginx.conf -g 'daemon off;'
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     pgbouncer:
+  #       condition: service_healthy
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "10m"
+  #       max-file: "3"
+
   pgbouncer:
     # Maintained image (the pgbouncer/pgbouncer repo is stale); pre-existing
     # pgbouncer.ini/userlist.txt mounts win over the entrypoint generator.
@@ -204,6 +296,7 @@ services:
     ports:
       - "127.0.0.1:${OVERRIDE_PGBOUNCER_PORT:-6432}:6432"
     environment:
+      DATABASE_PROXY_ENABLED: ${DATABASE_PROXY_ENABLED:-false}
       # Stats credential for the healthcheck only — the entrypoint ignores
       # unknown vars, so this never touches userlist.txt (DB_USER/DATABASE_URL
       # must stay unset for the same reason).
@@ -216,7 +309,7 @@ services:
     volumes:
       - pgbouncer-data:/etc/pgbouncer:ro
     healthcheck:
-      test: ["CMD-SHELL", "PGPASSWORD=\"$PGBOUNCER_STATS_PASSWORD\" psql -h 127.0.0.1 -p 6432 -U pgbouncer_stats -d pgbouncer -tAc 'SHOW POOLS' | grep -q ."]
+      test: ["CMD-SHELL", "if [ \"$${DATABASE_PROXY_ENABLED:-false}\" = \"true\" ]; then export PGSSLMODE=require; fi; PGPASSWORD=\"$PGBOUNCER_STATS_PASSWORD\" psql -h 127.0.0.1 -p 6432 -U pgbouncer_stats -d pgbouncer -tAc 'SHOW POOLS' | grep -q ."]
       interval: 10s
       timeout: 5s
       retries: 5

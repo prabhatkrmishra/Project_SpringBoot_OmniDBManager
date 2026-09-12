@@ -195,6 +195,33 @@ class PostgresDatabaseEngineTest {
     }
 
     @Test
+    void proxyModeIssuesSinglePortDualHostnameStrings() {
+        PostgresDatabaseEngine e = directEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, "require");
+        e.setProxyProperties(new com.pkmprojects.mongodbserver.config.DatabaseProxyProperties(
+                true, 15432, "db.example.com", "pool.example.com"));
+        assertThat(e.buildConnectionString("myuser", "mypass", "mydb"))
+                .isEqualTo("postgresql://myuser:mypass@db.example.com:15432/mydb?sslmode=require&application_name=omnidb");
+        assertThat(e.buildPooledConnectionString("myuser", "mypass", "mydb"))
+                .isEqualTo("postgresql://myuser:mypass@pool.example.com:15432/mydb?sslmode=require&application_name=omnidb");
+        var conns = e.connectionEndpoints("mydb", "myuser", "mypass", true);
+        assertThat(conns.direct().host()).isEqualTo("db.example.com:15432");
+        assertThat(conns.pooled().host()).isEqualTo("pool.example.com:15432");
+        assertThat(conns.direct().port()).isEqualTo(15432);
+        // Same identity both paths — hostname selects mode only.
+        assertThat(conns.direct().username()).isEqualTo(conns.pooled().username());
+        assertThat(conns.direct().database()).isEqualTo(conns.pooled().database());
+    }
+
+    @Test
+    void proxyDisabledKeepsLegacyTwoPortStrings() {
+        PostgresDatabaseEngine e = pooledEngine("jdbc:postgresql://127.0.0.1:9813/postgres", "pg.example.com", 27431, 27432, "require");
+        e.setProxyProperties(new com.pkmprojects.mongodbserver.config.DatabaseProxyProperties(
+                false, 15432, "", ""));
+        assertThat(e.buildConnectionString("myuser", "mypass", "mydb")).contains("pg.example.com:27431");
+        assertThat(e.buildPooledConnectionString("myuser", "mypass", "mydb")).contains("pg.example.com:27432");
+    }
+
+    @Test
     void installPooledAuthWithoutPoolerConfigThrows() {
         PostgresDatabaseEngine e = engine("jdbc:postgresql://127.0.0.1:9813/postgres", "", "require");
         assertThatThrownBy(() -> e.installPooledAuth("myapp"))

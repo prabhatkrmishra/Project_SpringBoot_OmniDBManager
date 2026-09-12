@@ -268,15 +268,18 @@ class ProvisioningServicePostgresTest {
     }
 
     @Test
-    void deletePostgresToleratesDropFailure() {
+    void deletePostgresDropFailurePreservesRoleAndMetadata() {
         ManagedDatabase md = new ManagedDatabase("myapp", DatabaseEngineType.POSTGRES, "myapp_user", List.of("CONNECT:myapp"), NOW, NOW, null);
         when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp")).thenReturn(Optional.of(md));
         doThrow(new RuntimeException("drop failed")).when(postgresRepo).dropDatabase("myapp");
 
-        // should not throw — PG delete is best-effort
-        service.delete(DatabaseEngineType.POSTGRES, "myapp");
-
-        verify(managedRepo).deleteByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp");
+        // DROP failure is terminal for the attempt: role + metadata preserved,
+        // failure surfaces as recoverable — never warn-and-continue into desync.
+        assertThatThrownBy(() -> service.delete(DatabaseEngineType.POSTGRES, "myapp"))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("preserved for retry");
+        verify(postgresRepo, never()).dropUser(any(), any());
+        verify(managedRepo, never()).deleteByEngineTypeAndDbName(any(), any());
     }
 
     // ── listDatabases POSTGRES ──────────────────────────────────────
@@ -454,6 +457,51 @@ class ProvisioningServicePostgresTest {
 
         assertThatThrownBy(() -> service.repairPooledAuth(DatabaseEngineType.POSTGRES, "myapp"))
                 .isInstanceOf(DatabaseNotFoundException.class);
+    }
+
+    // ── S-02 unique roles: PG roles are cluster-wide ────────────────────
+
+    @Test
+    void secondDatabaseWithSameRequestedUserGetsDistinctRole() {
+        // DB-A provisions first with the free name; DB-B requests the same name
+        // afterwards and MUST NOT reuse/ALTER DB-A's role (that would rotate
+        // DB-A's password). Format: omni_<sanitisedDb>_<rand6>.
+        when(postgresRepo.roleExists("app")).thenReturn(false);
+        DatabaseInfo first = service.provision(
+                new CreateDatabaseForm("dbalpha", DatabaseEngineType.POSTGRES, "app", "secret111"));
+        assertThat(first.connectionString()).contains("app:secret111@");
+
+        when(postgresRepo.roleExists("app")).thenReturn(true);
+        when(postgresRepo.roleExists(argThat(s -> s instanceof String str && str.startsWith("omni_"))))
+                .thenReturn(false);
+        DatabaseInfo second = service.provision(
+                new CreateDatabaseForm("dbbeta", DatabaseEngineType.POSTGRES, "app", "secret222"));
+
+        ArgumentCaptor<String> users = ArgumentCaptor.forClass(String.class);
+        verify(postgresRepo, times(2)).createUser(any(), users.capture(), any());
+        assertThat(users.getAllValues().get(0)).isEqualTo("app");
+        String generated = users.getAllValues().get(1);
+        assertThat(generated).isNotEqualTo("app");
+        assertThat(generated).startsWith("omni_dbbeta_");
+        verify(postgresRepo).createDatabase("dbbeta", generated);
+        verify(postgresRepo).grantPrivileges("dbbeta", generated);
+        assertThat(second.connectionString()).contains(generated + ":secret222@");
+
+        ArgumentCaptor<ManagedDatabase> cap = ArgumentCaptor.forClass(ManagedDatabase.class);
+        verify(managedRepo, atLeastOnce()).save(cap.capture());
+        ManagedDatabase last = cap.getAllValues().get(cap.getAllValues().size() - 1);
+        assertThat(last.getDbName()).isEqualTo("dbbeta");
+        assertThat(last.getUserName()).isEqualTo(generated);
+    }
+
+    @Test
+    void provisionFailsClosedWhenNoUniqueRoleAvailable() {
+        when(postgresRepo.roleExists(any())).thenReturn(true);
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("dbgamma", DatabaseEngineType.POSTGRES, "app", "secret333")))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("unique");
+        verify(postgresRepo, never()).createUser(any(), any(), any());
     }
 
     @Test

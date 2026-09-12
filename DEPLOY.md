@@ -206,6 +206,8 @@ OVERRIDE_MYSQL_TLS=true        # issued strings get ?sslMode=REQUIRED (or VERIFY
 
 Manager UI stays on `443` via `127.0.0.1:8443` (plain `http` reverse proxy, no `stream` multiplex). Postgres is exposed on **two** separate public TCP ports via `stream` — `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS and are IP-allowlisted (never `0.0.0.0/0`); DNS must be grey-cloud (DNS only) so TCP reaches your VPS.
 
+> **Future: single-port SNI proxy.** The planned end-state serves both links on one public port `:15432` (`db.*` → Postgres, `pool.*` → PgBouncer, unknown SNI rejected). Do **not** cut over yet — see `deploy/s06-cutover-gate.md` (19 checks: proxy health, SNI routing, TLS, isolation, failure semantics) and `deploy/database-proxy.stream.conf`. Until every box passes, this two-port section stays authoritative.
+
 ```bash
 # Move any existing sites that listen on 443 to 127.0.0.1:8443
 # Example: sudo sed -i "s/listen 443 ssl http2;/listen 127.0.0.1:8443 ssl http2;/g" /etc/nginx/sites-enabled/<OTHER_SITE>

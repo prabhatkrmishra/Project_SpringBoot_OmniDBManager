@@ -272,6 +272,21 @@ public class PostgresDatabaseRepository {
                 jdbcTemplate.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()", (rs, rowNum) -> null, dbName);
             } catch (Exception ignored) {
             }
+            // Explicit session-state verification (not sequencing alone):
+            // termination is async SIGTERM and new DIRECT arrivals are not
+            // held (PAUSE covers pooled clients only), so count survivors.
+            // Non-zero is warn-only — DROP decides loudly by itself — but the
+            // warning distinguishes "sessions raced back in" from silent drift.
+            // Our own admin connection lives in the maintenance database, so
+            // it is never counted by the datname filter.
+            try {
+                Integer remaining = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = ?", Integer.class, dbName);
+                if (remaining != null && remaining > 0) {
+                    log.warn("dropDatabase({}): {} PostgreSQL session(s) still present after terminate — DROP may fail if sessions persist (new direct arrivals are not held)", dbName, remaining);
+                }
+            } catch (Exception ignored) {
+            }
             evictPool(dbName);
             jdbcTemplate.execute("DROP DATABASE IF EXISTS " + quoteIdentifier(dbName));
         } finally {
@@ -369,6 +384,18 @@ public class PostgresDatabaseRepository {
             return c != null && c > 0;
         } catch (Exception e) {
             log.debug("isAuthLookupInstalled({}) probe failed", dbName, e);
+            return false;
+        }
+    }
+
+    /** Cluster-wide role probe for S-02 unique-role wiring (provision-time uniquify). */
+    public boolean roleExists(String userName) {
+        try {
+            Integer n = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM pg_roles WHERE rolname = ?", Integer.class, userName);
+            return n != null && n > 0;
+        } catch (Exception e) {
+            log.debug("roleExists({}) probe failed", userName, e);
             return false;
         }
     }

@@ -27,6 +27,12 @@ public class AuditEvent {
      */
     public static final String DELETE = "DELETE";
     /**
+     * Event type: database deletion failed partway — DROP did not succeed so
+     * the role and OmniDB metadata were deliberately preserved for retry.
+     * A later successful delete records {@link #DELETE}.
+     */
+    public static final String DELETE_FAILED = "DELETE_FAILED";
+    /**
      * Event type: a database user was revoked.
      */
     public static final String REVOKE_USER = "REVOKE_USER";
@@ -75,7 +81,7 @@ public class AuditEvent {
      * webhook subscription checkboxes.
      */
     public static final List<String> ALL_TYPES = List.of(
-            PROVISION, RESET_PASSWORD, DELETE, REVOKE_USER,
+            PROVISION, RESET_PASSWORD, DELETE, DELETE_FAILED, REVOKE_USER,
             WEBHOOK_CREATED, WEBHOOK_UPDATED, WEBHOOK_DELETED,
             BACKUP_CREATED, BACKUP_RESTORED, IMPORT,
             TABLE_CREATED, TABLE_DROPPED, TABLE_TRUNCATED, ROW_INSERTED, ROW_DELETED,
@@ -104,7 +110,7 @@ public class AuditEvent {
     /**
      * Records one admin action on the provisioning lifecycle.
      *
-     * @param eventType   one of {@link #PROVISION}, {@link #RESET_PASSWORD}, {@link #DELETE},
+     * @param eventType   one of {@link #PROVISION}, {@link #RESET_PASSWORD}, {@link #DELETE}, {@link #DELETE_FAILED},
      *                    {@link #REVOKE_USER}, {@link #WEBHOOK_CREATED}, {@link #WEBHOOK_UPDATED},
      *                    {@link #WEBHOOK_DELETED}, {@link #BACKUP_CREATED}, {@link #BACKUP_RESTORED},
      *                    {@link #IMPORT}, {@link #TABLE_CREATED}, {@link #TABLE_DROPPED},

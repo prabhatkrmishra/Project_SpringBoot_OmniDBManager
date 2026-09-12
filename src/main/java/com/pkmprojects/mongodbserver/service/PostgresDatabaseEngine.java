@@ -27,6 +27,16 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
     private final String sslmode;
     private final com.pkmprojects.mongodbserver.config.PgbouncerProperties pgbouncerProperties;
 
+    // Single-port proxy (S-06). Setter-injected optional so all existing
+    // constructors/tests keep working; null = legacy two-port behavior.
+    // When configured, public strings carry only proxy hostname + :15432.
+    private volatile com.pkmprojects.mongodbserver.config.DatabaseProxyProperties proxyProperties;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setProxyProperties(com.pkmprojects.mongodbserver.config.DatabaseProxyProperties proxyProperties) {
+        this.proxyProperties = proxyProperties;
+    }
+
     @org.springframework.beans.factory.annotation.Autowired
     public PostgresDatabaseEngine(PostgresDatabaseRepository postgresDatabaseRepository,
                                    Environment environment,
@@ -161,12 +171,32 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         return postgresDatabaseRepository.isAuthLookupInstalled(dbName);
     }
 
+    /** True only when the single-port proxy is explicitly configured (S-06 gate). */
+    boolean isProxyMode() {
+        return proxyProperties != null && proxyProperties.isConfigured();
+    }
+
     @Override
     public com.pkmprojects.mongodbserver.model.DatabaseConnections connectionEndpoints(
             String dbName, String userName, String password, boolean pooled) {
         com.pkmprojects.mongodbserver.model.SslMode mode =
                 com.pkmprojects.mongodbserver.model.SslMode.parse(sslmode,
                         com.pkmprojects.mongodbserver.model.SslMode.REQUIRE);
+        if (isProxyMode()) {
+            com.pkmprojects.mongodbserver.model.ConnectionEndpoint direct =
+                    new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                            proxyProperties.directHost().trim() + ":" + proxyProperties.port(),
+                            proxyProperties.port(), dbName, userName, password, mode,
+                            com.pkmprojects.mongodbserver.model.ConnectionMode.DIRECT, null);
+            if (!pooled) return new com.pkmprojects.mongodbserver.model.DatabaseConnections(direct, null);
+            com.pkmprojects.mongodbserver.model.ConnectionEndpoint pooledEp =
+                    new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                            proxyProperties.pooledHost().trim() + ":" + proxyProperties.port(),
+                            proxyProperties.port(), dbName, userName, password, mode,
+                            com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED,
+                            com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
+            return new com.pkmprojects.mongodbserver.model.DatabaseConnections(direct, pooledEp);
+        }
         com.pkmprojects.mongodbserver.model.ConnectionEndpoint direct =
                 new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
                         resolveDirectHost(), issuedPort, dbName, userName, password, mode,
@@ -199,7 +229,11 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
 
     @Override
     public String buildConnectionString(String userName, String password, String dbName) {
-        String host = resolveDirectHost();
+        // S-06: proxy mode issues only proxy hostname + :15432 (structurally
+        // distinct branch — no port swapping on a previous URL).
+        String host = isProxyMode()
+                ? proxyProperties.directHost().trim() + ":" + proxyProperties.port()
+                : resolveDirectHost();
         String encodedUser = uriEncode(userName);
         String encodedPass = uriEncode(password);
         String encodedDb = uriEncode(dbName);
@@ -214,7 +248,9 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
      * Host is DNS-only; port comes from app.pgbouncer.issued-port.
      */
     public String buildPooledConnectionString(String userName, String password, String dbName) {
-        String host = resolvePooledHost();
+        String host = isProxyMode()
+                ? proxyProperties.pooledHost().trim() + ":" + proxyProperties.port()
+                : resolvePooledHost();
         String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
         return base + "?sslmode=" + sslmode + "&application_name=omnidb";
     }
