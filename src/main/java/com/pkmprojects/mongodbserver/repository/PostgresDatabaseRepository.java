@@ -312,6 +312,12 @@ public class PostgresDatabaseRepository {
     }
 
     public void grantPrivileges(String dbName, String userName) {
+        // Tenant isolation (live-gate 7/9): fresh databases grant CONNECT to
+        // PUBLIC by default, so without the revoke every tenant could open
+        // every other tenant's database (proven live). Revoke first, then
+        // grant the owner explicitly. Takes effect for new server sessions;
+        // already-pooled backends need RECONNECT to pick it up.
+        jdbcTemplate.execute("REVOKE CONNECT ON DATABASE " + quoteIdentifier(dbName) + " FROM PUBLIC");
         jdbcTemplate.execute("GRANT CONNECT ON DATABASE " + quoteIdentifier(dbName) + " TO " + quoteIdentifier(userName));
         JdbcTemplate target = jdbcFor(dbName);
         // Hardening: revoke public create on this DB's public schema (PG15+ already does, but explicit for older templates)

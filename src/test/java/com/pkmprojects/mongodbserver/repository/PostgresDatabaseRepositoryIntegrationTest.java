@@ -63,6 +63,7 @@ class PostgresDatabaseRepositoryIntegrationTest {
                 // roles survive DB drop — clean up matching role
                 try { repo.dropUser(db, db + "_user"); } catch (Exception ignored) {}
                 try { repo.dropUser(db, "testuser"); } catch (Exception ignored) {}
+                try { repo.dropUser(db, "otheruser"); } catch (Exception ignored) {}
             }
         }
     }
@@ -86,6 +87,29 @@ class PostgresDatabaseRepositoryIntegrationTest {
         assertThat(users).contains("testuser");
         repo.dropDatabase("testdb");
         repo.dropUser("testdb", "testuser");
+    }
+
+    @Test
+    void grantPrivilegesRevokesPublicConnect() throws Exception {
+        // Live-gate 7/9 regression: without the PUBLIC revoke, any role can
+        // CONNECT to any freshly provisioned database (PostgreSQL default).
+        repo.createDatabase("testdb", "root");
+        repo.createUser("testdb", "testuser", "secret1234");
+        repo.createUser("testdb", "otheruser", "secret5678");
+        repo.grantPrivileges("testdb", "testuser");
+        String url = "jdbc:postgresql://" + postgres.getHost() + ":" + postgres.getMappedPort(5432) + "/postgres";
+        try (var c = java.sql.DriverManager.getConnection(url, "root", "root");
+                var st = c.createStatement();
+                var rs = st.executeQuery("SELECT "
+                        + "has_database_privilege('testuser', 'testdb', 'CONNECT') AS owner_ok, "
+                        + "has_database_privilege('otheruser', 'testdb', 'CONNECT') AS stranger_ok")) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getBoolean("owner_ok")).isTrue();
+            assertThat(rs.getBoolean("stranger_ok")).isFalse();
+        }
+        repo.dropDatabase("testdb");
+        repo.dropUser("testdb", "testuser");
+        repo.dropUser("testdb", "otheruser");
     }
 
     @Test
