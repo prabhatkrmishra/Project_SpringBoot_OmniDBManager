@@ -296,9 +296,14 @@ services:
       - |
         set -eu
         # Allow-listed render: only the pooled hostname is substituted; all
-        # nginx-native $$variables pass through (a bare `envsubst` with no
+        # nginx-native $variables pass through (a bare `envsubst` with no
         # allow-list would blank every nginx variable and fail nginx -t).
-        envsubst '$DATABASE_PROXY_POOLED_HOST' < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
+        # NOTE the double $$: compose interpolates this file first, so $$
+        # collapses to $ and envsubst receives the allow-list literally.
+        # (Single $ here made compose bake the HOSTNAME into the allow-list,
+        # so the template variable survived unsubstituted and every SNI
+        # fell into the blackhole — fail-closed, but nothing routed.)
+        envsubst '$$DATABASE_PROXY_POOLED_HOST' < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
         nginx -t -c /run-rendered/nginx.conf
         exec nginx -c /run-rendered/nginx.conf -g 'daemon off;'
     depends_on:
