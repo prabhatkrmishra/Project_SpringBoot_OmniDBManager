@@ -107,7 +107,8 @@ services:
   # PgBouncer — pooling for Postgres, managed like pgvector (always on with postgres).
   # Same Docker network as postgres (host=postgres:5432 internally).
   # Static wildcard `*` database — any DB provisioned with pooling just works, no RELOAD file dance.
-  # Default loopback-bound 127.0.0.1:6432 (safe/closed), matching Adminer/mongo-express pattern.
+  # Host-side loopback-bound 127.0.0.1:6432 via the ports mapping below
+  # (safe/closed); the pooler itself must listen on * inside its netns.
   # Config lives in named volume `pgbouncer-data` (no host folder), written by one-shot init below.
   pgbouncer-init:
     image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
@@ -177,7 +178,12 @@ services:
         * = host=postgres port=5432 auth_user=$${AUTH_USER} auth_query=SELECT * FROM pgbouncer.user_lookup(\$$1)
         [pgbouncer]
         listen_port = 6432
-        listen_addr = 127.0.0.1
+        # Bind all container interfaces: 127.0.0.1 here would mean the
+        # CONTAINER's loopback only, so host-side connections through the
+        # published port get refused (nothing listens on the container eth0).
+        # External exposure is still governed by this service's ports mapping
+        # (host loopback only) + the proxy as the single public bridge.
+        listen_addr = *
         auth_type = scram-sha-256
         auth_file = /etc/pgbouncer/userlist.txt
         auth_user = $${AUTH_USER}
