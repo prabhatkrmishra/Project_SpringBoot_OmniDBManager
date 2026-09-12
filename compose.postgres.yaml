@@ -296,7 +296,7 @@ services:
       - |
         set -eu
         # Allow-listed render: only the pooled hostname is substituted; all
-        # nginx-native $variables pass through (a bare `envsubst` with no
+        # nginx-native $$variables pass through (a bare `envsubst` with no
         # allow-list would blank every nginx variable and fail nginx -t).
         # NOTE the double $$: compose interpolates this file first, so $$
         # collapses to $ and envsubst receives the allow-list literally.
