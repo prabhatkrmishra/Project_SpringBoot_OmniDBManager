@@ -247,54 +247,59 @@ services:
         # postgres name entry. The ini stays root-owned 644 (world-readable).
         chown 70:70 /etc/pgbouncer/userlist.txt
   # Single-port Database Proxy (Nginx stream + ssl_preread SNI routing).
-  # INACTIVE until the cutover gate passes (deploy/s06-cutover-gate.md).
+  # Opt-in via the `database-proxy` compose profile (NOT started by plain
+  # `up -d`) + DATABASE_PROXY_ENABLED=true with the pooled hostname set —
+  # both required, per the cutover gate (deploy/s06-cutover-gate.md).
   # Pooled-only public shape: the single public port serves the pooled link
   # (db hostname → PgBouncer); direct has NO public route (loopback on-box,
-  # SSH tunnel from outside). One hostname cannot serve both links — SNI
-  # routing cannot split it. No tenant passwords here — TLS passthrough
+  # SSH tunnel from outside). No tenant passwords here — TLS passthrough
   # only; PostgreSQL stays the auth authority. Unknown SNI has no route.
-  # database-proxy:
-  #   image: nginx:1.27-alpine  # TODO: pin digest via `docker buildx imagetools inspect` at deploy
-  #   container_name: omnidb-database-proxy
-  #   restart: unless-stopped
-  #   read_only: true
-  #   security_opt:
-  #     - no-new-privileges:true
-  #   cap_drop:
-  #     - ALL
-  #   tmpfs:
-  #     - /tmp
-  #     - /var/cache/nginx
-  #     - /run
-  #     - /run-rendered
-  #   ports:
-  #     - "${DATABASE_PROXY_BIND:-127.0.0.1}:${DATABASE_PROXY_PORT:-14291}:14291"
-  #   environment:
-  #     # Pooled public hostname (the single SNI entry). DIRECT_HOST optional —
-  #     # set it (different value) only for the dual-link shape.
-  #     DATABASE_PROXY_POOLED_HOST: ${DATABASE_PROXY_POOLED_HOST:-db.example.com}
-  #     DATABASE_PROXY_DIRECT_HOST: ${DATABASE_PROXY_DIRECT_HOST:-}
-  #   volumes:
-  #     # Template uses envsubst placeholders ONLY for the two hostnames
-  #     # (nginx-native $vars are $$-escaped); rendered at container start.
-  #     - ./deploy/database-proxy.stream.conf:/tpl/nginx.conf.tpl:ro
-  #   command:
-  #     - sh
-  #     - -c
-  #     - |
-  #       set -eu
-  #       envsubst < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
-  #       exec nginx -c /run-rendered/nginx.conf -g 'daemon off;'
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     pgbouncer:
-  #       condition: service_healthy
-  #   logging:
-  #     driver: json-file
-  #     options:
-  #       max-size: "10m"
-  #       max-file: "3"
+  database-proxy:
+    profiles:
+      - database-proxy
+    # Pinned to the multi-arch index digest (resolves per-arch on pull).
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    container_name: omnidb-database-proxy
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /run
+      - /run-rendered
+    ports:
+      - "${DATABASE_PROXY_BIND:-127.0.0.1}:${DATABASE_PROXY_PORT:-14291}:14291"
+    environment:
+      # Pooled public hostname (the single SNI entry). DIRECT_HOST optional —
+      # set it (different value) only for the dual-link shape.
+      DATABASE_PROXY_POOLED_HOST: ${DATABASE_PROXY_POOLED_HOST:-db.example.com}
+      DATABASE_PROXY_DIRECT_HOST: ${DATABASE_PROXY_DIRECT_HOST:-}
+    volumes:
+      # Template uses envsubst placeholders ONLY for the hostname
+      # (nginx-native $vars are $$-escaped); rendered at container start.
+      - ./deploy/database-proxy.stream.conf:/tpl/nginx.conf.tpl:ro
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        envsubst < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
+        nginx -t -c /run-rendered/nginx.conf
+        exec nginx -c /run-rendered/nginx.conf -g 'daemon off;'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   pgbouncer:
     # Maintained image (the pgbouncer/pgbouncer repo is stale); pre-existing

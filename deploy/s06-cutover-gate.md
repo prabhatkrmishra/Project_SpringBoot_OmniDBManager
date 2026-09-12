@@ -21,7 +21,9 @@ rejects half-configured proxy blocks at startup).
 
 ## Cutover verification (in order — stop on first failure)
 
-1. [ ] Start Database Proxy.
+1. [ ] Start Database Proxy: `DATABASE_PROXY_ENABLED=true` +
+       `COMPOSE_PROFILES=database-proxy` in `.env`, then
+       `docker compose -f compose.postgres.yaml up -d` (recreates init → pooler TLS block, then starts the proxy).
 2. [ ] Proxy health: process up + `pgbouncer:6432` reachable.
 3. [ ] `db.missionhelmai.com:14291` → PgBouncer → PostgreSQL
        (tenant pooled login, `SELECT 1`).
