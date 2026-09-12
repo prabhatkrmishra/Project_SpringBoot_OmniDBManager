@@ -173,14 +173,15 @@ services:
         # Avoid double-quote/backslash in these passwords or the line malforms
         # and logins fail closed (loud, not silent).
         authline() { u="$$1"; p="$$2"; printf '"%s" "%s"\n' "$$u" "$$p"; }
-        # NOTE: auth_query value must not contain spaces — the [databases] line
-        # is whitespace-tokenized (key=value per token), so spaces yield
-        # "syntax error in connection string" + "no such user" for every pooled
-        # login. SELECT*FROM lexes identically in PostgreSQL. (Comment kept out
-        # of the heredoc below: an unquoted $1 in there would trip set -u.)
+        # NOTE: the [databases] line is whitespace-tokenized (key=value per
+        # token), so a spaced auth_query must be SINGLE-quoted — that is the
+        # only quoting cstr_get_value understands (double quotes do not work).
+        # Verified against the 1.24.1 parser source. $1 is bound as a query
+        # parameter by the pooler itself (no quoting concerns). (Comment kept
+        # out of the heredoc below: an unquoted $1 in there would trip set -u.)
         cat > /etc/pgbouncer/pgbouncer.ini <<INI
         [databases]
-        * = host=postgres port=5432 auth_user=$${AUTH_USER} auth_query=SELECT*FROM pgbouncer.user_lookup(\$$1)
+        * = host=postgres port=5432 auth_user=$${AUTH_USER} auth_query='SELECT * FROM pgbouncer.user_lookup(\$$1)'
         [pgbouncer]
         listen_port = 6432
         # Bind all container interfaces: 127.0.0.1 here would mean the
