@@ -172,7 +172,7 @@ services:
         authline() { u="$$1"; p="$$2"; printf '"%s" "%s"\n' "$$u" "$$p"; }
         cat > /etc/pgbouncer/pgbouncer.ini <<INI
         [databases]
-        * = host=postgres port=5432 auth_user=$${AUTH_USER} auth_query=SELECT * FROM pgbouncer.user_lookup($$1)
+        * = host=postgres port=5432 auth_user=$${AUTH_USER} auth_query=SELECT * FROM pgbouncer.user_lookup(\$$1)
         [pgbouncer]
         listen_port = 6432
         listen_addr = 127.0.0.1
