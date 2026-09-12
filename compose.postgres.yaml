@@ -287,7 +287,10 @@ services:
       - -c
       - |
         set -eu
-        envsubst < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
+        # Allow-listed render: only the pooled hostname is substituted; all
+        # nginx-native $variables pass through (a bare `envsubst` with no
+        # allow-list would blank every nginx variable and fail nginx -t).
+        envsubst '$DATABASE_PROXY_POOLED_HOST' < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
         nginx -t -c /run-rendered/nginx.conf
         exec nginx -c /run-rendered/nginx.conf -g 'daemon off;'
     depends_on:
