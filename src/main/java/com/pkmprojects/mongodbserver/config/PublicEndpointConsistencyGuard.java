@@ -49,10 +49,10 @@ public class PublicEndpointConsistencyGuard implements ApplicationRunner {
         if (proxy.port() < 1 || proxy.port() > 65535)
             throw new IllegalStateException("database.proxy.port must be 1..65535");
         if (proxy.isPooledOnlyPublic()) {
-            log.info("DatabaseProxy pooled-only public :{} pooled={} (direct has no public route; unknown-SNI deny expected)",
+            log.info("DatabaseProxy pooled-only public :{} pooled={} (direct has no public route; SCRAM is the access boundary)",
                     proxy.port(), proxy.pooledHost());
         } else {
-            log.info("DatabaseProxy configured :{} direct={} pooled={} (SNI split, unknown-SNI deny expected)", proxy.port(),
+            log.info("DatabaseProxy configured :{} direct={} pooled={} (plain passthrough; SCRAM is the access boundary)", proxy.port(),
                     proxy.directHost(), proxy.pooledHost());
         }
     }

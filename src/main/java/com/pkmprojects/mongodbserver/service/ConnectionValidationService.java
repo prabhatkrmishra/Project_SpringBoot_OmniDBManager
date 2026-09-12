@@ -35,7 +35,7 @@ public class ConnectionValidationService {
 
     /**
      * Tiered pooled proof (§29 + review hierarchy). {@code PUBLIC} exercises
-     * the full app contract (DNS → NSG → proxy :14291 → SNI → pooler → PG);
+     * the full app contract (DNS → NSG → proxy :14291 → pooler → PG);
      * {@code LOOPBACK} proves only tenant → pooler → PG with tenant SCRAM
      * (same pooler, same {@code auth_query}) — necessary but <b>not
      * equivalent</b> to the production path. Callers must log the path and
@@ -64,7 +64,7 @@ public class ConnectionValidationService {
 
     /** Which tier proved pooled health — see {@link #validatePooledDetailed}. */
     public enum ValidationPath {
-        /** Full public route (DNS → proxy :14291 → SNI → pooler → PG). */
+        /** Full public route (DNS → proxy :14291 → pooler → PG). */
         PUBLIC,
         /** Same pooler + auth_query + tenant SCRAM via loopback; proxy hop unproven. */
         LOOPBACK,

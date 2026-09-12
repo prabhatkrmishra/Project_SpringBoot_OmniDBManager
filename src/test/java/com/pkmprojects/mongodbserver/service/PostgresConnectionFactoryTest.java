@@ -24,7 +24,7 @@ class PostgresConnectionFactoryTest {
 
     @Test
     void hostnameSelectsModeNeverIdentity() {
-        // SNI-identity contract (S-06 audit): same database + same role +
+        // Identity contract: same database + same role +
         // same password on either hostname; only host/port/mode differ.
         // Authorization still comes from PostgreSQL per (role, db), never
         // from the hostname, username shape, or packet heuristics.

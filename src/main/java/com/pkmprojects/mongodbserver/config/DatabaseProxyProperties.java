@@ -3,7 +3,7 @@ package com.pkmprojects.mongodbserver.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Single-port Database Proxy (TLS passthrough + SNI split).
+ * Single-port Database Proxy (plain TCP passthrough to the pooler).
  * Two shapes, both on one public port (default {@code :14291}):
  * <ul>
  *   <li><b>Dual-link</b> — {@code direct-host} + {@code pooled-host} set and

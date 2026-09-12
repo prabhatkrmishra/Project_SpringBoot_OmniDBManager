@@ -283,7 +283,7 @@ public class ProvisioningService {
                                         "Pooled validation failed for '" + dbName + "' — pooled logins cannot authenticate via PgBouncer");
                             }
                             if (result.path() != ConnectionValidationService.ValidationPath.PUBLIC) {
-                                // LOOPBACK proves pooler + SCRAM but not DNS/NSG/proxy/SNI —
+                                // LOOPBACK proves pooler + SCRAM but not DNS/NSG/proxy —
                                 // honest confidence level, full proof only via PUBLIC after S-06.
                                 log.warn("Provisioned pooled database '{}' — pooled health proven via {} path only, public proxy path unproven",
                                         dbName, result.path());
