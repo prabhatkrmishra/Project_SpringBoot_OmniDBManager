@@ -60,7 +60,11 @@ public final class PgbouncerConsoleClient implements AutoCloseable {
         this.socket = socket;
         this.socketTimeoutMs = socketTimeoutMs;
         this.in = new DataInputStream(socket.getInputStream());
-        this.out = new DataOutputStream(socket.getOutputStream());
+        // Buffered: every PG message must leave as ONE transport write. This
+        // pooler build drops query messages split across several TLS records
+        // with "incomplete pkt" (proven live — byte-identical messages pass
+        // coalesced and die split). Every send path ends with flush().
+        this.out = new DataOutputStream(new java.io.BufferedOutputStream(socket.getOutputStream()));
     }
 
     /**
