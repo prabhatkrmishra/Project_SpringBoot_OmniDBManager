@@ -8,10 +8,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -66,23 +62,26 @@ public class PgbouncerMonitorService {
         PgbouncerSnapshot.Stats stats = null;
         String status;
 
-        try (Connection c = openAdminConnection();
-             Statement st = c.createStatement()) {
+        // Raw protocol console client (see PgbouncerConsoleClient): pgjdbc's
+        // connect-time SET probe dies on the console db with "SET failed".
+        // Column positions follow the 1.24 admin.c layouts:
+        //   SHOW POOLS: database(0) user(1) cl_active(2) cl_waiting(3) ...
+        //     sv_active(6) sv_idle(9) maxwait-seconds(13) pool_mode(15)
+        //   SHOW STATS: database(0) total_query_count(3)
+        //     total_query_time(7) total_wait_time(8)
+        try (PgbouncerConsoleClient c = openAdminConnection()) {
 
             // SHOW POOLS
-            try (ResultSet rs = st.executeQuery("SHOW POOLS")) {
-                while (rs.next()) {
-                    String db = rs.getString("database");
-                    String poolMode = rs.getString("pool_mode");
-                    int clActive = rs.getInt("cl_active");
-                    int clWaiting = rs.getInt("cl_waiting");
-                    int svActive = rs.getInt("sv_active");
-                    int svIdle = rs.getInt("sv_idle");
-                    double maxWait = 0;
-                    try { maxWait = rs.getDouble("maxwait"); } catch (Exception ignored) {}
-                    // pgbouncer: maxwait is in seconds
-                    pools.add(new PgbouncerSnapshot.Pool(db, poolMode, clActive, clWaiting, svActive, svIdle, maxWait));
-                }
+            for (String[] row : c.query("SHOW POOLS").rows()) {
+                String db = row[0];
+                String poolMode = row[15];
+                int clActive = parseInt(row[2]);
+                int clWaiting = parseInt(row[3]);
+                int svActive = parseInt(row[6]);
+                int svIdle = parseInt(row[9]);
+                // pgbouncer: maxwait is in seconds
+                double maxWait = parseDouble(row[13]);
+                pools.add(new PgbouncerSnapshot.Pool(db, poolMode, clActive, clWaiting, svActive, svIdle, maxWait));
             }
 
             // SHOW STATS — aggregate across databases
@@ -90,16 +89,14 @@ public class PgbouncerMonitorService {
             double totalQueryTime = 0;
             long totalWaitTime = 0;
             int rows = 0;
-            try (ResultSet rs = st.executeQuery("SHOW STATS")) {
-                while (rs.next()) {
-                    long q = rs.getLong("total_query_count");
-                    long qTime = rs.getLong("total_query_time");
-                    long wait = rs.getLong("total_wait_time");
-                    totalQueries += q;
-                    totalQueryTime += qTime;
-                    totalWaitTime += wait;
-                    rows++;
-                }
+            for (String[] row : c.query("SHOW STATS").rows()) {
+                long q = parseLong(row[3]);
+                double qTime = parseDouble(row[7]);
+                long wait = parseLong(row[8]);
+                totalQueries += q;
+                totalQueryTime += qTime;
+                totalWaitTime += wait;
+                rows++;
             }
             double avgQueryMs = rows > 0 && totalQueries > 0 ? (totalQueryTime / (double) totalQueries) : 0;
             stats = new PgbouncerSnapshot.Stats(totalQueries, avgQueryMs, totalWaitTime);
@@ -129,10 +126,9 @@ public class PgbouncerMonitorService {
     }
 
     public void ping() {
-        try (Connection c = openAdminConnection();
-             Statement st = c.createStatement();
-             ResultSet rs = st.executeQuery("SHOW POOLS")) {
-            if (!rs.next() && poolsEmptyIsOk()) return;
+        try (PgbouncerConsoleClient c = openAdminConnection()) {
+            var result = c.query("SHOW POOLS");
+            if (result.rows().isEmpty() && poolsEmptyIsOk()) return;
         } catch (Exception e) {
             throw new IllegalStateException("PgBouncer unreachable: " + e.getMessage(), e);
         }
@@ -153,14 +149,22 @@ public class PgbouncerMonitorService {
         return proxyProperties != null && proxyProperties.isConfigured() ? "require" : "disable";
     }
 
-    private Connection openAdminConnection() throws Exception {
-        // pgbouncer virtual database — connect to 127.0.0.1:port/pgbouncer with stats user
-        // Same console-SET suppression as PgbouncerAdminService.ASSUME_VERSION
-        // (SHOW POOLS via JDBC died with "SET failed" live).
-        String url = "jdbc:postgresql://127.0.0.1:" + properties.port() + "/pgbouncer?sslmode=" + poolerSslMode()
-                + PgbouncerAdminService.ASSUME_VERSION + "&connectTimeout=2&socketTimeout=3";
-        String user = properties.statsUser();
-        String pass = resolveStatsPassword();
-        return DriverManager.getConnection(url, user, pass);
+    private PgbouncerConsoleClient openAdminConnection() throws Exception {
+        // pgbouncer virtual database — stats user, raw protocol (see above).
+        return PgbouncerConsoleClient.connect("127.0.0.1", properties.port(),
+                properties.statsUser(), resolveStatsPassword(),
+                poolerSslMode().equals("require"), 2000, 3000);
+    }
+
+    private static int parseInt(String s) {
+        try { return Integer.parseInt(s.trim()); } catch (Exception e) { return 0; }
+    }
+
+    private static long parseLong(String s) {
+        try { return Long.parseLong(s.trim()); } catch (Exception e) { return 0L; }
+    }
+
+    private static double parseDouble(String s) {
+        try { return Double.parseDouble(s.trim()); } catch (Exception e) { return 0; }
     }
 }

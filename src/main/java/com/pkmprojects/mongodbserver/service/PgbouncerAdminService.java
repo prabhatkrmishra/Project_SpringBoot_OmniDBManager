@@ -1,9 +1,6 @@
 package com.pkmprojects.mongodbserver.service;
 
 import com.pkmprojects.mongodbserver.config.PgbouncerProperties;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.Statement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,10 +65,8 @@ public class PgbouncerAdminService {
 
     private boolean exec(String command, String dbName) {
         String target = quoted(dbName);
-        try (Connection c = openAdminConnection();
-                Statement st = c.createStatement()) {
-            st.setQueryTimeout(5);
-            st.execute(command + " " + target);
+        try (PgbouncerConsoleClient c = openAdminConnection()) {
+            c.query(command + " " + target);
             log.info("PgBouncer {} {} ok", command, dbName);
             return true;
         } catch (Exception e) {
@@ -86,24 +81,13 @@ public class PgbouncerAdminService {
         return proxyProperties != null && proxyProperties.isConfigured() ? "require" : "disable";
     }
 
-    // NOTE: assumeMinServerVersion suppresses the driver's connect-time
-    // `SET extra_float_digits` probe, which the pgbouncer *console* database
-    // rejects with "SET failed" (proven live — every PAUSE/RESUME/RECONNECT
-    // died on it while psql worked). Tenant databases accept SET, so only
-    // the console URLs need this. Server is PG18; 9.0 is just the driver's
-    // "don't probe" floor.
-    static final String ASSUME_VERSION = "&assumeMinServerVersion=9.0";
-
-    /** JDBC URL for the pooler console — package-visible for tests. */
-    String adminJdbcUrl() {
-        return "jdbc:postgresql://127.0.0.1:" + properties.port()
-                + "/pgbouncer?sslmode=" + poolerSslMode() + ASSUME_VERSION + "&connectTimeout=2&socketTimeout=5";
-    }
-
-    private Connection openAdminConnection() throws Exception {
-        String url = adminJdbcUrl();
+    private PgbouncerConsoleClient openAdminConnection() throws Exception {
         String pass = properties.adminPassword();
-        return DriverManager.getConnection(url, properties.adminUser(), pass == null ? "" : pass);
+        // Raw protocol client (see PgbouncerConsoleClient): pgjdbc's
+        // connect-time SET probe dies on the console db with "SET failed".
+        return PgbouncerConsoleClient.connect("127.0.0.1", properties.port(),
+                properties.adminUser(), pass == null ? "" : pass,
+                poolerSslMode().equals("require"), 2000, 5000);
     }
 
     /** Quote an admin-console identifier (db names are pre-validated upstream). */
