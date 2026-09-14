@@ -206,7 +206,7 @@ OVERRIDE_MYSQL_TLS=true        # issued strings get ?sslMode=REQUIRED (or VERIFY
 
 Manager UI stays on `443` via `127.0.0.1:8443` (plain `http` reverse proxy, no `stream` multiplex). Postgres is exposed on **two** separate public TCP ports via `stream` — `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS and are IP-allowlisted (never `0.0.0.0/0`); DNS must be grey-cloud (DNS only) so TCP reaches your VPS.
 
-> **S-06 single-host TLS bridge (implemented, cutover gate pending).** One public hostname + one public port `:15432` serve BOTH modes via `options=-c omnidb.mode=<direct|pooled>` (see `deploy/s06-bridge-gate.md` for the live checklist and `deploy/db-proxy/` for the bridge). The old pooled-only nginx passthrough (`deploy/database-proxy.stream.conf`, superseded — see `deploy/s06-cutover-gate.md` header) and the dual-hostname SNI plan are retired. Do **not** cut over production until every bridge-gate box passes.
+> **Single-host TLS bridge (implemented, cutover gate pending).** One public hostname + one public port `:15432` serve BOTH modes via `options=-c omnidb.mode=<direct|pooled>` (see `deploy/database-bridge-gate.md` for the live checklist and `deploy/db-proxy/` for the bridge). The old pooled-only nginx passthrough (`deploy/database-proxy.stream.conf`, superseded — see git history) and the dual-hostname SNI plan are retired. Do **not** cut over production until every bridge-gate box passes.
 
 ```bash
 # Move any existing sites that listen on 443 to 127.0.0.1:8443

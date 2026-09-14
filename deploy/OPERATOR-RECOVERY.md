@@ -1,10 +1,10 @@
-## Operator recovery quick reference (S-09/S-11)
+## Operator recovery quick reference
 
 All commands run on the deployment host. Tenant credentials below are
 placeholders — substitute the issued values. Never print tenant passwords
 into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
 
-## Architecture (S-12)
+## Architecture
 
 - One public PostgreSQL endpoint: `db.example.com:15432` (host/port from
   `DATABASE_PROXY_HOST` / `DATABASE_PROXY_PORT`, loopback-bound by default
@@ -23,7 +23,7 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   ADMIN-gated in-app proxy). Externally reachable: the app UI/API (via
   nginx) and the single database gateway `:15432`.
 
-## Normal verification (S-12)
+## Normal verification
 
 - Application liveness (anonymous, orchestrator-safe):
   `curl -fsS http://127.0.0.1:9811/actuator/health/liveness` → `{"status":"UP"}`.
@@ -116,7 +116,7 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   credentials/endpoints are issued. Rotation/provisioning/deletion wait
   for the control plane; tenant traffic does not.
 
-## Critical safety warnings (S-12)
+## Critical safety warnings
 
 - DO NOT expose PostgreSQL `:5432` or PgBouncer `:6432` publicly — the
   bridge `:15432` is the only application database ingress.
@@ -132,7 +132,7 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
 - DO NOT treat a metadata/resource mismatch as proof of anything except
   "needs investigation".
 
-## Recovery semantics (established by S-09/S-11 evidence)
+## Recovery semantics (established by live evidence)
 
 - Provisioning crash-orphans are loud (409 on retry) and operator-recoverable.
 - Rotation converges on retry (superuser ALTER needs no old password).
@@ -148,7 +148,7 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   fails closed; legacy plaintext passes through only when it was stored
   that way).
 
-## Backup / restore / upgrade (S-12)
+## Backup / restore / upgrade
 
 - Back up MongoDB metadata, per-tenant database dumps, the proxy CA/certs,
   and `APP_ENCRYPTION_KEY` together; test-restore the key + metadata pair
@@ -162,7 +162,7 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   resource state — restoring an older metadata backup while newer tenant
   resources exist surfaces as reconcile mismatches, not silent loss.
 
-## Health model (S-12)
+## Health model
 
 - Liveness (`/actuator/health/liveness`, anonymous): JVM responsive only.
 - Readiness (`/actuator/health/readiness`, anonymous): Spring ready to

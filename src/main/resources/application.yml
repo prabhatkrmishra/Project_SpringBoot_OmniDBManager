@@ -65,7 +65,7 @@ management:
     health:
       show-details: never
       show-components: never
-      # S-12 P3-3: orchestrator probes. Default groups only —
+      # Orchestrator probes. Default groups only —
       # liveness = JVM responsive, readiness = Spring ready to serve.
       # Readiness additionally requires the control-plane stores via the
       # unconditional controlPlane indicator (unknown group names fail
@@ -134,8 +134,8 @@ app:
     # via auth_query. Must match the pooler container's userlist (see
     # compose.postgres.yaml pgbouncer-init) or every pooled login fails.
     auth-password: ${PGBOUNCER_AUTH_PASSWORD:change-me-now}
-  # Single-host TLS-bridge Database Proxy (S-06 final).
-  # Disabled until the cutover gate passes (deploy/s06-cutover-gate.md).
+  # Single-host TLS-bridge Database Proxy.
+  # Disabled until the cutover gate passes (deploy/database-bridge-gate.md).
   # One public hostname + one public port serve BOTH modes; the mode travels
   # as options=-c omnidb.mode=<direct|pooled> (routing only, never auth).
   proxy:
