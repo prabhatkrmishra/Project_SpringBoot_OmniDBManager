@@ -27,7 +27,10 @@ Most teams run MongoDB *and* PostgreSQL *and* MySQL. OmniDB Manager unifies them
 - **Backup & restore** — Mongo gzip'd canonical Extended JSON (`formatVersion:1`); Postgres & MySQL JDBC gzip'd JSON dumps (`formatVersion:1`, `tables`/`rows`/`columns`). Streaming download, replace-semantics restore with pre-validation.
 - **Encryption at rest** — `AES-256-GCM` (`ENC:v1:`) for stored per-database passwords (all engines). Key from `APP_ENCRYPTION_KEY` (base64 32B or 64 hex); plaintext fallback when blank (dev only).
 - **Hardening** — per-engine rate limit (`IP:engine`, 5/min, `trustXFF=false`), TLS (`sslmode=require` / `verify-full` + `application_name` for PG; `sslMode=REQUIRED` / `VERIFY_IDENTITY` for MySQL), `scram-sha-256` / `caching_sha2_password`, `PGDATA=/var/lib/postgresql/18/docker`, audit trail (`PROVISION/RESET_PASSWORD/DELETE/TABLE_CREATED/DROPPED/TRUNCATED/ROW_INSERTED/ROW_DELETED/BACKUP_CREATED/RESTORED/IMPORT`), Micrometer `provisioned.databases{engine}` gauge, `postgres` + `mysql` HealthIndicators.
-- **Optional PgBouncer pooling** — `pgbouncer:6432` runs with postgres (same network, `postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder). Per-DB opt-in on provision; pooled strings use `POSTGRES_ISSUED_HOST:6432`, direct stay `POSTGRES_ISSUED_HOST:9813` — Mongo/MySQL untouched.
+- **Optional PgBouncer pooling** — `pgbouncer:6432` runs with postgres (same network, `postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder). Per-DB opt-in on provision; pooled strings use `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT`, direct use `POSTGRES_ISSUED_HOST` + `POSTGRES_ISSUED_PORT` — Mongo/MySQL untouched. Pooled server connections re-auth via `auth_query` (`pgbouncer.user_lookup`), so rotation takes effect on next checkout.
+- **Single-host TLS bridge (pending cutover)** — optional Go proxy (`deploy/db-proxy/`) exposing one public port `:15432` for BOTH Postgres modes, routed by `options=-c omnidb.mode=<direct|pooled>` and stripped before the backend. Verify-full both backend legs, SNI-enforced, fail-closed, cert hot-reload; issued bridged strings pin `channel_binding=disable`. Live checklist: `deploy/database-bridge-gate.md`. Disabled by default (`DATABASE_PROXY_ENABLED=false`) until the gate passes.
+- **Read-only reconciliation** — `GET /api/admin/reconcile` (ADMIN-only) diffs metadata against live engine catalogs (`HEALTHY` / `MISSING_*` / `ORPHAN_*` / `INCONSISTENT` / `SERVICE_ACCOUNT`); diagnostic only, never mutates.
+- **Probes & crash recovery** — anonymous liveness/readiness (`/actuator/health/liveness|readiness`, tenant health deliberately excluded); full health stays ADMIN-only. Startup best-effort `RESUME`s pooled databases paused by a crashed delete, so pooled clients never wedge.
 - **Brute-force protection** — login rate limit per IP+username (5/15m, 429 + `Retry-After`).
 - **Bundled UIs (optional)** — mongo-express at `/mongo-express`, Adminer at `/adminer` (Postgres), phpMyAdmin at `/phpmyadmin` (MySQL), all loopback-bound and behind app auth. Adminer signs in automatically as the Postgres superuser, so one click sees every provisioned database — no second login.
 
@@ -112,6 +115,7 @@ docker compose -f compose.postgres.yaml up -d
 ```
 
 Pooled strings use `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT` (e.g. `pg.example.com:27432`), direct use `POSTGRES_ISSUED_HOST` + `POSTGRES_ISSUED_PORT` (e.g. `pg.example.com:27431`) — blank host resolves to `127.0.0.1:6432` / `127.0.0.1:9813` for local dev. Mongo/MySQL untouched. Per-DB users auth via `auth_query` (`pgbouncer.user_lookup`, SCRAM) as least-privilege `pgbouncer_auth`; `userlist.txt` holds only `pgbouncer_admin`/`stats` (md5) plus the plain-text auth_user entry SCRAM requires. The detail page shows **pooled auth ok/missing** with a one-click repair for pre-existing pooled DBs. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** and a `pgbouncer` entry in `/actuator/health`.
+Pooled strings use `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT` (e.g. `pg.example.com:27432`), direct use `POSTGRES_ISSUED_HOST` + `POSTGRES_ISSUED_PORT` (e.g. `pg.example.com:27431`) — blank host resolves to `127.0.0.1:6432` / `127.0.0.1:9813` for local dev. When the TLS bridge is enabled (`DATABASE_PROXY_HOST` set), both modes instead share that host + `DATABASE_PROXY_PORT` (`:15432`) with `options=-c omnidb.mode=` selecting the route and `channel_binding=disable` pinned (see `deploy/database-bridge-gate.md`). Mongo/MySQL untouched. Per-DB users auth via `auth_query` (`pgbouncer.user_lookup`, SCRAM) as least-privilege `pgbouncer_auth`; `userlist.txt` holds only `pgbouncer_admin`/`stats` (md5) plus the plain-text auth_user entry SCRAM requires. The detail page shows **pooled auth ok/missing** with a one-click repair for pre-existing pooled DBs. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** and a `pgbouncer` entry in `/actuator/health`.
 
 ### Enable MySQL
 
@@ -212,7 +216,7 @@ Mount certs in `compose.postgres.yaml` (see commented `postgres` service) and se
 
 ### Custom public port (optional)
 
-MongoDB/MySQL can each be served on a non-standard public port instead of `27017`/`3306`: add a matching `stream` server (`listen <custom-port> ssl` → `proxy_pass 127.0.0.1:9812|9816`), open that port **only to your app servers** in the firewall, and set `*_ISSUED_HOST` to `host:<custom-port>` — issued strings then carry it with no extra variable. Postgres **always** uses its two-port split (`POSTGRES_ISSUED_HOST` DNS-only + `POSTGRES_ISSUED_PORT`/`PGBOUNCER_ISSUED_PORT`, see DEPLOY.md §6) — never `host:port` in `POSTGRES_ISSUED_HOST`. The odd port only quiets scanners; the allowlist, TLS, and per-database credentials are the actual locks. See `deploy/nginx.conf.example`.
+MongoDB/MySQL can each be served on a non-standard public port instead of `27017`/`3306`: add a matching `stream` server (`listen <custom-port> ssl` → `proxy_pass 127.0.0.1:9812|9816`), open that port **only to your app servers** in the firewall, and set `*_ISSUED_HOST` to `host:<custom-port>` — issued strings then carry it with no extra variable. Postgres uses its two-port split on the interim path (`POSTGRES_ISSUED_HOST` DNS-only + `POSTGRES_ISSUED_PORT`/`PGBOUNCER_ISSUED_PORT`, see DEPLOY.md §6) — never `host:port` in `POSTGRES_ISSUED_HOST`; after the bridge cutover both modes share `DATABASE_PROXY_HOST:DATABASE_PROXY_PORT` (`:15432`). The odd port only quiets scanners; the allowlist, TLS, and per-database credentials are the actual locks. See `deploy/nginx.conf.example`.
 
 ## Using the provisioned database
 
@@ -254,7 +258,16 @@ Use pooled for app/workers, direct for DDL/migrations only.
 
 ### Direct connection — not a proxy
 
-OmniDB Manager is the **control plane** only: it provisions DBs, issues per-DB credentials, and rotates/deletes them. It never sits in the data path. Connection strings point straight at MongoDB/PostgreSQL, so apps talk directly over the native wire protocol. After provisioning, the manager is needed only for admin operations.
+With the TLS bridge enabled, issued Postgres strings share one host/port for both modes:
+
+```
+postgresql://myapp_user:***@db.example.com:15432/myapp?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Ddirect
+postgresql://myapp_user:***@db.example.com:15432/myapp?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Dpooled
+```
+
+### Direct connection — not a proxy (except the optional bridge hop)
+
+OmniDB Manager is the **control plane** only: it provisions DBs, issues per-DB credentials, and rotates/deletes them. The Manager JVM never sits in the data path. On the legacy path, connection strings point straight at MongoDB/PostgreSQL/MySQL, so apps talk directly over the native wire protocol. On the bridge path, Postgres strings additionally traverse the stateless Go TLS bridge (`:15432`), which routes by `options` and authenticates nothing — PostgreSQL stays the auth authority. After provisioning, the manager is needed only for admin operations.
 
 ## Atlas / external MongoDB
 
@@ -295,7 +308,7 @@ Issued connection strings derive from the active `spring.mongodb.uri` host.
 | `app.login-rate-limit.*` | `5 / 15m` | Login brute-force window |
 | `app.provision-rate-limit.*` | `5 / 1m` | Per-engine provision/reset/delete window (`IP:engine`) |
 
-`application.yml` also sets `management.endpoints.web.exposure=health,info,metrics` and `show-components:always`.
+`application.yml` also sets `management.endpoints.web.exposure=health,info,metrics` with `show-details:never` / `show-components:never`; anonymous liveness/readiness groups stay minimal while full health requires `ADMIN`.
 
 ## Architecture
 
@@ -307,6 +320,11 @@ Controller  →  Service  →  Repository (Mongo Java driver / JdbcTemplate)
 
 - `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit, `EncryptionService` `ENC:v1:` for all engines; Postgres `pooled` flag per DB for PgBouncer, `repairPooledAuth` backfill for the `auth_query` lookup).
 - `DatabaseEngine` — `MongoDatabaseEngine` + `PostgresDatabaseEngine` (via `JdbcTemplate`, no `@Transactional`; `buildPooledConnectionString` for pooled DBs via `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT`, `installPooledAuth`/`isPooledAuthInstalled` for the pooler lookup) + `MysqlDatabaseEngine`.
+- `DatabaseEngine` — `MongoDatabaseEngine` + `PostgresDatabaseEngine` (via `JdbcTemplate`, no `@Transactional`; `buildPooledConnectionString` for pooled DBs via `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT`, `installPooledAuth`/`isPooledAuthInstalled` for the pooler lookup; bridged `channel_binding=disable` + `options=-c omnidb.mode=` strings via `PostgresConnectionStringBuilder` when the TLS bridge is enabled) + `MysqlDatabaseEngine`.
+- `PooledResumeOnStartup` — startup best-effort `RESUME` of pooled databases paused by a crashed delete (never throws, creates/deletes nothing).
+- `ReconciliationService` + `AdminDiagnosticsController` — read-only metadata-vs-catalog diff at `GET /api/admin/reconcile` (ADMIN-only, never mutates).
+- `ControlPlaneReadinessIndicator` — bounded readiness signal over configured maintenance stores only (tenant health excluded); anonymous liveness/readiness probes, full health ADMIN-only.
+- `PgbouncerAdminService` — best-effort `PAUSE`/`RESUME`/`RECONNECT` around delete/rotation via the pooler console (single-DB scope, never throws).
 - `PostgresDatabaseRepository` — `CREATE DATABASE "db" OWNER "user" TEMPLATE template0`, `CREATE ROLE ... WITH LOGIN PASSWORD`, `pg_terminate_backend`, `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `quoteIdentifier`, `executeInDatabase`, `listTables`/`listRowsWithCtid` (`ctid::text AS __pg_ctid`); pooled-auth: `ensureAuthRole` (least-privilege `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE`), `installAuthLookup` (`pgbouncer.user_lookup`, `SECURITY DEFINER`, `REVOKE FROM PUBLIC`), `isAuthLookupInstalled` probe.
 - `MysqlDatabaseRepository` — ``CREATE DATABASE `db` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci``, ``CREATE USER 'u'@'%' IDENTIFIED BY ?`` + `GRANT ... ON db.*`, `information_schema` sizes/tables/columns, `quoteIdentifier` backticks, `getPrimaryKeyColumn` single-PK guard.
 - `ExplorationService` / `PostgresExplorationService` / `MysqlExplorationService` — read-only browsing, bounded pagination (50/page), JSON export, PK-aware delete.
@@ -325,7 +343,7 @@ Naming is validated per-engine; system databases are protected.
 
 - **DDL** — `CREATE/DROP DATABASE` runs outside transactions (auto-commit `JdbcTemplate`). `CREATE DATABASE "db" OWNER "user" TEMPLATE template0 ENCODING 'UTF8'`; `CREATE ROLE "user" WITH LOGIN PASSWORD '...'` (`scram-sha-256`); `GRANT CONNECT` + schema grants.
 - **Table/row CRUD** — `CREATE TABLE ... (col TEXT)`, `DROP TABLE IF EXISTS ... CASCADE`, `TRUNCATE ... CASCADE`, `INSERT` dynamic, `SELECT *, ctid::text AS __pg_ctid LIMIT ? OFFSET ?`, `DELETE ... WHERE ctid = ?::tid`. Columns lowercased, `distinct()`, reserved names blocked (`__pg_ctid/__ctid/ctid/__new_col/__new_val/_csrf`).
-- **Connection strings** — built from `app.postgres.issued-host` (DNS-only) + `app.postgres.issued-port`, or derived `127.0.0.1:9813` locally; `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb`. Pooled DBs use the same host + `app.pgbouncer.issued-port` — Postgres-only, Mongo/MySQL untouched.
+- **Connection strings** — built from `app.postgres.issued-host` (DNS-only) + `app.postgres.issued-port`, or derived `127.0.0.1:9813` locally; `uriEncode` for user/pass, `?sslmode=require&application_name=omnidb`. Pooled DBs use the same host + `app.pgbouncer.issued-port` — Postgres-only, Mongo/MySQL untouched. With the TLS bridge enabled both modes share `DATABASE_PROXY_HOST:DATABASE_PROXY_PORT` with `channel_binding=disable` + `options=-c omnidb.mode=` pinned.
 - **PgBouncer** — `edoburu/pgbouncer:v1.24.1-p1` same Docker network (`postgres:5432` internally, `127.0.0.1:6432` loopback, no host folder, static wildcard `*` with `auth_user=pgbouncer_auth` + `auth_query=pgbouncer.user_lookup`). Pool sizes templated from the same env as the app. Per-DB opt-in on provision; `SHOW` via `stats_users`.
 
 ## MySQL specifics
@@ -366,7 +384,7 @@ CI: `.github/workflows/maven.yml` — `mvn -B clean package -DargLine=-Xmx1024m`
 
 - Unit tests for validators, password generator, services, rate limiters, encryption, backup/restore.
 - `@WebMvcTest` slices for controllers (auth, CSRF, validation, error handling).
-- Testcontainers-backed tests (real MongoDB/PostgreSQL with auth) for driver repos and full provision/reset/delete lifecycle, including concurrency and rate-limit bursts. Skipped automatically when Docker is unavailable (`Tests run:266 Failures:0 Errors:0 Skipped:26` without Docker).
+- Testcontainers-backed tests (real MongoDB/PostgreSQL with auth) for driver repos and full provision/reset/delete lifecycle, including concurrency and rate-limit bursts. Full suite is **714 tests, 0 failures** with Docker available (`mvn test`); container-backed tests require a running Docker daemon.
 
 ## Project layout
 
@@ -378,14 +396,14 @@ compose.mysql.yaml                # MySQL 8.4 + phpMyAdmin (standalone: -f compo
 .env / .env.example               # credentials (gitignored)
 src/main/java/com/pkmprojects/mongodbserver
   MongodbserverApplication.java   # @SpringBootApplication (excludes DataSourceAutoConfiguration when PG/MySQL disabled)
-  config/                         # Security, rate limiting, PostgresConfig/MysqlConfig, PgbouncerProperties/HealthIndicator, EncryptionProperties, HealthIndicators, metrics, proxy filters
-  controller/                     # Login, Dashboard, Database, Collection, Postgres, Mysql, Activity, Backup, Monitor
+  config/                         # Security, rate limiting, PostgresConfig/MysqlConfig, PgbouncerProperties/HealthIndicator, EncryptionProperties, HealthIndicators, ControlPlaneReadinessIndicator, metrics, proxy filters
+  controller/                     # Login, Dashboard, Database, Collection, Postgres, Mysql, Activity, Backup, Monitor, AdminDiagnostics
   dto/                            # Form + view objects (CreateDatabaseForm, DatabaseInfo, TableInfo, TableRowPage, MysqlDatabaseStats, PgbouncerSnapshot, ...)
   error/                          # Domain exceptions + global handler
   model/                          # AuditEvent, ManagedDatabase (id=engine:dbName, encrypted password), DatabaseEngineType
   repository/                     # MongoDatabaseRepository, PostgresDatabaseRepository, MysqlDatabaseRepository, ManagedDatabaseRepository, AuditLogRepository
   security/                       # Password generator
-  service/                        # Provisioning, Exploration, PostgresExploration, MysqlExploration, Backup, Statistics, Monitor (+ PgbouncerMonitor), Encryption, DatabaseNameValidator
+  service/                        # Provisioning, Exploration, PostgresExploration, MysqlExploration, Backup, Statistics, Monitor (+ PgbouncerMonitor), Encryption, DatabaseNameValidator, Reconciliation, PooledResumeOnStartup, PgbouncerAdmin
   util/                           # Json helpers
 src/main/resources
   application.yml                 # defaults (spring.mongodb.*, app.postgres.*, app.pgbouncer.*, app.mysql.*, rate-limit, management)
@@ -393,7 +411,7 @@ src/main/resources
   static/js/app.js                # copy-to-clipboard, confirm, toggle-password helpers
   templates/                      # Thymeleaf views (login, index, database, table-rows, collections, activity, monitor + PgBouncer facet, ...)
     fragments/
-deploy/                           # deploy.sh, setup-cron.sh, verify-memory-config.sh, load-test-*.sh, nginx.conf.example
+deploy/                           # deploy.sh, setup-cron.sh, verify-memory-config.sh, load-test-*.sh, nginx.conf.example, db-proxy/ (Go TLS bridge), database-bridge-gate.md, OPERATOR-RECOVERY.md
 ```
 
 ## Third-party libraries & credits
@@ -404,7 +422,7 @@ deploy/                           # deploy.sh, setup-cron.sh, verify-memory-conf
 | [Spring Security](https://spring.io/projects/spring-security) | Form login, CSRF, method security, filter ordering | Apache-2.0 |
 | [Spring Data MongoDB](https://spring.io/projects/spring-data-mongodb) | Repository metadata + driver gateway | Apache-2.0 |
 | [MongoDB Java Driver](https://www.mongodb.com/docs/drivers/java/) | Direct database/user administration | Apache-2.0 |
-| [PostgreSQL JDBC](https://jdbc.postgresql.org/) 42.7.5 | PostgreSQL administration via JDBC | BSD-2-Clause |
+| [PostgreSQL JDBC](https://jdbc.postgresql.org/) 42.7.13 | PostgreSQL administration via JDBC | BSD-2-Clause |
 | [Thymeleaf](https://www.thymeleaf.org/) + `thymeleaf-extras-springsecurity6` | Server-rendered views | Apache-2.0 |
 | [springboot4-dotenv](https://github.com/paulschwarz/spring-dotenv) | `.env` loading | MIT |
 | [Bootstrap](https://getbootstrap.com/) 5.3.8 (WebJar) | UI styling | MIT |
