@@ -27,6 +27,20 @@ public class PostgresRoleNameGenerator {
         return "omni_" + base + "_" + suffix(6);
     }
 
+    /**
+     * S-08 P1: same scheme with a total-length cap (MySQL usernames are
+     * limited to 32 chars: {@code omni_} + base + {@code _} + 6-char suffix
+     * leaves 20 for the base).
+     */
+    public String generate(String dbName, int maxLength) {
+        String base = dbName == null ? "db" : dbName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", "_");
+        if (base.isBlank()) base = "db";
+        int baseCap = Math.max(1, Math.min(24, maxLength - 12));
+        if (base.length() > baseCap) base = base.substring(0, baseCap);
+        if (!SAFE.matcher(base).matches()) base = "db";
+        return "omni_" + base + "_" + suffix(6);
+    }
+
     private String suffix(int len) {
         StringBuilder sb = new StringBuilder(len);
         for (int i = 0; i < len; i++) sb.append(ALPHABET.charAt(random.nextInt(ALPHABET.length())));

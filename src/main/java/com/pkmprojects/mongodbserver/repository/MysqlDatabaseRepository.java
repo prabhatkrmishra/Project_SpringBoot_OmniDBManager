@@ -89,6 +89,25 @@ public class MysqlDatabaseRepository {
         return jdbcTemplate.queryForObject("SELECT VERSION()", String.class);
     }
 
+    /**
+     * S-08 P1: cluster-wide account probe for provision-time uniquify.
+     * MySQL accounts are {@code user@host} server-global; like PG roles, a
+     * name requested for a second database must not reuse the first tenant's
+     * account (shared password + accumulating cross-database grants).
+     * Probe failures fail OPEN toward the requested name (mirroring PG
+     * {@code roleExists}): provisioning itself remains authoritative, so a
+     * monitoring outage can never block provisioning.
+     */
+    public boolean userExists(String userName) {
+        try {
+            Integer n = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM mysql.user WHERE user = ? AND host = '%'", Integer.class, userName);
+            return n != null && n > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public void createDatabase(String dbName) {
         String sql = "CREATE DATABASE " + quoteIdentifier(dbName) + " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci";
         jdbcTemplate.execute(sql);

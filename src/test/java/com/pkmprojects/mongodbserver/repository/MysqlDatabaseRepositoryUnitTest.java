@@ -110,4 +110,38 @@ class MysqlDatabaseRepositoryUnitTest {
         verify(jdbc).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("CREATE USER 'bob'@'%'") && sql.contains("'secret123'")));
         org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("ALTER USER")));
     }
+
+    // ── userExists (S-08 P1 provision-time uniquify) ────────────────────
+
+    @Test
+    void userExistsReturnsTrueWhenAccountPresent() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(1);
+        assertThat(repo.userExists("bob")).isTrue();
+    }
+
+    @Test
+    void userExistsReturnsFalseWhenAbsent() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(0);
+        assertThat(repo.userExists("bob")).isFalse();
+    }
+
+    @Test
+    void userExistsFailsOpenOnProbeFailure() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenThrow(new RuntimeException("connection refused"));
+        // Mirrors PG roleExists: provisioning stays authoritative on a real
+        // collision, so a monitoring outage never blocks provisioning.
+        assertThat(repo.userExists("bob")).isFalse();
+    }
 }

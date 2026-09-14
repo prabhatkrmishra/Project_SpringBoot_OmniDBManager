@@ -142,6 +142,38 @@ public class DatabaseNameValidator {
         }
     }
 
+    /**
+     * S-07 P2: PostgreSQL passwords are embedded in single-quoted
+     * {@code CREATE/ALTER ROLE ... PASSWORD} literals server-side. The
+     * repository defense-in-depth rejects semicolons, double-dashes and
+     * C-style comment markers there with a raw 500; surface the same rule
+     * here instead so callers get HTTP 400 before any lifecycle step runs.
+     */
+    public void validatePostgresPassword(String password) {
+        validatePassword(password);
+        if (password == null || password.isBlank()) {
+            return;
+        }
+        if (password.contains(";") || password.contains("--") || password.contains("/*") || password.contains("*/")) {
+            throw new NameNotAllowedException("Postgres password must not contain ';', '--', '/*' or '*/'");
+        }
+    }
+
+    /**
+     * S-08: MySQL passwords face the identical server-side literal
+     * restriction ({@code MysqlDatabaseRepository.escapePassword}), so the
+     * same early-400 rule applies.
+     */
+    public void validateMysqlPassword(String password) {
+        validatePassword(password);
+        if (password == null || password.isBlank()) {
+            return;
+        }
+        if (password.contains(";") || password.contains("--") || password.contains("/*") || password.contains("*/")) {
+            throw new NameNotAllowedException("MySQL password must not contain ';', '--', '/*' or '*/'");
+        }
+    }
+
     private void requireValid(String value, String pattern, int maxLen, String message) {
         if (value == null || value.isBlank()) {
             throw new NameNotAllowedException("A name is required");
