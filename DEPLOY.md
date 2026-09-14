@@ -1,16 +1,19 @@
 # General guideline
 
-> **For deploying OmniDB Manager** on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. Manager UI on `443` (HTTPS); Postgres on two non-standard public TCP ports `A` direct → `127.0.0.1:9813` (migrations/admin) and `B` pooled → `127.0.0.1:6432` (app/workers) via Nginx `stream` (TLS + IP allowlist, grey-cloud DNS). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<NON_STD_1>`/`<NON_STD_2>` (e.g. `27431`/`27432`) to your environment.
+> **For deploying OmniDB Manager** on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. Manager UI on `443` (HTTPS); Postgres via the single-host TLS bridge on one public TCP port `:15432` serving BOTH modes (`direct` → `127.0.0.1:9813`, `pooled` → `127.0.0.1:6432`) — see `deploy/database-bridge-gate.md`. Until the bridge cutover gate passes, Postgres stays on the interim two-port Nginx `stream` path (`A` direct → `127.0.0.1:9813`, `B` pooled → `127.0.0.1:6432`, TLS + IP allowlist, grey-cloud DNS). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<NON_STD_1>`/`<NON_STD_2>` (e.g. `27431`/`27432`) to your environment.
 
 ## Architecture
 
 ```
 Internet:443 (<YOUR_DOMAIN>)
   → Nginx http (127.0.0.1:8443 ssl) → 127.0.0.1:9811 (OmniDB Manager, Java 25)
-Internet:<NON_STD_1> (pg.example.com, grey-cloud, TLS, allowlist)
-  → Nginx stream → 127.0.0.1:9813 (pgvector container, ssl=on) — direct A
-Internet:<NON_STD_2> (pg.example.com, grey-cloud, TLS, allowlist)
-  → Nginx stream → 127.0.0.1:6432 (PgBouncer, pool_mode=transaction) → 127.0.0.1:9813 — pooled B
+Internet:15432 (db.example.com, grey-cloud, TLS, allowlist) — target path
+  → bridge (TLS endpoint, SNI + options=-c omnidb.mode= routing)
+    ├── direct → postgres:5432 (127.0.0.1:9813)
+    └── pooled → pgbouncer:6432 (pool_mode=transaction) → postgres:5432
+Interim until cutover (Nginx stream, two ports):
+  Internet:<NON_STD_1> → Nginx stream → 127.0.0.1:9813 (pgvector, ssl=on) — direct A
+  Internet:<NON_STD_2> → Nginx stream → 127.0.0.1:6432 (PgBouncer) → 127.0.0.1:9813 — pooled B
 
 Internet:80 → Nginx http → 301 https://$host$request_uri (only for /.well-known/acme-challenge)
 ```
@@ -22,21 +25,23 @@ All engines run as Docker containers, loopback-bound only. The Manager provision
 | OmniDB Manager | `omnidb.service` (Java 25) | `127.0.0.1:9811` | via `https://<YOUR_DOMAIN>/login` |
 | MongoDB 8 | `omnidb-mongo` | `127.0.0.1:9812` | via `MONGODB_ISSUED_HOST` |
 | mongo-express | `omnidb-mongo-express` | `127.0.0.1:9814` | via app proxy `/mongo-express` |
-| PostgreSQL 18 (pgvector) | `omnidb-postgres` | `127.0.0.1:9813` | via `pg.example.com:<NON_STD_1>` (direct A, TLS, allowlist) |
-| PgBouncer 1.24.1 | `omnidb-pgbouncer` | `127.0.0.1:6432` | via `pg.example.com:<NON_STD_2>` (pooled B, TLS, allowlist) |
+| PostgreSQL 18 (pgvector) | `omnidb-postgres` | `127.0.0.1:9813` | via bridge `db.example.com:15432` (both modes; interim: `pg.example.com:<NON_STD_1>` direct A, TLS, allowlist) |
+| PgBouncer 1.24.1 | `omnidb-pgbouncer` | `127.0.0.1:6432` | via bridge `db.example.com:15432` (pooled; interim: `pg.example.com:<NON_STD_2>`, TLS, allowlist) |
+| TLS bridge | `omnidb-database-proxy` | `127.0.0.1:15432` | `db.example.com:15432` — sole public DB ingress after cutover (disabled until the gate in `deploy/database-bridge-gate.md` passes) |
 | Adminer | `omnidb-adminer` | `127.0.0.1:9815` | via app proxy `/adminer` |
 | MySQL 8.4 | `omnidb-mysql` | `127.0.0.1:9816` | via `MYSQL_ISSUED_HOST` |
 | phpMyAdmin | `omnidb-phpmyadmin` | `127.0.0.1:9817` | via app proxy `/phpmyadmin` |
-| Nginx stream | — | `0.0.0.0:<NON_STD_1>, 0.0.0.0:<NON_STD_2>` | `pg.example.com:<NON_STD_1>/<NON_STD_2>` |
+| Nginx stream | — | interim: `0.0.0.0:<NON_STD_1>, 0.0.0.0:<NON_STD_2>` | `pg.example.com:<NON_STD_1>/<NON_STD_2>` (retired at cutover; bridge needs no Nginx streams) |
 | Nginx http | — | `127.0.0.1:8443` ssl | your sites |
 
-> **Two Postgres links:** `A` direct (`<NON_STD_1>` → `127.0.0.1:9813`) for DDL/migrations/break-glass (tighter IP allowlist); `B` pooled (`<NON_STD_2>` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both require TLS (`sslmode=require`/`verify-full`) + per-DB `SCRAM-SHA-256` + IP allowlist. Non-standard port is camouflage only — never a substitute for the allowlist. DNS must be grey-cloud (DNS only) so TCP reaches your VPS, not Cloudflare HTTP proxy. MongoDB/MySQL use their own public ports/streams (see §5.2/§5.3).
+> **Two Postgres links, one future port:** after cutover both links share `db.example.com:15432` — `A` direct for DDL/migrations/break-glass (tighter IP allowlist), `B` pooled for app/workers — selected by `options=-c omnidb.mode=` in the issued string (stripped by the bridge). Until then the interim two-port Nginx path applies: `A` (`<NON_STD_1>` → `127.0.0.1:9813`), `B` (`<NON_STD_2>` → `127.0.0.1:6432` → `127.0.0.1:9813`). Both paths require TLS (`sslmode=require`/`verify-full`) + per-DB `SCRAM-SHA-256` + IP allowlist; bridged strings additionally pin `channel_binding=disable` (PLUS cannot survive the bridge). Non-standard port is camouflage only — never a substitute for the allowlist. DNS must be grey-cloud (DNS only) so TCP reaches your VPS, not Cloudflare HTTP proxy. MongoDB/MySQL use their own public ports/streams (see §5.2/§5.3).
 
 ## 1. Prerequisites
 
 - VPS (Ubuntu 24.04 recommended), user with `sudo`, SSH key
 - Domain `<YOUR_DOMAIN>` + `pg.example.com` with DNS `A` records → `<YOUR_VPS_IP>` (DNS only / grey cloud if using Cloudflare — raw DB TCP cannot go via Cloudflare HTTP proxy, must be grey-cloud)
 - Only `443` + `80` (for Let's Encrypt) + `22` open by default. DB loopback ports (`9812`, `9813`, `9816`, `6432`) never public. Postgres public ports `<NON_STD_1>` (e.g. `27431` direct) + `<NON_STD_2>` (e.g. `27432` pooled) are opened **only** to your app servers via IP allowlist (never `0.0.0.0/0`) — see §6 and `deploy/nginx.conf.example`.
+- Only `443` + `80` (for Let's Encrypt) + `22` open by default. DB loopback ports (`9812`, `9813`, `9816`, `6432`, `15432` pre-cutover) never public. Postgres public access is one port after cutover (`:15432`, allowlisted to your app servers, never `0.0.0.0/0`); interim two-port path uses `<NON_STD_1>` (e.g. `27431` direct) + `<NON_STD_2>` (e.g. `27432` pooled), each allowlisted — see §6 and `deploy/nginx.conf.example`.
 - If other sites already use `443` on the same VPS, they will be moved to `127.0.0.1:8443` so `443` stays for the Manager UI (step 6).
 
 Verify DNS:
@@ -140,6 +145,12 @@ PGBOUNCER_ADMIN_PASSWORD=<PGBOUNCER_ADMIN_PASSWORD>
 PGBOUNCER_STATS_PASSWORD=<PGBOUNCER_STATS_PASSWORD>
 # OVERRIDE_POSTGRES_SSLMODE=require  # or verify-full with CA (see §10)
 
+# === Single-host TLS bridge (pending cutover gate, see deploy/database-bridge-gate.md) ===
+# DATABASE_PROXY_ENABLED=false       # keep false until every gate box passes
+# DATABASE_PROXY_HOST=db.example.com # public hostname (must be in ./certs/server.crt SANs)
+# DATABASE_PROXY_PORT=15432
+# DATABASE_PROXY_BIND=127.0.0.1
+
 # === MySQL engine ===
 MYSQL_ENABLED=true
 MYSQL_ROOT_PASSWORD=<MYSQL_ROOT_PASSWORD>
@@ -150,13 +161,15 @@ MYSQL_ISSUED_HOST=mysql.example.com
 APP_ENCRYPTION_KEY=<BASE64_32_BYTES>
 ```
 
-> **Manager → DB vs issued strings:** `*_URI` stays `127.0.0.1` (Manager and DB on the same host via Docker). `*_ISSUED_HOST`/`*_ISSUED_PORT` is what your apps dial. Never give the root `*_URI` to your apps. Postgres uses two public ports: `POSTGRES_ISSUED_PORT` (direct `A` → `127.0.0.1:9813`) and `PGBOUNCER_ISSUED_PORT` (pooled `B` → `127.0.0.1:6432`). See `VARS.md` for the full variable reference.
+> **Manager → DB vs issued strings:** `*_URI` stays `127.0.0.1` (Manager and DB on the same host via Docker). `*_ISSUED_HOST`/`*_ISSUED_PORT` is what your apps dial. Never give the root `*_URI` to your apps. Postgres uses two public ports on the interim path: `POSTGRES_ISSUED_PORT` (direct `A` → `127.0.0.1:9813`) and `PGBOUNCER_ISSUED_PORT` (pooled `B` → `127.0.0.1:6432`); after cutover both modes share `DATABASE_PROXY_HOST:DATABASE_PROXY_PORT` (`:15432`) with `options=-c omnidb.mode=` selecting the route and `channel_binding=disable` pinned. See `VARS.md` for the full variable reference.
 
 ## 5. TLS per Engine
 
-### 5.1 PostgreSQL — two links (direct A + pooled B, both TLS)
+### 5.1 PostgreSQL — bridge target path, interim two-link path
 
-Postgres runs with `ssl=on` (self-signed CA or Let's Encrypt) and `hostssl` in `pg_hba.conf`. Two public TCP ports expose it: `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS at Nginx (`listen <NON_STD_*> ssl`) with the same cert, and both require IP allowlist + `sslmode=require`/`verify-full` + per-DB `SCRAM-SHA-256`. Full steps in §10 and `deploy/nginx.conf.example`. Issued strings carry `sslmode=require` (or `verify-full` with CA) and the port from `POSTGRES_ISSUED_PORT` / `PGBOUNCER_ISSUED_PORT`. Non-standard port is camouflage only — the allowlist + TLS + per-DB credentials are the real locks. DNS must be grey-cloud (DNS only).
+Target path (pending gate): the `omnidb-database-proxy` container terminates client TLS on `:15432` (public cert `./certs/server.crt|key`, SNI must equal `DATABASE_PROXY_HOST`), reads `options=-c omnidb.mode=` from the StartupMessage, then opens backend TLS verify-full (`postgres` / `pgbouncer` SANs against `./certs/ca.crt`). No Nginx streams are needed for Postgres on this path — one SG rule for `:15432`. Issued bridged strings pin `channel_binding=disable` (PLUS cannot survive a TLS-terminating bridge) and carry `options=-c omnidb.mode=<direct|pooled>` (stripped before PG/PgBouncer). Full checklist: `deploy/database-bridge-gate.md`.
+
+Interim path (current production): Postgres runs with `ssl=on` (self-signed CA or Let's Encrypt) and `hostssl` in `pg_hba.conf`. Two public TCP ports expose it: `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS at Nginx (`listen <NON_STD_*> ssl`) with the same cert, and both require IP allowlist + `sslmode=require`/`verify-full` + per-DB `SCRAM-SHA-256`. Full steps in §10 and `deploy/nginx.conf.example`. Issued strings carry `sslmode=require` (or `verify-full` with CA) and the port from `POSTGRES_ISSUED_PORT` / `PGBOUNCER_ISSUED_PORT`. Non-standard port is camouflage only — the allowlist + TLS + per-DB credentials are the real locks. DNS must be grey-cloud (DNS only).
 
 ### 5.2 MongoDB
 
@@ -202,9 +215,9 @@ MYSQL_ISSUED_HOST=mysql.example.com
 OVERRIDE_MYSQL_TLS=true        # issued strings get ?sslMode=REQUIRED (or VERIFY_IDENTITY with CA)
 ```
 
-## 6. Nginx — Manager UI on 443 + Postgres on two non-standard ports
+## 6. Nginx — Manager UI on 443 (+ interim Postgres on two non-standard ports)
 
-Manager UI stays on `443` via `127.0.0.1:8443` (plain `http` reverse proxy, no `stream` multiplex). Postgres is exposed on **two** separate public TCP ports via `stream` — `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS and are IP-allowlisted (never `0.0.0.0/0`); DNS must be grey-cloud (DNS only) so TCP reaches your VPS.
+Manager UI stays on `443` via `127.0.0.1:8443` (plain `http` reverse proxy, no `stream` multiplex). After the bridge cutover, Postgres needs **no** Nginx streams at all — one SG rule for `:15432` (allowlisted, never `0.0.0.0/0`) replaces everything below. Until then the interim path exposes Postgres on **two** separate public TCP ports via `stream` — `A` direct (`<NON_STD_1>` e.g. `27431` → `127.0.0.1:9813`) for DDL/migrations/break-glass and `B` pooled (`<NON_STD_2>` e.g. `27432` → `127.0.0.1:6432` → `127.0.0.1:9813`) for app/workers. Both streams terminate TLS and are IP-allowlisted (never `0.0.0.0/0`); DNS must be grey-cloud (DNS only) so TCP reaches your VPS.
 
 > **Single-host TLS bridge (implemented, cutover gate pending).** One public hostname + one public port `:15432` serve BOTH modes via `options=-c omnidb.mode=<direct|pooled>` (see `deploy/database-bridge-gate.md` for the live checklist and `deploy/db-proxy/` for the bridge). The old pooled-only nginx passthrough (`deploy/database-proxy.stream.conf`, superseded — see git history) and the dual-hostname SNI plan are retired. Do **not** cut over production until every bridge-gate box passes.
 
@@ -383,17 +396,23 @@ SQL
 curl -k -s https://<YOUR_DOMAIN>/login | head -20
 # → <!DOCTYPE html> ... Sign in · DB Manager
 
-# Postgres direct A (migrations/admin) via <NON_STD_1> → 9813
+# Postgres via the bridge (after cutover) — both modes, channel binding pinned off
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=db.example.com port=15432 dbname=<DB_NAME> user=<DB_USER> sslmode=require channel_binding=disable options='-c omnidb.mode=direct'" -c "select current_user, current_database(), now();"
+# → <DB_USER> | <DB_NAME> | 1 row
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=db.example.com port=15432 dbname=<DB_NAME> user=<DB_USER> sslmode=require channel_binding=disable options='-c omnidb.mode=pooled'" -c "select current_user;"
+# → <DB_USER> (1 row)
+
+# Postgres direct A interim (migrations/admin) via <NON_STD_1> → 9813
 PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=27431 dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user, current_database(), now();"
 # → <DB_USER> | <DB_NAME> | 1 row
 
-# Postgres pooled B (app/workers) via <NON_STD_2> → 6432 → 9813
+# Postgres pooled B interim (app/workers) via <NON_STD_2> → 6432 → 9813
 PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=27432 dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user;"
 # → <DB_USER> (1 row)
 
 # Ports
-ss -tlnp | grep -E "443|8443|9811|9812|9813|9816|27431|27432|6432|80"
-# → 0.0.0.0:80, 0.0.0.0:27431 (stream direct), 0.0.0.0:27432 (stream pooled), 127.0.0.1:8443, 127.0.0.1:9811..9817 + 127.0.0.1:6432
+ss -tlnp | grep -E "443|8443|9811|9812|9813|9816|15432|27431|27432|6432|80"
+# → 0.0.0.0:80, 0.0.0.0:15432 (bridge, post-cutover; interim: 0.0.0.0:27431 direct + 0.0.0.0:27432 pooled), 127.0.0.1:8443, 127.0.0.1:9811..9817 + 127.0.0.1:6432
 ```
 
 ## Connection Strings
@@ -410,11 +429,15 @@ MYSQL_URI=jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval
 # MongoDB
 mongodb://<DB_USER>:<DB_PASSWORD>@mongo.example.com/<DB_NAME>?authSource=<DB_NAME>        # + &tls=true if OVERRIDE_MONGODB_TLS=true
 
-# PostgreSQL direct A (migrations/admin) — POSTGRES_ISSUED_PORT (e.g. 27431)
+# PostgreSQL via the bridge (after cutover) — same host/port both modes, options selects route
+postgresql://<DB_USER>:<DB_PASSWORD>@db.example.com:15432/<DB_NAME>?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Ddirect
+postgresql://<DB_USER>:<DB_PASSWORD>@db.example.com:15432/<DB_NAME>?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Dpooled
+
+# PostgreSQL direct A interim (migrations/admin) — POSTGRES_ISSUED_PORT (e.g. 27431)
 postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27431/<DB_NAME>?sslmode=require&application_name=omnidb
 # verify-full: postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27431/<DB_NAME>?sslmode=verify-full&sslrootcert=/path/to/ca.crt&application_name=omnidb
 
-# PostgreSQL pooled B (app/workers) — PGBOUNCER_ISSUED_PORT (e.g. 27432), only for DBs with Route via PgBouncer
+# PostgreSQL pooled B interim (app/workers) — PGBOUNCER_ISSUED_PORT (e.g. 27432), only for DBs with Route via PgBouncer
 postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27432/<DB_NAME>?sslmode=require&application_name=omnidb
 
 # MySQL
@@ -430,20 +453,32 @@ https://<YOUR_DOMAIN>/login
 
 ## Custom Public DB Ports
 
-Postgres **always** uses two non-standard public TCP ports (see §6): `<NON_STD_1>` (e.g. `27431`) direct `A` → `127.0.0.1:9813` and `<NON_STD_2>` (e.g. `27432`) pooled `B` → `127.0.0.1:6432`. MongoDB and MySQL optionally use a single custom port each. Each engine gets one public port (Postgres gets two, one per link); every database on that engine shares it (databases are distinguished by dbname + credentials, not by port). Enabling a database in OmniDB opens nothing by itself — traffic flows only once the stream servers (§6) and the firewall rules below both exist. Non-standard port is camouflage only — the allowlist + TLS + per-DB credentials are the real locks.
+Postgres uses **one** public TCP port after cutover (`:15432` both modes via the bridge — no per-link ports, no Nginx streams). On the interim path it uses two non-standard public TCP ports (see §6): `<NON_STD_1>` (e.g. `27431`) direct `A` → `127.0.0.1:9813` and `<NON_STD_2>` (e.g. `27432`) pooled `B` → `127.0.0.1:6432`. MongoDB and MySQL optionally use a single custom port each. Each engine gets one public port (interim Postgres gets two, one per link); every database on that engine shares it (databases are distinguished by dbname + credentials, not by port). Enabling a database in OmniDB opens nothing by itself — traffic flows only once the stream servers (§6, interim) or the bridge plus its `:15432` rule (target) and the firewall rules below exist. Non-standard port is camouflage only — the allowlist + TLS + per-DB credentials are the real locks.
 
 | Engine | Stream target (loopback) | Public port | Env vars | Notes |
 |---|---|---|---|---|
 | MongoDB | `127.0.0.1:9812` | `<CUSTOM_PORT>` | `MONGODB_ISSUED_HOST=mongo.example.com:<CUSTOM_PORT>` | `OVERRIDE_MONGODB_TLS=true` for `&tls=true` |
-| PostgreSQL direct `A` | `127.0.0.1:9813` | `<NON_STD_1>` e.g. `27431` | `POSTGRES_ISSUED_HOST=pg.example.com` + `POSTGRES_ISSUED_PORT=<NON_STD_1>` | `?sslmode=require` (or `verify-full` with CA), tighter allowlist |
-| PostgreSQL pooled `B` | `127.0.0.1:6432` | `<NON_STD_2>` e.g. `27432` | same `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT=<NON_STD_2>` | Only for DBs provisioned with **Route via PgBouncer** |
+| PostgreSQL both modes (bridge, target) | `127.0.0.1:15432` | `15432` | `DATABASE_PROXY_HOST=db.example.com` + `DATABASE_PROXY_PORT=15432` | `options=-c omnidb.mode=` selects route, `channel_binding=disable` pinned |
+| PostgreSQL direct `A` (interim) | `127.0.0.1:9813` | `<NON_STD_1>` e.g. `27431` | `POSTGRES_ISSUED_HOST=pg.example.com` + `POSTGRES_ISSUED_PORT=<NON_STD_1>` | `?sslmode=require` (or `verify-full` with CA), tighter allowlist |
+| PostgreSQL pooled `B` (interim) | `127.0.0.1:6432` | `<NON_STD_2>` e.g. `27432` | same `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT=<NON_STD_2>` | Only for DBs provisioned with **Route via PgBouncer** |
 | MySQL | `127.0.0.1:9816` | `<CUSTOM_PORT>` | `MYSQL_ISSUED_HOST=mysql.example.com:<CUSTOM_PORT>` | `OVERRIDE_MYSQL_TLS=true` for `?sslMode=REQUIRED` |
 
-Use a **different** `<CUSTOM_PORT>` per engine — one port cannot serve two engines without SNI routing. Pooled and direct Postgres must also differ from each other (`<NON_STD_1>` ≠ `<NON_STD_2>`).
+Use a **different** `<CUSTOM_PORT>` per engine — one port cannot serve two engines without SNI routing. On the interim path, pooled and direct Postgres must also differ from each other (`<NON_STD_1>` ≠ `<NON_STD_2>`); the bridge path needs only `:15432`.
 
 ### NSG / security-group rules (one per public DB port)
 
-Default-deny everything inbound; allow each custom port **only** from your app servers (never `0.0.0.0/0`). Host-level `ufw` stays as a second layer (see `deploy/nginx.conf.example`). Each `<NON_STD_*>` allow only the MissionHelm IP (or your app server IP), grey-cloud DNS, never `0.0.0.0/0`.
+Default-deny everything inbound; allow each custom port **only** from your app servers (never `0.0.0.0/0`). Host-level `ufw` stays as a second layer (see `deploy/nginx.conf.example`). After cutover Postgres needs a single rule for `:15432`; the interim `<NON_STD_*>` rules below allow only the MissionHelm IP (or your app server IP), grey-cloud DNS, never `0.0.0.0/0`.
+
+```bash
+# Azure NSG — Postgres bridge (target path, replaces both interim rules):
+az network nsg rule create \
+  --resource-group <RESOURCE_GROUP> --nsg-name <NSG_NAME> \
+  --name allow-pg-bridge --priority 109 \
+  --source-address-prefixes <APP_SERVER_IP>/32 \
+  --destination-port-ranges 15432 \
+  --destination-address-prefixes '*' \
+  --access Allow --protocol Tcp --direction Inbound
+```
 
 ```bash
 # Azure NSG — Postgres direct A (tighter allowlist, e.g. only MissionHelm IP):
@@ -534,6 +569,8 @@ DNS.2 = <YOUR_DOMAIN>
 DNS.3 = localhost
 IP.1 = 127.0.0.1
 EOF
+
+> Bridge cutover: add the bridge hostname to the SANs (e.g. `DNS.4 = db.example.com`) — the bridge refuses to serve when SNI ≠ `DATABASE_PROXY_HOST`, and backend legs verify `postgres`/`pgbouncer` SANs against `./certs/ca.crt`. The compose bridge mounts `./certs/server.crt|key` + `./certs/ca.crt` read-only.
 
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial \
   -out server.crt -days 3650 -sha256 -extfile san.cnf -extensions v3_req

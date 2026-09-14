@@ -129,6 +129,7 @@ MYSQL_ISSUED_HOST=mysql.example.com
 | `DATABASE_PROXY_ENABLED` | `false` | `database.proxy.enabled` | Bridge gate: keep `false` until prod hostname + `:15432` cert + NSG single-port approval. Legacy two-port strings stay authoritative until then. |
 | `DATABASE_PROXY_PORT` | `15432` | `database.proxy.port` | Single public TCP port (both modes). |
 | `DATABASE_PROXY_HOST` | `` | `database.proxy.host` | e.g. `db.example.com`. Required when enabled. Same host/port serve DIRECT+POOLED; options selects mode. Unknown SNI and missing/invalid mode fail closed. |
+| `DATABASE_PROXY_BIND` | `127.0.0.1` | — (compose `ports`) | Loopback bind for the published `:15432`. Set `0.0.0.0` only with an SG allowlist in front. |
 | `DATABASE_PROXY_MAX_CONNS` | `2000` | — (compose only) | Bridge max concurrent client connections; excess refused without backend contact. |
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | `compose.postgres.yaml:pgbouncer-init` + `app.pgbouncer.admin-password` | **Must change when Postgres enabled.** Never logged. |
 | `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | same | `stats_users` for `SHOW` only. |

@@ -247,7 +247,6 @@ services:
         # and every pooled login breaks. Numeric id because busybox has no
         # postgres name entry. The ini stays root-owned 644 (world-readable).
         chown 70:70 /etc/pgbouncer/userlist.txt
-  # Single-port Database Proxy (plain TCP passthrough to the pooler).
   # Single-host TLS-bridge proxy (deploy/db-proxy/).
   # Opt-in via the `database-proxy` compose profile (NOT started by plain
   # `up -d`) + DATABASE_PROXY_ENABLED=true with DATABASE_PROXY_HOST set —
