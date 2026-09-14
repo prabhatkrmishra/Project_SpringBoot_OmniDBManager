@@ -137,6 +137,9 @@ MYSQL_ISSUED_HOST=mysql.example.com
 | `DATABASE_PROXY_HOST` | `` | `database.proxy.host` | e.g. `db.example.com`. Required when enabled. Same host/port serve DIRECT+POOLED(+profiles); `options=-c omnidb.mode=` selects mode, `options=-c omnidb.pool_profile=<standard\|high_concurrency>` selects the pooled instance. Unknown SNI, missing/invalid mode, and unknown/duplicate/misplaced profile fail closed. |
 | `DATABASE_PROXY_BIND` | `127.0.0.1` | — (compose `ports`) | Loopback bind for the published `:15432`. Set `0.0.0.0` only with an SG allowlist in front. |
 | `DATABASE_PROXY_MAX_CONNS` | `2000` | — (compose only) | Bridge max concurrent client connections; excess refused without backend contact. |
+| `PROXY_DIRECT_SAN` | `postgres` | — (compose `database-proxy` only) | Expected SAN on the PostgreSQL backend cert (bridge↔PG leg is verify-full against `PROXY_BACKEND_CA`). Change it only if the PG cert does not carry this SAN — e.g. when every backend reuses one public cert, set all three SANs to that DNS name (see `DEPLOY.md` §11 step 7). Mismatch symptom: `certificate is valid for <NAME>, not postgres`, every route `backend unavailable`. |
+| `PROXY_POOLED_SAN` | `pgbouncer` | — (compose `database-proxy` only) | Same, for the standard pooler backend (`pgbouncer:6432`). |
+| `PROXY_POOLED_HC_SAN` | `pgbouncer-hc` | — (compose `database-proxy` only) | Same, for the HC pooler backend (`pgbouncer-hc:6433`). |
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | `compose.postgres.yaml:pgbouncer-init` + `app.pgbouncer.admin-password` | **Must change when Postgres enabled.** Never logged. |
 | `PGBOUNCER_STATS_PASSWORD` | `change-me-now` | same | `stats_users` for `SHOW` only. |
 | `PGBOUNCER_AUTH_PASSWORD` | `change-me-now` | `compose.postgres.yaml:pgbouncer-init` userlist + `app.pgbouncer.auth-password` | **Must change when Postgres enabled.** Pooler `auth_user` SCRAM credential; must match the running container. |

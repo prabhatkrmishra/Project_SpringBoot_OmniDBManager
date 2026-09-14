@@ -681,6 +681,9 @@ PGPASSWORD='<DB_PASSWORD>' psql "postgresql://<DB_USER>:<DB_PASSWORD>@pg.example
 | `MongoTimeoutError` / `ECONNREFUSED` on issued Mongo string | `MONGODB_ISSUED_HOST` wrong or port not exposed | Set `MONGODB_ISSUED_HOST` + expose Mongo via Nginx `stream` (§5.2) |
 | `Public Key Retrieval is not allowed` (MySQL) | Missing `allowPublicKeyRetrieval=true` | Add `&allowPublicKeyRetrieval=true` to the JDBC URI |
 | `Unable to determine zone_id for <YOUR_DOMAIN>` | Cloudflare token for wrong zone | Use `webroot` with port 80, or create token for correct zone |
+| `FATAL: private key file "/var/lib/postgresql/server.key" must be owned by the database user or root` after a fresh checkout | `./certs/server.key` ownership was reset by the fresh checkout (bind-mounted into the container, must be owned by UID 999) | `sudo chown 999:999 ~/omnidb/certs/server.key ~/omnidb/certs/server.crt ~/omnidb/certs/ca.crt && sudo chmod 600 ~/omnidb/certs/server.key`, then `docker compose -f compose.postgres.yaml up -d --force-recreate postgres` so the container picks up the corrected mount (a plain restart keeps the stale mount) |
+| `proxy: load public cert/key: open /certs/server.key: permission denied`, bridge container `Restarting` | The Go bridge runs as non-root UID 65532 (`deploy/db-proxy/Dockerfile`) and cannot read a `600`/UID-999 key | Give the bridge group read without opening the key to everyone: `sudo chgrp 65532 ~/omnidb/certs/server.key && sudo chmod 640 ~/omnidb/certs/server.key` (needs sudo — the file is owned by UID 999). Postgres keeps working: it only requires owner-or-root, group read is allowed |
+| `proxy: backend dial ... tls: failed to verify certificate: x509: certificate is valid for <NAME>, not postgres` (or `not pgbouncer` / `not pgbouncer-hc`); all bridge routes `FATAL: backend unavailable` while direct container checks pass | Bridge↔backend legs are verify-full (`PROXY_BACKEND_CA` + `PROXY_*_SAN`), but the backend certs do not carry the compose-default SANs — e.g. every backend reuses one public cert valid only for the public hostname | Point the SANs at the name the backends actually present (see §11, step 7): set `PROXY_DIRECT_SAN` / `PROXY_POOLED_SAN` / `PROXY_POOLED_HC_SAN` in `compose.postgres.yaml` to that DNS name and `--force-recreate database-proxy`. Verification stays on (chain + hostname, no code change). The alternative is minting backend certs that cover `postgres` / `pgbouncer` / `pgbouncer-hc` and reverting the SANs to the defaults |
 
 ## Renewal
 
@@ -712,3 +715,126 @@ fail. The detail page shows **pooled auth missing** for these and offers
 installed). New provisions install it automatically. Password rotation needs
 no pooler reload: `auth_query` reads the live SCRAM verifier from
 `pg_authid`, so a reset takes effect on the next pooled login.
+
+## 11. Fresh VPS redeploy (new checkout, delete containers, keep data)
+
+Use this when the VPS checkout is far behind `origin/main` (or otherwise
+untrustworthy) and you want a clean tree + fresh containers while keeping all
+data. Named volumes (`postgres-data`, `pgbouncer-data`, ...) are **never**
+touched, so databases, roles, and pooler credentials survive. What is
+replaced: the working tree, all containers/images, the app jar, and the
+bridge. Secrets (`.env`) and TLS files (`certs/`) are backed up first and
+restored byte-identical — they are never regenerated here.
+
+```bash
+# 0. Back up secrets + TLS (certs/ backup only needs sudo for server.key)
+mkdir -p ~/deploy-backup-<DATE> && cp ~/omnidb/.env ~/deploy-backup-<DATE>/.env.bak
+cp ~/omnidb/certs/ca.crt ~/omnidb/certs/server.crt ~/deploy-backup-<DATE>/ 2>/dev/null
+sudo cp ~/omnidb/certs/server.key ~/deploy-backup-<DATE>/ && sudo chown $USER ~/deploy-backup-<DATE>/server.key
+```
+
+```bash
+# 1. Stop the app, then bring the old stack down (volumes are preserved)
+sudo systemctl stop omnidb
+cd ~/omnidb && COMPOSE_PROFILES=database-proxy docker compose -f compose.postgres.yaml down
+docker volume ls | grep -E 'postgres-data|pgbouncer-data'   # both MUST still be listed
+```
+
+```bash
+# 2. Replace the working tree with the release commit (example: v1.8.0)
+git fetch origin && git checkout main && git reset --hard <RELEASE_COMMIT_SHA>
+git rev-parse HEAD && git status --short   # clean, HEAD == release commit
+```
+
+> `certs/` and `.env` are untracked/ignored, so `git reset --hard` leaves
+> them in place — but the fresh checkout resets their ownership/permissions,
+> which breaks the containers (steps 3–4 fix exactly that). Verify the
+> backups before continuing: `cmp ~/omnidb/.env ~/deploy-backup-<DATE>/.env.bak`.
+
+```bash
+# 3. PostgreSQL key ownership (else: FATAL ... must be owned by the database user or root)
+#    server.key MUST be owned by UID 999 (the postgres container user).
+sudo chown 999:999 ~/omnidb/certs/server.key ~/omnidb/certs/server.crt ~/omnidb/certs/ca.crt
+sudo chmod 600 ~/omnidb/certs/server.key
+```
+
+```bash
+# 4. Bridge key readability (else: proxy: load public cert/key: permission denied, container Restarting)
+#    The Go bridge runs as UID 65532 (deploy/db-proxy/Dockerfile). Group-read
+#    lets it read the key while keeping it closed to everyone else; postgres
+#    still accepts it (it requires owner-or-root, group read is allowed).
+sudo chgrp 65532 ~/omnidb/certs/server.key && sudo chmod 640 ~/omnidb/certs/server.key
+```
+
+```bash
+# 5. Production env for the bridge (values only — the public port in these
+#    docs is an example; keep whatever public port this host already uses)
+grep -E '^(DATABASE_PROXY_ENABLED|DATABASE_PROXY_PORT|DATABASE_PROXY_BIND|DATABASE_PROXY_HOST)' ~/omnidb/.env
+# Required: DATABASE_PROXY_ENABLED=true, DATABASE_PROXY_PORT=<PUBLIC_PORT>,
+# DATABASE_PROXY_BIND=0.0.0.0 (only behind an SG allowlist), DATABASE_PROXY_HOST=<PUBLIC_HOSTNAME>
+```
+
+```bash
+# 6. Start the data layer first (postgres, pooler inits, both poolers)
+docker compose -f compose.postgres.yaml up -d postgres pgbouncer-init pgbouncer-hc-init
+docker compose -f compose.postgres.yaml up -d pgbouncer pgbouncer-hc adminer
+docker exec omnidb-postgres pg_isready -U root -d postgres   # accepting connections
+# If postgres FATALs on server.key ownership here, redo step 3 then:
+# docker compose -f compose.postgres.yaml up -d --force-recreate postgres
+```
+
+```bash
+# 7. Backend SANs must match the certs the backends actually present
+#    The bridge dials every backend leg with verify-full. The compose defaults
+#    (postgres / pgbouncer / pgbouncer-hc) only work if the backend certs carry
+#    those SANs. If every backend reuses one public cert (check with:
+#    openssl x509 -in ~/omnidb/certs/server.crt -noout -ext subjectAltName),
+#    set all three SANs to that DNS name instead:
+#      PROXY_DIRECT_SAN / PROXY_POOLED_SAN / PROXY_POOLED_HC_SAN: "<PUBLIC_HOSTNAME>"
+#    Symptom of a mismatch: bridge logs "tls: failed to verify certificate:
+#    x509: certificate is valid for <NAME>, not postgres" and every route
+#    returns FATAL: backend unavailable.
+COMPOSE_PROFILES=database-proxy docker compose -f compose.postgres.yaml up -d --build database-proxy
+docker logs omnidb-database-proxy --tail 2
+# → proxy: single-host TLS-bridge listening :15432 public=<HOST> direct=postgres:5432 pooled=pgbouncer:6432 pooled-hc=pgbouncer-hc:6433
+```
+
+```bash
+# 8. App jar — download the release artifact, never build on the VPS
+#    (the release workflow already built + attached it to the GitHub Release)
+cd ~/omnidb/target && curl -fSL -o omnidb-manager-<VERSION>.jar.new \
+  'https://github.com/<OWNER>/<REPO>/releases/download/<TAG>/omnidb-manager-<VERSION>.jar'
+# sanity: the jar must contain the release's new classes, e.g.
+# python3 -c "import zipfile; z=zipfile.ZipFile('omnidb-manager-<VERSION>.jar.new'); print([n for n in z.namelist() if n.endswith(('PoolProfile.class','PgbouncerHcProperties.class'))])"
+mv omnidb-manager-<VERSION>.jar.new omnidb-manager-<VERSION>.jar
+# keep the previous jar in target/ as the rollback artifact
+```
+
+```bash
+# 9. Point the pinned systemd unit at the new jar and start
+sudo sed -i 's|omnidb-manager-<OLD>.jar|omnidb-manager-<NEW>.jar|' /etc/systemd/system/omnidb.service
+sudo systemctl daemon-reload && sudo systemctl start omnidb
+sleep 30; curl -s -o /dev/null -w 'login: %{http_code}\n' http://127.0.0.1:9811/login
+# → login: 200
+sudo journalctl -u omnidb --no-pager --since '5 min ago' | grep -iE 'ERROR|FATAL|Exception' | head
+```
+
+```bash
+# 10. Smoke-test every bridge route through the PUBLIC endpoint
+#     (use a disposable tenant; drop it afterwards)
+# direct → postgres | bare/standard → pgbouncer:6432 | high_concurrency → pgbouncer-hc:6433
+PGPASSWORD='<DB_PASSWORD>' psql "host=<PUBLIC_HOSTNAME> port=<PUBLIC_PORT> dbname=<DB> user=<USER> sslmode=require channel_binding=disable options='-c omnidb.mode=direct'" -c 'select current_user;'
+PGPASSWORD='<DB_PASSWORD>' psql "host=<PUBLIC_HOSTNAME> port=<PUBLIC_PORT> dbname=<DB> user=<USER> sslmode=require channel_binding=disable options='-c omnidb.mode=pooled'" -c 'select current_user;'
+PGPASSWORD='<DB_PASSWORD>' psql "host=<PUBLIC_HOSTNAME> port=<PUBLIC_PORT> dbname=<DB> user=<USER> sslmode=require channel_binding=disable options='-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency'" -c 'select current_user;'
+# fail-closed checks (must reject, never route):
+#   -c omnidb.mode=pooled -c omnidb.pool_profile=banana   → missing or invalid connection mode
+#   -c omnidb.mode=direct -c omnidb.pool_profile=standard → missing or invalid connection mode
+docker logs omnidb-database-proxy --tail 6 | grep 'route mode'
+# → direct→postgres:5432, standard→pgbouncer:6432, high_concurrency→pgbouncer-hc:6433
+```
+
+Rollback (no data loss — volumes are untouched throughout): point
+`ExecStart` in `/etc/systemd/system/omnidb.service` back at the previous jar
+kept in `target/`, `daemon-reload`, `restart omnidb`. For a full-container
+rollback, `git reset --hard <PREVIOUS_RELEASE_COMMIT>` and repeat steps 6–7
+with the previous compose file.
