@@ -65,6 +65,19 @@ management:
     health:
       show-details: never
       show-components: never
+      # S-12 P3-3: orchestrator probes. Default groups only —
+      # liveness = JVM responsive, readiness = Spring ready to serve.
+      # Readiness additionally requires the control-plane stores via the
+      # unconditional controlPlane indicator (unknown group names fail
+      # startup, so per-engine names cannot be listed statically).
+      # Tenant/data-plane health is deliberately NOT an input — one sick
+      # tenant must not mark the control plane down — and dependency detail
+      # stays behind the ADMIN-gated /actuator/health.
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,controlPlane
 
 # Web app admin account (from .env)
 app:
