@@ -108,11 +108,11 @@ Issued bridged strings therefore pin `channel_binding=disable`
 
 ## Regression
 
-- [ ] Full Maven suite green; S-07/S-09 lifecycle intact.
+- [ ] Full Maven suite green; lifecycle intact.
 - [ ] OmniDB management stays direct/private; Mongo/MySQL unchanged.
 - [ ] No public 5432/6432; structured builders only, no URL surgery.
 
-## S-06.1 adversarial hardening (implemented, live re-proven)
+## Adversarial hardening (implemented, live re-proven)
 
 - Cancel map entries are unregistered when their relay exits (previously
   `del` was never called; entries lived to the 100k cap). Cancel learning
@@ -126,7 +126,7 @@ Issued bridged strings therefore pin `channel_binding=disable`
   `FuzzRewriteNoLeak` (4.4M execs) PASS with no crashers; live matrix,
   cancel, fail-closed, and pooler-down isolation re-proven after the fix.
 
-## Accepted non-blocking hardening (S-06.2, not a correctness requirement)
+## Accepted non-blocking hardening (not a correctness requirement)
 
 - Per-IP rate limiting is intentionally absent. Abuse is bounded by:
   `PROXY_MAX_CONNS` (default 2000, fail-closed, no backend contact on

@@ -203,7 +203,7 @@ services:
         admin_users = pgbouncer_admin
         stats_users = pgbouncer_stats
         INI
-        # S-06 bridge TLS. Two legs (see deploy/db-proxy/):
+        # Bridge TLS. Two legs (see deploy/db-proxy/):
         #   leg 1 (client->proxy): terminates at the bridge (public cert).
         #   leg 2a (proxy->postgres): bridge is the TLS client (verify-full).
         #   leg 2b (proxy->pooler->postgres): bridge->pooler TLS + pooler->PG TLS.
@@ -248,10 +248,10 @@ services:
         # postgres name entry. The ini stays root-owned 644 (world-readable).
         chown 70:70 /etc/pgbouncer/userlist.txt
   # Single-port Database Proxy (plain TCP passthrough to the pooler).
-  # S-06 single-host TLS-bridge proxy (deploy/db-proxy/).
+  # Single-host TLS-bridge proxy (deploy/db-proxy/).
   # Opt-in via the `database-proxy` compose profile (NOT started by plain
   # `up -d`) + DATABASE_PROXY_ENABLED=true with DATABASE_PROXY_HOST set —
-  # both required, per the cutover gate (deploy/s06-cutover-gate.md).
+  # both required, per the cutover gate (deploy/database-bridge-gate.md).
   # One public hostname + one public port serve BOTH modes; the mode comes
   # from StartupMessage options=-c omnidb.mode=<direct|pooled> (stripped by
   # the bridge before PG/PgBouncer). No tenant passwords here — PostgreSQL
