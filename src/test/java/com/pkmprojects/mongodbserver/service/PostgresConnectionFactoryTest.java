@@ -46,27 +46,26 @@ class PostgresConnectionFactoryTest {
     }
 
     @Test
-    void proxyModeUsesSinglePortDualHostname() {
+    void proxyModeUsesSingleHostBothModes() {
         var f = factory();
         f.setProxyProperties(new com.pkmprojects.mongodbserver.config.DatabaseProxyProperties(
-                true, 15432, "db.example.com", "pool.example.com"));
+                true, 15432, "db.example.com"));
         var conns = f.both("customer_db", "u", "p", true);
+        // Single-host bridge: identical host/port; mode travels in options.
         assertThat(conns.direct().host()).isEqualTo("db.example.com:15432");
-        assertThat(conns.pooled().host()).isEqualTo("pool.example.com:15432");
+        assertThat(conns.pooled().host()).isEqualTo("db.example.com:15432");
+        assertThat(conns.direct().mode().name()).isEqualTo("DIRECT");
+        assertThat(conns.pooled().mode().name()).isEqualTo("POOLED");
         assertThat(conns.direct().username()).isEqualTo(conns.pooled().username());
-    }
-
-    @Test
-    void pooledOnlyPublicKeepsDirectInternal() {
-        var f = factory();
-        f.setProxyProperties(new com.pkmprojects.mongodbserver.config.DatabaseProxyProperties(
-                true, 14291, "", "db.example.com"));
-        var conns = f.both("customer_db", "u", "p", true);
-        assertThat(conns.pooled().host()).isEqualTo("db.example.com:14291");
-        assertThat(conns.pooled().port()).isEqualTo(14291);
-        // direct has no public route: falls back to the internal address
-        assertThat(conns.direct().host()).doesNotContain("db.example.com");
-        assertThat(conns.direct().host()).isNotEqualTo(conns.pooled().host());
+        var b = new PostgresConnectionStringBuilder();
+        // Bridged strings carry the routing directive; plain strings never do.
+        assertThat(b.toUri(conns.direct())).doesNotContain("options=");
+        assertThat(b.toUriBridged(conns.direct())).contains("channel_binding=disable");
+        assertThat(b.toUriBridged(conns.direct())).contains("options=" + PostgresConnectionStringBuilder.encode(PostgresConnectionStringBuilder.MODE_OPTION_DIRECT));
+        assertThat(b.toUriBridged(conns.pooled())).contains("channel_binding=disable");
+        assertThat(b.toUriBridged(conns.pooled())).contains("options=" + PostgresConnectionStringBuilder.encode(PostgresConnectionStringBuilder.MODE_OPTION_POOLED));
+        assertThat(b.toJdbcBridged(conns.direct())).contains("channelBinding=disable");
+        assertThat(b.toJdbcBridged(conns.pooled())).contains("channelBinding=disable");
     }
 
     @Test

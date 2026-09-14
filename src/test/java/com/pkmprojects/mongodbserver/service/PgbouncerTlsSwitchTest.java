@@ -6,11 +6,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 /**
- * S-06 pooler-TLS switch: with the TLS-passthrough proxy configured, even
+ * S-06 pooler-TLS switch: with the TLS-bridge proxy configured, even
  * loopback pooler connections (admin console, stats polling) must use
  * {@code sslmode=require} because PgBouncer itself terminates client TLS
  * ({@code client_tls_sslmode=require}). Otherwise the pooler is plaintext
- * (two-port TLS-termination model) and {@code sslmode=disable} applies.
+ * (legacy two-port model) and {@code sslmode=disable} applies.
  */
 class PgbouncerTlsSwitchTest {
 
@@ -20,7 +20,7 @@ class PgbouncerTlsSwitchTest {
     }
 
     private static DatabaseProxyProperties proxyOn() {
-        return new DatabaseProxyProperties(true, 15432, "db.example.com", "pool.example.com");
+        return new DatabaseProxyProperties(true, 15432, "db.example.com");
     }
 
     @Test
@@ -38,17 +38,17 @@ class PgbouncerTlsSwitchTest {
     @Test
     void adminStaysDisableWhenProxyPresentButUnconfigured() {
         var svc = new PgbouncerAdminService(props());
-        // enabled but pooled hostname missing -> pooler stays plaintext
-        svc.setProxyProperties(new DatabaseProxyProperties(false, 15432, "", "pool.example.com"));
+        // enabled but hostname missing -> pooler stays plaintext
+        svc.setProxyProperties(new DatabaseProxyProperties(false, 15432, "db.example.com"));
         assertThat(svc.poolerSslMode()).isEqualTo("disable");
-        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, "", ""));
+        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, ""));
         assertThat(svc.poolerSslMode()).isEqualTo("disable");
     }
 
     @Test
-    void adminUsesRequireInPooledOnlyPublicShape() {
+    void adminUsesRequireInSingleHostShape() {
         var svc = new PgbouncerAdminService(props());
-        svc.setProxyProperties(new DatabaseProxyProperties(true, 14291, "", "db.example.com"));
+        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, "db.example.com"));
         assertThat(svc.poolerSslMode()).isEqualTo("require");
     }
 
@@ -67,14 +67,14 @@ class PgbouncerTlsSwitchTest {
     @Test
     void monitorStaysDisableWhenProxyPresentButUnconfigured() {
         var svc = new PgbouncerMonitorService(props());
-        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, "", ""));
+        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, ""));
         assertThat(svc.poolerSslMode()).isEqualTo("disable");
     }
 
     @Test
-    void monitorUsesRequireInPooledOnlyPublicShape() {
+    void monitorUsesRequireInSingleHostShape() {
         var svc = new PgbouncerMonitorService(props());
-        svc.setProxyProperties(new DatabaseProxyProperties(true, 14291, "", "db.example.com"));
+        svc.setProxyProperties(new DatabaseProxyProperties(true, 15432, "db.example.com"));
         assertThat(svc.poolerSslMode()).isEqualTo("require");
     }
 }

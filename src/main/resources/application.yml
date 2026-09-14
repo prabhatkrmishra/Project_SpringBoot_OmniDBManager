@@ -121,15 +121,14 @@ app:
     # via auth_query. Must match the pooler container's userlist (see
     # compose.postgres.yaml pgbouncer-init) or every pooled login fails.
     auth-password: ${PGBOUNCER_AUTH_PASSWORD:change-me-now}
-  # Single-port Database Proxy (plain TCP passthrough to the pooler).
+  # Single-host TLS-bridge Database Proxy (S-06 final).
   # Disabled until the cutover gate passes (deploy/s06-cutover-gate.md).
-  # Pooled-only public shape: set pooled-host only; direct stays internal.
-  # (Set a *different* direct-host for the dual-link shape.)
+  # One public hostname + one public port serve BOTH modes; the mode travels
+  # as options=-c omnidb.mode=<direct|pooled> (routing only, never auth).
   proxy:
     enabled: ${DATABASE_PROXY_ENABLED:false}
-    port: ${DATABASE_PROXY_PORT:14291}
-    direct-host: ${DATABASE_PROXY_DIRECT_HOST:}
-    pooled-host: ${DATABASE_PROXY_POOLED_HOST:}
+    port: ${DATABASE_PROXY_PORT:15432}
+    host: ${DATABASE_PROXY_HOST:}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)

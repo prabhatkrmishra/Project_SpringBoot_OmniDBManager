@@ -183,20 +183,17 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
                 com.pkmprojects.mongodbserver.model.SslMode.parse(sslmode,
                         com.pkmprojects.mongodbserver.model.SslMode.REQUIRE);
         if (isProxyMode()) {
-            // Dual-link serves direct via proxy; pooled-only public keeps direct
-            // on the internal address (no public direct route exists).
-            com.pkmprojects.mongodbserver.model.ConnectionEndpoint direct = proxyProperties.directViaProxy()
-                    ? new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
-                            proxyProperties.directHost().trim() + ":" + proxyProperties.port(),
+            // Single-host bridge: same public host/port for both modes; the
+            // mode travels as options=-c omnidb.mode= via the string builder.
+            com.pkmprojects.mongodbserver.model.ConnectionEndpoint direct =
+                    new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                            proxyProperties.normalizedHost() + ":" + proxyProperties.port(),
                             proxyProperties.port(), dbName, userName, password, mode,
-                            com.pkmprojects.mongodbserver.model.ConnectionMode.DIRECT, null)
-                    : new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
-                            resolveDirectHost(), issuedPort, dbName, userName, password, mode,
                             com.pkmprojects.mongodbserver.model.ConnectionMode.DIRECT, null);
             if (!pooled) return new com.pkmprojects.mongodbserver.model.DatabaseConnections(direct, null);
             com.pkmprojects.mongodbserver.model.ConnectionEndpoint pooledEp =
                     new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
-                            proxyProperties.pooledHost().trim() + ":" + proxyProperties.port(),
+                            proxyProperties.normalizedHost() + ":" + proxyProperties.port(),
                             proxyProperties.port(), dbName, userName, password, mode,
                             com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED,
                             com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
@@ -234,30 +231,46 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
 
     @Override
     public String buildConnectionString(String userName, String password, String dbName) {
-        // Proxy mode: pooled-only public keeps direct on the internal address
-        // (no public direct route exists); dual-link serves direct via proxy.
-        String host = (isProxyMode() && proxyProperties.directViaProxy())
-                ? proxyProperties.directHost().trim() + ":" + proxyProperties.port()
-                : resolveDirectHost();
+        // Legacy direct strings never carry the bridge routing directive:
+        // non-proxy mode goes straight to PostgreSQL/PgBouncer ports, and the
+        // proxy path below appends options only for the single-host bridge.
+        // (Unconditional options= broke PG/PgBouncer handshakes where
+        // omnidb.mode is unknown — the bridge must strip it first.)
+        String host;
+        String modeSuffix = "";
+        if (isProxyMode()) {
+            host = proxyProperties.normalizedHost() + ":" + proxyProperties.port();
+            // S-06 closure: PLUS channel binding cannot survive the TLS
+            // bridge (client cert != backend-leg cert), so bridged strings
+            // pin channel_binding=disable for plain SCRAM-SHA-256.
+            modeSuffix = "&channel_binding=" + PostgresConnectionStringBuilder.CHANNEL_BINDING_DISABLE
+                    + "&options=" + uriEncode(PostgresConnectionStringBuilder.MODE_OPTION_DIRECT);
+        } else {
+            host = resolveDirectHost();
+        }
         String encodedUser = uriEncode(userName);
         String encodedPass = uriEncode(password);
         String encodedDb = uriEncode(dbName);
         String base = "postgresql://" + encodedUser + ":" + encodedPass + "@" + host + "/" + encodedDb;
-        // sslmode is enum-based (Postgres only) — always included
-        return base + "?sslmode=" + sslmode + "&application_name=omnidb";
+        // sslmode is enum-based (Postgres only) — always included.
+        return base + "?sslmode=" + sslmode + "&application_name=omnidb" + modeSuffix;
     }
 
     /**
      * Pooled connection string for DBs provisioned with pooling enabled.
-     * Routes through PgBouncer public port (PGBOUNCER_ISSUED_PORT), not the internal loopback port.
-     * Host is DNS-only; port comes from app.pgbouncer.issued-port.
+     * Single-host bridge: same public host/port as direct; options selects pooled.
+     * Legacy two-port shape (DNS + PGBOUNCER_ISSUED_PORT) only when proxy is off.
      */
     public String buildPooledConnectionString(String userName, String password, String dbName) {
         String host = isProxyMode()
-                ? proxyProperties.pooledHost().trim() + ":" + proxyProperties.port()
+                ? proxyProperties.normalizedHost() + ":" + proxyProperties.port()
                 : resolvePooledHost();
         String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
-        return base + "?sslmode=" + sslmode + "&application_name=omnidb";
+        String modeSuffix = isProxyMode()
+                ? "&channel_binding=" + PostgresConnectionStringBuilder.CHANNEL_BINDING_DISABLE
+                        + "&options=" + uriEncode(PostgresConnectionStringBuilder.MODE_OPTION_POOLED)
+                : "";
+        return base + "?sslmode=" + sslmode + "&application_name=omnidb" + modeSuffix;
     }
 
     /**

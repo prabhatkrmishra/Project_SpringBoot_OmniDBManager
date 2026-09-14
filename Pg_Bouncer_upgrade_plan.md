@@ -1,4 +1,12 @@
-# OmniDB — Secure Dual-Mode PostgreSQL Connectivity
+> **SUPERSEDED (S-06.1):** this plan describes the retired dual-hostname
+> SNI-routing architecture (`db.example.com` + `pool.example.com`, proxy
+> splits by hostname/SNI). The approved architecture is the single-host
+> TLS bridge (`db.example.com:15432` both modes, routing via
+> `options=-c omnidb.mode=<direct|pooled>`, stripped before PG/PgBouncer).
+> Kept for audit history only — do not implement. See
+> `deploy/s06-bridge-gate.md` and `deploy/db-proxy/`.
+
+# OmniDB — Secure Dual-Mode PostgreSQL Connectivity (SUPERSEDED)
 
 ## Full Architecture & Implementation Plan
 

@@ -45,14 +45,14 @@ public class PostgresConnectionEndpointFactory {
     }
 
     public ConnectionEndpoint direct(String dbName, String user, String password) {
-        if (isProxyMode() && proxyProperties.directViaProxy()) {
+        if (isProxyMode()) {
+            // Single-host bridge: same public host/port for both modes; the
+            // mode travels as options=-c omnidb.mode= via the string builder.
             return new ConnectionEndpoint(
-                    proxyProperties.directHost().trim() + ":" + proxyProperties.port(),
+                    proxyProperties.normalizedHost() + ":" + proxyProperties.port(),
                     proxyProperties.port(), dbName, user, password,
                     sslMode, ConnectionMode.DIRECT, null);
         }
-        // Pooled-only public: direct intentionally stays on the internal
-        // address (loopback on-box; SSH tunnel from outside).
         return new ConnectionEndpoint(publicHost(issuedPort), issuedPort, dbName, user, password,
                 sslMode, ConnectionMode.DIRECT, null);
     }
@@ -60,7 +60,7 @@ public class PostgresConnectionEndpointFactory {
     public ConnectionEndpoint pooled(String dbName, String user, String password) {
         if (isProxyMode()) {
             return new ConnectionEndpoint(
-                    proxyProperties.pooledHost().trim() + ":" + proxyProperties.port(),
+                    proxyProperties.normalizedHost() + ":" + proxyProperties.port(),
                     proxyProperties.port(), dbName, user, password,
                     sslMode, ConnectionMode.POOLED, PoolMode.TRANSACTION);
         }

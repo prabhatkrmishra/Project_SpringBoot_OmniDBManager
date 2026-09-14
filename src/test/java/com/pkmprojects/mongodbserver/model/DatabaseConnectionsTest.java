@@ -11,7 +11,7 @@ class DatabaseConnectionsTest {
     }
 
     private static ConnectionEndpoint pooled() {
-        return new ConnectionEndpoint("pool.example.com:15432", 15432, "customer_db", "u", "p",
+        return new ConnectionEndpoint("db.example.com:15432", 15432, "customer_db", "u", "p",
                 SslMode.REQUIRE, ConnectionMode.POOLED, PoolMode.TRANSACTION);
     }
 
@@ -39,7 +39,7 @@ class DatabaseConnectionsTest {
     @Test
     void withoutSecretNeverCarriesPassword() {
         PublicConnectionEndpoint pub = pooled().withoutSecret();
-        assertThat(pub.host()).contains("pool.example.com");
+        assertThat(pub.host()).contains("db.example.com");
         assertThat(pub.toString()).doesNotContain("\"p\"");
     }
 

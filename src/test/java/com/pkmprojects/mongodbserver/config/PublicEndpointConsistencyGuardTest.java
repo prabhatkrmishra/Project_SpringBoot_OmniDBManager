@@ -12,37 +12,29 @@ class PublicEndpointConsistencyGuardTest {
     @Test
     void disabledProxyIsNoop() {
         var guard = new PublicEndpointConsistencyGuard(
-                new DatabaseProxyProperties(false, 15432, "", ""), props());
+                new DatabaseProxyProperties(false, 15432, ""), props());
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
     }
 
     @Test
-    void enabledProxyRequiresDistinctHostnames() {
+    void enabledProxyRequiresSingleHostname() {
         var guard = new PublicEndpointConsistencyGuard(
-                new DatabaseProxyProperties(true, 15432, "db.example.com", "db.example.com"), props());
+                new DatabaseProxyProperties(true, 15432, ""), props());
         assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("must differ");
+                .hasMessageContaining("database.proxy.host");
     }
 
     @Test
-    void enabledProxyRequiresPooledHostname() {
+    void enabledProxyWithSingleHostPasses() {
         var guard = new PublicEndpointConsistencyGuard(
-                new DatabaseProxyProperties(true, 15432, "", ""), props());
-        assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("pooled-host");
-    }
-
-    @Test
-    void blankDirectHostMeansPooledOnlyPublic() {
-        var guard = new PublicEndpointConsistencyGuard(
-                new DatabaseProxyProperties(true, 14291, "", "db.example.com"), props());
+                new DatabaseProxyProperties(true, 15432, "db.example.com"), props());
         assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
     }
 
     @Test
     void nonTransactionPoolModeRejected() {
         var guard = new PublicEndpointConsistencyGuard(
-                new DatabaseProxyProperties(false, 15432, "", ""),
+                new DatabaseProxyProperties(false, 15432, ""),
                 new PgbouncerProperties(6432, 6432, "session", 1000, 5, 2, 3, 10, "a", "s", "p"));
         assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("transaction");

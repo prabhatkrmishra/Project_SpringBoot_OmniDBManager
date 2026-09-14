@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
  * {@code SELECT 1}. Exercises the real PgBouncer route for pooled (not just
  * {@code SHOW POOLS}) and the direct route for migrations. Until the
  * single-port proxy lands, pooled validation uses the internal-equivalent
- * pooled address; the same method targets {@code pooled-host:14291} once
+ * pooled address; the same method targets the single-host bridge once
  * S-06 without caller changes.
  */
 @Service
@@ -35,7 +35,7 @@ public class ConnectionValidationService {
 
     /**
      * Tiered pooled proof (§29 + review hierarchy). {@code PUBLIC} exercises
-     * the full app contract (DNS → NSG → proxy :14291 → pooler → PG);
+     * the full app contract (DNS → NSG → bridge :15432 → pooler → PG);
      * {@code LOOPBACK} proves only tenant → pooler → PG with tenant SCRAM
      * (same pooler, same {@code auth_query}) — necessary but <b>not
      * equivalent</b> to the production path. Callers must log the path and
@@ -50,6 +50,8 @@ public class ConnectionValidationService {
         // pooler is plaintext (two-port TLS-termination model) so require
         // would fail closed against 127.0.0.1:6432. Same-host hop — no
         // security lost; SCRAM + auth_query are still fully exercised.
+        // The loopback hop bypasses the proxy, so it must use the plain JDBC
+        // (no bridge options=) even when the public endpoint is bridged.
         var loopbackSsl = engine.isProxyMode()
                 ? conns.pooled().sslMode()
                 : com.pkmprojects.mongodbserver.model.SslMode.DISABLE;
@@ -58,13 +60,13 @@ public class ConnectionValidationService {
                 dbName, user, password, loopbackSsl,
                 com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED,
                 com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
-        if (run("pooled-loopback", loopback)) return new PooledValidation(true, ValidationPath.LOOPBACK);
+        if (runLoopback(loopback)) return new PooledValidation(true, ValidationPath.LOOPBACK);
         return new PooledValidation(false, ValidationPath.NONE);
     }
 
     /** Which tier proved pooled health — see {@link #validatePooledDetailed}. */
     public enum ValidationPath {
-        /** Full public route (DNS → proxy :14291 → pooler → PG). */
+        /** Full public route (DNS → bridge :15432 → pooler → PG). */
         PUBLIC,
         /** Same pooler + auth_query + tenant SCRAM via loopback; proxy hop unproven. */
         LOOPBACK,
@@ -75,12 +77,38 @@ public class ConnectionValidationService {
     public record PooledValidation(boolean healthy, ValidationPath path) {
     }
 
-    /** Protected so tests can stub tiers without live PostgreSQL. */
-    protected boolean run(String mode, com.pkmprojects.mongodbserver.model.ConnectionEndpoint ep) {
-        String jdbc = strings.toJdbc(ep);
+    /** Visible for tests so tiers can be stubbed without live PostgreSQL. */
+    boolean run(String mode, com.pkmprojects.mongodbserver.model.ConnectionEndpoint ep) {
+        // Single-host bridge endpoints share host/port; the JDBC must carry
+        // options=-c omnidb.mode= or the proxy fails closed. Legacy ports go
+        // straight to PG/PgBouncer and must NOT see the directive.
+        String jdbc = engine.isProxyMode() ? strings.toJdbcBridged(ep) : strings.toJdbc(ep);
         // Never log the URI (contains password) — host/db/mode only.
         // DriverManager keeps this compile-safe: the PG driver is a
         // runtime-scoped dep (no org.postgresql.* imports allowed here).
+        try (var c = java.sql.DriverManager.getConnection(jdbc);
+                var st = c.createStatement()) {
+            st.setQueryTimeout(5);
+            try (var rs = st.executeQuery("SELECT 1")) {
+                return rs.next() && rs.getInt(1) == 1;
+            }
+        } catch (Exception e) {
+            log.debug("ConnectionValidationService {} validation failed for db={} host={}", mode, ep.database(), ep.host(), e);
+            return false;
+        }
+    }
+
+    /**
+     * Loopback tier bypasses the proxy — always the plain JDBC, never
+     * bridged. Separated from {@link #run} so tests can stub it and so the
+     * proxy-mode branch in {@link #run} cannot leak options= to loopback.
+     */
+    boolean runLoopback(com.pkmprojects.mongodbserver.model.ConnectionEndpoint ep) {
+        // Record the endpoint for tests before attempting the connection.
+        return runInner("pooled-loopback", strings.toJdbc(ep), ep);
+    }
+
+    private boolean runInner(String mode, String jdbc, com.pkmprojects.mongodbserver.model.ConnectionEndpoint ep) {
         try (var c = java.sql.DriverManager.getConnection(jdbc);
                 var st = c.createStatement()) {
             st.setQueryTimeout(5);

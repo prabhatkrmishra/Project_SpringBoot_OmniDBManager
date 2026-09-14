@@ -44,16 +44,22 @@ class ConnectionValidationHierarchyTest {
         ConnectionEndpoint loopbackEndpoint;
 
         @Override
-        protected boolean run(String mode, ConnectionEndpoint endpoint) {
+        boolean run(String mode, ConnectionEndpoint endpoint) {
             attempted.add(mode);
-            if (mode.equals("pooled-loopback")) loopbackEndpoint = endpoint;
             return mode.equals("pooled") ? publicOk : loopbackOk;
+        }
+
+        @Override
+        boolean runLoopback(ConnectionEndpoint endpoint) {
+            attempted.add("pooled-loopback");
+            loopbackEndpoint = endpoint;
+            return loopbackOk;
         }
     }
 
     private Scripted scripted(boolean publicOk, boolean loopbackOk, boolean pooledEnabled) {
         var direct = ep("db.example.com:15432", 15432, ConnectionMode.DIRECT, null);
-        var pooled = pooledEnabled ? ep("pool.example.com:15432", 15432, ConnectionMode.POOLED, PoolMode.TRANSACTION) : null;
+        var pooled = pooledEnabled ? ep("db.example.com:15432", 15432, ConnectionMode.POOLED, PoolMode.TRANSACTION) : null;
         when(engine.connectionEndpoints(anyString(), anyString(), anyString(), anyBoolean()))
                 .thenReturn(new DatabaseConnections(direct, pooled));
         Scripted s = new Scripted(engine);

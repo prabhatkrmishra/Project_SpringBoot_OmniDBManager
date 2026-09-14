@@ -3,41 +3,31 @@ package com.pkmprojects.mongodbserver.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Single-port Database Proxy (plain TCP passthrough to the pooler).
- * Two shapes, both on one public port (default {@code :14291}):
- * <ul>
- *   <li><b>Dual-link</b> — {@code direct-host} + {@code pooled-host} set and
- *       different: {@code direct-host} → PostgreSQL, {@code pooled-host} →
- *       PgBouncer.</li>
- *   <li><b>Pooled-only public</b> — only {@code pooled-host} set: the public
- *       port serves the pooled link; direct stays on the internal address
- *       (loopback on-box, SSH tunnel from outside). There is deliberately no
- *       same-hostname split: SNI routing cannot distinguish two links behind
- *       one name.</li>
- * </ul>
+ * Single-host TLS-bridge Database Proxy (S-06 final).
+ *
+ * <p>One public hostname + one public port serve BOTH modes:
+ * {@code db.example.com:15432} with {@code options=-c omnidb.mode=direct}
+ * routes to PostgreSQL and {@code options=-c omnidb.mode=pooled} routes to
+ * PgBouncer. SNI alone cannot split one hostname, so the mode comes from the
+ * StartupMessage {@code options} field after client TLS termination.
+ * PostgreSQL stays the auth authority; the proxy never stores passwords.
  */
 @ConfigurationProperties(prefix = "database.proxy")
 public record DatabaseProxyProperties(
         boolean enabled,
         int port,
-        String directHost,
-        String pooledHost) {
+        String host) {
     public DatabaseProxyProperties {
-        if (port == 0) port = 14291;
+        if (port == 0) port = 15432;
     }
 
-    /** Proxy serves at least the pooled link (pooled-only or dual). */
+    /** Proxy serves the single public endpoint when enabled with a host. */
     public boolean isConfigured() {
-        return enabled && pooledHost != null && !pooledHost.isBlank();
+        return enabled && host != null && !host.isBlank();
     }
 
-    /** Public port serves pooled only; direct has no public route. */
-    public boolean isPooledOnlyPublic() {
-        return isConfigured() && (directHost == null || directHost.isBlank());
-    }
-
-    /** Direct link goes through the proxy only in dual-link shape. */
-    public boolean directViaProxy() {
-        return isConfigured() && !isPooledOnlyPublic();
+    /** Normalized public hostname (trimmed, never null). */
+    public String normalizedHost() {
+        return host == null ? "" : host.trim();
     }
 }
