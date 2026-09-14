@@ -217,6 +217,21 @@ public class ProvisioningService {
         return engine.name() + ":" + dbName;
     }
 
+    /**
+     * S-07 P1: PostgreSQL roles are cluster-wide but the lifecycle lock is
+     * per database name, so two provisions for <i>different</i> databases
+     * requesting the <i>same</i> role never mutually exclude. The
+     * resolve-then-create sequence must additionally serialize per requested
+     * role name; otherwise a probe-then-race lets the second provision
+     * {@code ALTER} the first tenant's role password (cross-tenant
+     * credential clobber via the idempotent {@code createUser} path).
+     * Always acquired <i>inside</i> the database lock (db → role order
+     * everywhere; no path takes role → db), so no deadlock cycle exists.
+     */
+    private String roleLockKey(DatabaseEngineType engine, String userName) {
+        return engine.name() + ":role:" + userName;
+    }
+
     public DatabaseInfo provision(CreateDatabaseForm form) {
         DatabaseEngineType engineType = form.engineType() != null ? form.engineType() : DatabaseEngineType.MONGO;
         String dbName = form.dbName().trim();
@@ -233,6 +248,16 @@ public class ProvisioningService {
             nameValidator.validateUserName(userName);
         }
         nameValidator.validatePassword(requestedPassword);
+        // S-07 P2: reject PG-unsafe passwords with HTTP 400 here, before the
+        // lock or any lifecycle step (the repository would throw a raw 500).
+        // Blank = generated password (always safe charset).
+        if (engineType == DatabaseEngineType.POSTGRES && !requestedPassword.isBlank()) {
+            nameValidator.validatePostgresPassword(requestedPassword);
+        }
+        // S-08: identical server-side literal restriction for MySQL.
+        if (engineType == DatabaseEngineType.MYSQL && !requestedPassword.isBlank()) {
+            nameValidator.validateMysqlPassword(requestedPassword);
+        }
 
         return databaseLocks.withLock(lockKey(engineType, dbName), () -> {
             if (managedDatabaseStore.existsByEngineTypeAndDbName(engineType, dbName)
@@ -249,21 +274,70 @@ public class ProvisioningService {
             // already-taken role must NOT reuse/ALTER it (would rotate the other
             // tenant's password). Keep the requested name when free; otherwise
             // mint omni_<db>_<rand6> until free (bounded, fail-closed).
-            String effectiveUser = userName;
-            if (engineType == DatabaseEngineType.POSTGRES) {
-                effectiveUser = resolveUniquePostgresRole(dbName, userName);
-            }
+            // S-07 P1: resolve + create serialize per requested role name (see
+            // roleLockKey) so concurrent same-name provisions cannot interleave
+            // probe and create across different database locks.
+            final String effectiveUser;
             boolean pgUserCreated = false;
-            boolean pgDbCreated = false;
             boolean mysqlUserCreated = false;
+            if (engineType == DatabaseEngineType.POSTGRES) {
+                final String requestedUser = userName;
+                // S-07: kept inside the same failure contract as the rest of
+                // provisioning (a role-creation failure is a plain
+                // ProvisioningException with nothing yet to clean up).
+                try {
+                    effectiveUser = databaseLocks.withLock(roleLockKey(engineType, requestedUser), () -> {
+                        String u = resolveUniquePostgresRole(dbName, requestedUser);
+                        engine.createUser(dbName, u, password);
+                        return u;
+                    });
+                } catch (ProvisioningException e) {
+                    // Fail-closed uniqueness decisions already carry their
+                    // reason — propagate unwrapped.
+                    throw e;
+                } catch (Exception e) {
+                    log.error("Failed to provision database '{}' (user '{}')", dbName, userName, e);
+                    throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
+                }
+                pgUserCreated = true;
+            } else if (engineType == DatabaseEngineType.MYSQL) {
+                // S-08 P1: MySQL accounts are server-global like PG roles —
+                // same resolve-then-create serialization, same failure
+                // contract (see resolveUniqueMysqlUser).
+                final String requestedUser = userName;
+                try {
+                    effectiveUser = databaseLocks.withLock(roleLockKey(engineType, requestedUser), () -> {
+                        String u = resolveUniqueMysqlUser(dbName, requestedUser);
+                        engine.createUser(dbName, u, password);
+                        return u;
+                    });
+                } catch (ProvisioningException e) {
+                    throw e;
+                } catch (Exception e) {
+                    log.error("Failed to provision database '{}' (user '{}')", dbName, userName, e);
+                    throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
+                }
+                mysqlUserCreated = true;
+            } else {
+                effectiveUser = userName;
+            }
+            boolean pgDbCreated = false;
             boolean mysqlDbCreated = false;
             try {
                 if (engineType == DatabaseEngineType.POSTGRES) {
-                    engine.createUser(dbName, effectiveUser, password);
-                    pgUserCreated = true;
                     engine.createDatabase(dbName, effectiveUser);
                     pgDbCreated = true;
                     engine.grantPrivileges(dbName, effectiveUser);
+                    // S-07 P2: previously only pooled provisions were proven
+                    // end-to-end; a direct-only provision never validated the
+                    // tenant login it just created. Mirror the pooled
+                    // fail-closed behavior (validator-wired only; unit tests
+                    // and PG-disabled installs keep previous behavior).
+                    if (!form.isPooled() && connectionValidationService != null
+                            && !connectionValidationService.validateDirect(dbName, effectiveUser, password)) {
+                        throw new ProvisioningException(
+                                "Direct validation failed for '" + dbName + "' — tenant logins cannot authenticate");
+                    }
                     if (form.isPooled()) {
                         // Pooled DBs need the auth_query path or every pooled
                         // login fails: least-privilege auth role + per-DB
@@ -291,11 +365,11 @@ public class ProvisioningService {
                         }
                     }
                 } else if (engineType == DatabaseEngineType.MYSQL) {
-                    engine.createUser(dbName, userName, password);
-                    mysqlUserCreated = true;
-                    engine.createDatabase(dbName, userName);
+                    // Account already created under the role lock above with
+                    // the uniquified name (mysqlUserCreated set there).
+                    engine.createDatabase(dbName, effectiveUser);
                     mysqlDbCreated = true;
-                    engine.grantPrivileges(dbName, userName);
+                    engine.grantPrivileges(dbName, effectiveUser);
                 } else {
                     engine.createUser(dbName, userName, password);
                     engine.createDatabase(dbName, userName);
@@ -320,7 +394,7 @@ public class ProvisioningService {
                         try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up partially created MySQL database '{}'", dbName, ce); }
                     }
                     if (mysqlUserCreated) {
-                        try { engine.dropUser(dbName, userName); } catch (Exception ce) { log.warn("Could not clean up partially created MySQL user '{}'", userName, ce); }
+                        try { engine.dropUser(dbName, effectiveUser); } catch (Exception ce) { log.warn("Could not clean up partially created MySQL user '{}'", effectiveUser, ce); }
                     }
                 } else {
                     // MONGO generic failure (non-MongoException): best-effort cleanup
@@ -345,7 +419,21 @@ public class ProvisioningService {
             if (engineType == DatabaseEngineType.POSTGRES) {
                 metadata.setPooled(form.isPooled());
             }
-            managedDatabaseStore.save(metadata);
+            // S-07 P1: the save used to sit outside any cleanup — a store
+            // failure after DB/role/grants/validation left live PG resources
+            // with no metadata (orphan; retry then reports "already exists"
+            // with nothing to manage). Fail closed with best-effort cleanup.
+            final String pgUserForCleanup = effectiveUser;
+            try {
+                managedDatabaseStore.save(metadata);
+            } catch (Exception e) {
+                if (engineType == DatabaseEngineType.POSTGRES) {
+                    try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up PG database '{}' after metadata failure", dbName, ce); }
+                    try { engine.dropUser(dbName, pgUserForCleanup); } catch (Exception ce) { log.warn("Could not clean up PG role '{}' after metadata failure", pgUserForCleanup, ce); }
+                }
+                log.error("Failed to persist metadata for database '{}' — provisioned resources cleaned up", dbName, e);
+                throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
+            }
             audit(AuditEvent.PROVISION, dbName, engineType, effectiveUser, now);
             if (engineType == DatabaseEngineType.POSTGRES && metadata.isPooled()) {
                 log.info("Provisioned {} database '{}' with user '{}' (pooled via PgBouncer)", engineType, dbName, effectiveUser);
@@ -397,6 +485,44 @@ public class ProvisioningService {
         throw new ProvisioningException("Could not mint a unique Postgres role for database '" + dbName + "' (role '" + requestedUser + "' is taken)");
     }
 
+    /**
+     * S-08 P1: MySQL counterpart of {@link #resolveUniquePostgresRole}.
+     * MySQL accounts ({@code user@'%'}) are server-global, so a name
+     * requested for a second database must not reuse the first tenant's
+     * account (shared password plus accumulating cross-database grants).
+     * Minted names are capped to MySQL's 32-char username limit.
+     */
+    String resolveUniqueMysqlUser(String dbName, String requestedUser) {
+        if (mysqlRepository.isEmpty()) return requestedUser;
+        MysqlDatabaseRepository repo = mysqlRepository.get();
+        boolean taken;
+        try {
+            taken = repo.userExists(requestedUser);
+        } catch (Exception e) {
+            log.warn("S-08 user probe failed for '{}' — provisioning with requested name", requestedUser, e);
+            return requestedUser;
+        }
+        if (!taken) return requestedUser;
+        PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
+                ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
+        for (int i = 0; i < 5; i++) {
+            String candidate = gen.generate(dbName, 32);
+            boolean candidateTaken;
+            try {
+                candidateTaken = repo.userExists(candidate);
+            } catch (Exception e) {
+                log.warn("S-08 user probe failed for candidate on '{}' — failing closed", dbName, e);
+                throw new ProvisioningException("Could not verify a unique user for database '" + dbName + "'");
+            }
+            if (!candidateTaken) {
+                log.info("MySQL user '{}' already exists (server-wide) — provisioning '{}' with unique user '{}'",
+                        requestedUser, dbName, candidate);
+                return candidate;
+            }
+        }
+        throw new ProvisioningException("Could not mint a unique MySQL user for database '" + dbName + "' (user '" + requestedUser + "' is taken)");
+    }
+
     public DatabaseInfo resetPassword(String dbName, ResetPasswordForm form) {
         // Legacy: lookup engine from metadata
         ManagedDatabase md = managedDatabaseStore.findByDbName(dbName)
@@ -412,6 +538,14 @@ public class ProvisioningService {
         else nameValidator.validateDatabaseName(dbName);
         String requestedPassword = form.password() == null ? "" : form.password().trim();
         nameValidator.validatePassword(requestedPassword);
+        // S-07 P2: same early-400 rule as provision (see above).
+        if (engineType == DatabaseEngineType.POSTGRES && !requestedPassword.isBlank()) {
+            nameValidator.validatePostgresPassword(requestedPassword);
+        }
+        // S-08: identical server-side literal restriction for MySQL.
+        if (engineType == DatabaseEngineType.MYSQL && !requestedPassword.isBlank()) {
+            nameValidator.validateMysqlPassword(requestedPassword);
+        }
 
         return databaseLocks.withLock(lockKey(engineType, dbName), () -> {
             ManagedDatabase metadata = managedDatabaseStore.findByEngineTypeAndDbName(engineType, dbName)
@@ -422,7 +556,18 @@ public class ProvisioningService {
                     : requestedPassword;
 
             try {
-                engineFor(engineType).updateUserPassword(dbName, metadata.getUserName(), password);
+                // S-07 P1: serialize with concurrent provisions for the same
+                // role name (db → role lock order, matching provision).
+                if (engineType == DatabaseEngineType.POSTGRES) {
+                    String u = metadata.getUserName();
+                    databaseLocks.withLock(roleLockKey(engineType, u), () -> engineFor(engineType).updateUserPassword(dbName, u, password));
+                } else if (engineType == DatabaseEngineType.MYSQL) {
+                    // S-08 P1: same serialization for server-global MySQL accounts.
+                    String u = metadata.getUserName();
+                    databaseLocks.withLock(roleLockKey(engineType, u), () -> engineFor(engineType).updateUserPassword(dbName, u, password));
+                } else {
+                    engineFor(engineType).updateUserPassword(dbName, metadata.getUserName(), password);
+                }
             } catch (MongoCommandException e) {
                 log.error("Failed to reset password for user '{}' on database '{}'", metadata.getUserName(), dbName, e);
                 throw new ProvisioningException("Could not reset password for database '" + dbName + "'", e);

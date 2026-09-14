@@ -512,4 +512,122 @@ class ProvisioningServicePostgresTest {
         assertThat(pooled.isPooledAuthInstalled(DatabaseEngineType.POSTGRES, "myapp")).isTrue();
         assertThat(service.isPooledAuthInstalled(DatabaseEngineType.MONGO, "myapp")).isFalse();
     }
+
+    // ── S-07 lifecycle hardening ────────────────────────────────────────
+
+    @Test
+    void concurrentSameRoleProvisionsGetDistinctRoles() throws Exception {
+        // S-07 P1: PG roles are cluster-wide but the lifecycle lock is per
+        // database, so two provisions for different DBs requesting the same
+        // role must still serialize on the role name. The barrier forces the
+        // worst-case interleave (both probes before either create); without
+        // the role lock both provisions would createUser("app") and the
+        // second would ALTER the first tenant's password.
+        java.util.Set<String> liveRoles = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
+        java.util.concurrent.CyclicBarrier probeBarrier = new java.util.concurrent.CyclicBarrier(2);
+        when(postgresRepo.roleExists(any())).thenAnswer(inv -> {
+            String role = inv.getArgument(0);
+            if (role.equals("app")) {
+                try {
+                    probeBarrier.await(5, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    // Serialized (fixed) path: the peer is queued on the role
+                    // lock, not at the probe — proceed alone.
+                    probeBarrier.reset();
+                }
+            }
+            return liveRoles.contains(role);
+        });
+        doAnswer(inv -> {
+            liveRoles.add(inv.getArgument(1));
+            Thread.sleep(50);
+            return null;
+        }).when(postgresRepo).createUser(any(), any(), any());
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            var fa = pool.submit(() -> service.provision(
+                    new CreateDatabaseForm("dbalpha", DatabaseEngineType.POSTGRES, "app", "secret111")));
+            var fb = pool.submit(() -> service.provision(
+                    new CreateDatabaseForm("dbbeta", DatabaseEngineType.POSTGRES, "app", "secret222")));
+            DatabaseInfo a = fa.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            DatabaseInfo b = fb.get(60, java.util.concurrent.TimeUnit.SECONDS);
+            assertThat(a.connectionString()).contains("app:secret111@");
+            assertThat(b.connectionString()).doesNotContain("app:secret222@");
+            assertThat(b.connectionString()).contains(":secret222@");
+            ArgumentCaptor<String> users = ArgumentCaptor.forClass(String.class);
+            verify(postgresRepo, times(2)).createUser(any(), users.capture(), any());
+            assertThat(users.getAllValues().get(0)).isEqualTo("app");
+            assertThat(users.getAllValues().get(1)).startsWith("omni_").isNotEqualTo("app");
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void metadataSaveFailureCleansUpPostgresResources() {
+        // S-07 P1: the metadata save used to sit outside any cleanup — a
+        // store failure left a live database+role with no metadata (retry
+        // then reports "already exists" with nothing to manage).
+        when(managedRepo.save(any())).thenThrow(new RuntimeException("disk full"));
+
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "mysecret123")))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("Could not provision database");
+        verify(postgresRepo).dropDatabase("myapp");
+        verify(postgresRepo).dropUser("myapp", "myapp_user");
+    }
+
+    @Test
+    void directValidationFailureFailsProvisionWithCleanup() {
+        // S-07 P2: direct-only provisions are now proven end-to-end like
+        // pooled ones (validator-wired only).
+        ConnectionValidationService validator = mock(ConnectionValidationService.class);
+        when(validator.validateDirect("myapp", "myapp_user", "mysecret123")).thenReturn(false);
+        service.setConnectionValidationService(validator);
+
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "mysecret123")))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("Could not provision database 'myapp'")
+                .hasStackTraceContaining("Direct validation failed");
+        verify(postgresRepo).dropDatabase("myapp");
+        verify(postgresRepo).dropUser("myapp", "myapp_user");
+    }
+
+    @Test
+    void directValidationSuccessProvisions() {
+        ConnectionValidationService validator = mock(ConnectionValidationService.class);
+        when(validator.validateDirect("myapp", "myapp_user", "mysecret123")).thenReturn(true);
+        service.setConnectionValidationService(validator);
+
+        DatabaseInfo info = service.provision(
+                new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "mysecret123"));
+
+        verify(validator).validateDirect("myapp", "myapp_user", "mysecret123");
+        verify(postgresRepo, never()).ensureAuthRole(any(), any());
+        assertThat(info.connectionString()).contains("myapp_user:mysecret123@");
+    }
+
+    @Test
+    void postgresUnsafePasswordRejectedBeforeAnyLifecycleStep() {
+        // S-07 P2: ';' would throw a raw 500 deep in the repository; the API
+        // must answer 400 (NameNotAllowedException) with nothing created.
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "bad;password1")))
+                .isInstanceOf(com.pkmprojects.mongodbserver.error.NameNotAllowedException.class);
+        verify(postgresRepo, never()).createUser(any(), any(), any());
+        verify(postgresRepo, never()).createDatabase(any(), any());
+        verify(managedRepo, never()).save(any());
+    }
+
+    @Test
+    void postgresUnsafeRotationPasswordRejectedBeforeMutation() {
+        // No metadata stub: validation rejects before any store access.
+        assertThatThrownBy(() -> service.resetPassword(DatabaseEngineType.POSTGRES, "myapp",
+                new com.pkmprojects.mongodbserver.dto.ResetPasswordForm("bad--password1")))
+                .isInstanceOf(com.pkmprojects.mongodbserver.error.NameNotAllowedException.class);
+        verify(postgresRepo, never()).updateUserPassword(any(), any(), any());
+    }
 }

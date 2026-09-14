@@ -176,6 +176,16 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         return proxyProperties != null && proxyProperties.isConfigured();
     }
 
+    /**
+     * S-07 P2: public single-host endpoint for views
+     * ({@code db.example.com:15432} both modes). Empty when the proxy is off
+     * (legacy two-port display still applies).
+     */
+    public java.util.Optional<String> proxyPublicEndpoint() {
+        if (!isProxyMode()) return java.util.Optional.empty();
+        return java.util.Optional.of(proxyProperties.normalizedHost() + ":" + proxyProperties.port());
+    }
+
     @Override
     public com.pkmprojects.mongodbserver.model.DatabaseConnections connectionEndpoints(
             String dbName, String userName, String password, boolean pooled) {
