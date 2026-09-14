@@ -33,7 +33,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
- * S-07/S-09: tenant validation wiring + pooled admin-console lifecycle.
+ * Tenant validation wiring + pooled admin-console lifecycle.
  * Validator/admin are setter-injected optionals — absent means legacy behavior.
  */
 @ExtendWith(MockitoExtension.class)

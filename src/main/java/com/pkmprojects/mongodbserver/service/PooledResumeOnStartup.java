@@ -10,7 +10,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 /**
- * S-09 P2: crash recovery for PgBouncer {@code PAUSE}. Deletion holds
+ * Crash recovery for PgBouncer {@code PAUSE}. Deletion holds
  * {@code PAUSE} on the pooled database while it terminates sessions and
  * drops the resource, releasing it in {@code finally} — but a JVM crash
  * between PAUSE and RESUME leaves the pooler holding that database's
@@ -22,6 +22,17 @@ import org.springframework.stereotype.Service;
  * harmless pooler-side no-op, so this cannot disrupt healthy state; every
  * failure is logged, never thrown. It deliberately does NOT delete or
  * recreate anything (ownership cannot be proven at startup).
+ *
+ * <p>Parity note: no MySQL/Mongo equivalent exists by design,
+ * not by omission. This runner exists only because pooled delete holds
+ * {@code PAUSE} in an <em>external</em> process (PgBouncer) across a crash
+ * window — after a JVM crash nothing remains to release those held clients.
+ * MySQL/Mongo deletes hold no external pause (root-JDBC DDL / driver
+ * drop, both auto-commit with no held state), so a crash mid-delete leaves
+ * at worst a half-deleted resource, which the retry-safe delete path plus
+ * the read-only {@code ReconciliationService} (MISSING/ORPHAN shapes for
+ * all three engines) already surface. A fake "resume" abstraction for
+ * symmetry would add lifecycle without a state transition to recover.</p>
  */
 @Service
 @ConditionalOnProperty(name = "app.postgres.enabled", havingValue = "true")
@@ -45,7 +56,7 @@ public class PooledResumeOnStartup implements ApplicationRunner {
                     .filter(m -> m.getEngineType() == DatabaseEngineType.POSTGRES && m.isPooled())
                     .map(com.pkmprojects.mongodbserver.model.ManagedDatabase::getDbName)
                     .toList();
-            // S-14: deterministic order — standard, then high_concurrency.
+            // Deterministic order — standard, then high_concurrency.
             // Per-instance failure warns and continues; never throws from
             // the ApplicationRunner.
             for (String dbName : pooled) {

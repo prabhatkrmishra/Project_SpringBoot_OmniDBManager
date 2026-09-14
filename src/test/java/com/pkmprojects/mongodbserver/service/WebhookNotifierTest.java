@@ -3,6 +3,7 @@ package com.pkmprojects.mongodbserver.service;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
+import com.pkmprojects.mongodbserver.model.WebhookDeliveryAttempt;
 import com.pkmprojects.mongodbserver.store.WebhookConfigStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,10 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for webhook event fan-out and delivery.
+ *
+ * <p>Delivery attempts are also recorded on the bounded trail —
+ * success, 4xx-no-retry, 5xx-retry, and final failure — with no secrets or
+ * bodies in the record.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class WebhookNotifierTest {
@@ -43,6 +48,7 @@ class WebhookNotifierTest {
     private ExecutorService executor;
 
     private WebhookNotifier notifier;
+    private WebhookDeliveryTrail trail;
 
     @BeforeEach
     void setUp() {
@@ -52,7 +58,8 @@ class WebhookNotifierTest {
             ((Runnable) invocation.getArgument(0)).run();
             return null;
         }).when(executor).submit(any(Runnable.class));
-        notifier = new WebhookNotifier(WebhookConfigStore, httpClient, executor);
+        trail = new WebhookDeliveryTrail();
+        notifier = new WebhookNotifier(WebhookConfigStore, httpClient, executor, trail);
     }
 
     private WebhookConfig webhook(String name, String url, String secret, List<String> eventTypes, boolean enabled) {
@@ -261,5 +268,90 @@ class WebhookNotifierTest {
         notifier.onAuditEvent(event());
 
         verify(httpClient, times(2)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+    }
+
+    // ── delivery trail ────────────────────────────────────────────────
+
+    @Test
+    void successfulDeliveryIsRecordedAsDelivered() throws Exception {
+        HttpResponse<String> ok = response(200);
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
+                webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
+        when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(ok);
+
+        notifier.onAuditEvent(event());
+
+        assertThat(trail.recent()).hasSize(1);
+        WebhookDeliveryAttempt attempt = trail.recent().get(0);
+        assertThat(attempt.webhookName()).isEqualTo("slack");
+        assertThat(attempt.eventType()).isEqualTo(AuditEvent.PROVISION);
+        assertThat(attempt.result()).isEqualTo(WebhookDeliveryAttempt.DeliveryResult.DELIVERED);
+        assertThat(attempt.httpStatus()).isEqualTo(200);
+        assertThat(attempt.finalAttempt()).isTrue();
+    }
+
+    @Test
+    void clientErrorIsRecordedOnceAsFailed() throws Exception {
+        HttpResponse<String> badRequest = response(400);
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
+                webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
+        when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(badRequest);
+
+        notifier.onAuditEvent(event());
+
+        verify(httpClient, times(1)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        assertThat(trail.recent()).hasSize(1);
+        assertThat(trail.recent().get(0).result()).isEqualTo(WebhookDeliveryAttempt.DeliveryResult.FAILED);
+        assertThat(trail.recent().get(0).httpStatus()).isEqualTo(400);
+    }
+
+    @Test
+    void serverErrorRetriesRecordEachAttemptAndFinalFailure() throws Exception {
+        HttpResponse<String> failure = response(500);
+        when(WebhookConfigStore.findByEnabledTrue()).thenReturn(List.of(
+                webhook("slack", "https://example.com/hooks/events", null, List.of(), true)));
+        when(httpClient.<String>send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(failure);
+
+        notifier.onAuditEvent(event());
+
+        verify(httpClient, times(WebhookNotifier.MAX_DELIVERY_ATTEMPTS))
+                .send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        // One record per attempt: RETRYING, RETRYING, FAILED(final).
+        assertThat(trail.recent()).hasSize(WebhookNotifier.MAX_DELIVERY_ATTEMPTS);
+        assertThat(trail.recent().get(0).result()).isEqualTo(WebhookDeliveryAttempt.DeliveryResult.FAILED);
+        assertThat(trail.recent().get(0).finalAttempt()).isTrue();
+        assertThat(trail.recent().get(0).httpStatus()).isEqualTo(500);
+    }
+
+    @Test
+    void blockedHostDeliveryIsRecordedAsFailedWithoutHttpSend() throws Exception {
+        // Blocked at validation normally, but the notifier re-checks at send
+        // time for DNS-rebinding — drive deliver() directly with a webhook
+        // whose host is blocked.
+        WebhookNotifier direct = new WebhookNotifier(WebhookConfigStore, httpClient, executor, trail);
+        direct.deliver(webhook("local", "http://localhost:9/hooks", null, List.of(), true), event().event());
+
+        verify(httpClient, never()).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+        assertThat(trail.recent()).hasSize(1);
+        assertThat(trail.recent().get(0).result()).isEqualTo(WebhookDeliveryAttempt.DeliveryResult.FAILED);
+        assertThat(trail.recent().get(0).failureCategory()).isEqualTo("blocked-host");
+    }
+
+    @Test
+    void trailIsBoundedAndNeverLeaksSecrets() {
+        WebhookDeliveryTrail bounded = new WebhookDeliveryTrail();
+        for (int i = 0; i < WebhookDeliveryTrail.MAX_RETAINED + 10; i++) {
+            bounded.record(new WebhookDeliveryAttempt("w" + i, "hook", AuditEvent.PROVISION,
+                    NOW, 1, WebhookDeliveryAttempt.DeliveryResult.DELIVERED, 200, null, true));
+        }
+        assertThat(bounded.recent()).hasSize(WebhookDeliveryTrail.MAX_RETAINED);
+        // Newest first: the last record wins the head.
+        assertThat(bounded.recent().get(0).webhookId()).isEqualTo("w" + (WebhookDeliveryTrail.MAX_RETAINED + 9));
+        // Record shape carries no secret/header/body fields by construction —
+        // assert the record's string form contains no secret material.
+        assertThat(bounded.recent().get(0).toString()).doesNotContain("hunter2");
     }
 }

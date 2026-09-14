@@ -154,6 +154,56 @@
                         </div>
                     </div>
                 </section>
+
+                <section class="card shadow-sm mt-4">
+                    <div class="card-header bg-transparent">
+                        <h3 class="h6 mb-0"><i class="bi bi-activity text-primary"></i> Recent deliveries</h3>
+                    </div>
+                    <div class="card-body p-0">
+                        <p class="text-body-secondary p-3 mb-0" th:if="${#lists.isEmpty(deliveries)}">
+                            No delivery attempts recorded yet. Deliveries appear here after admin actions fire webhooks —
+                            including failures, which previously were visible only in server logs.
+                        </p>
+                        <div class="table-responsive" th:if="${!#lists.isEmpty(deliveries)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Webhook</th>
+                                        <th>Event</th>
+                                        <th>Attempt</th>
+                                        <th>Result</th>
+                                        <th>Status</th>
+                                        <th>When</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="d : ${deliveries}">
+                                        <td>
+                                            <span class="fw-medium" th:text="${d.webhookName}">Slack</span>
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-soft-info"
+                                                  th:text="${#strings.replace(d.eventType, '_', ' ')}">PROVISION</span>
+                                        </td>
+                                        <td class="text-body-secondary" th:text="${d.attemptNumber}">1</td>
+                                        <td>
+                                            <span class="badge badge-soft-success" th:if="${d.result.name() == 'DELIVERED'}">Delivered</span>
+                                            <span class="badge badge-soft-warning" th:if="${d.result.name() == 'RETRYING'}">Retrying</span>
+                                            <span class="badge badge-soft-danger" th:if="${d.result.name() == 'FAILED'}">Failed</span>
+                                        </td>
+                                        <td class="text-body-secondary">
+                                            <span th:if="${d.httpStatus != null}" th:text="${d.httpStatus}">200</span>
+                                            <span th:if="${d.httpStatus == null and d.failureCategory != null}"
+                                                  th:text="${d.failureCategory}">io-error</span>
+                                            <span th:if="${d.httpStatus == null and d.failureCategory == null}">—</span>
+                                        </td>
+                                        <td class="text-body-secondary" th:text="${d.attemptedAt}">-</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
             </main>
         </div>
     </div>

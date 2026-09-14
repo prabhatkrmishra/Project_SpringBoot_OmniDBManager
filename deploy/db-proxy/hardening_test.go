@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// S-06.1: rewrite must preserve unrelated option bytes exactly, including
+// Rewrite must preserve unrelated option bytes exactly, including
 // repeated whitespace inside quoted values.
 func TestRewritePreservesQuotedWhitespace(t *testing.T) {
 	pkt := buildStartup(t, [][2]string{
@@ -32,7 +32,7 @@ func TestRewritePreservesQuotedWhitespace(t *testing.T) {
 	}
 }
 
-// S-06.1: routing token at beginning/end/middle all strip cleanly.
+// Routing token at beginning/end/middle all strip cleanly.
 func TestStripRoutingTokenPositions(t *testing.T) {
 	cases := map[string]string{
 		"-c omnidb.mode=direct":                          "",
@@ -57,7 +57,7 @@ func TestStripRoutingTokenPositions(t *testing.T) {
 	}
 }
 
-// S-06.1: scan registers keys AND returns them so relay can unregister on close.
+// Scan registers keys AND returns them so relay can unregister on close.
 func TestScanReturnsKeysForCleanup(t *testing.T) {
 	cancels = &cancelRouter{}
 	msg := []byte{'K', 0, 0, 0, 12, 0, 0, 0x11, 0x22, 0, 0, 0x33, 0x44}
@@ -74,7 +74,7 @@ func TestScanReturnsKeysForCleanup(t *testing.T) {
 	}
 }
 
-// S-06.1: ReadyForQuery gate recognises session-ready.
+// ReadyForQuery gate recognises session-ready.
 func TestReadyForQueryGate(t *testing.T) {
 	if !hasReadyForQuery([]byte{'Z', 0, 0, 0, 5}) {
 		t.Fatal("missed ReadyForQuery")
@@ -87,7 +87,7 @@ func TestReadyForQueryGate(t *testing.T) {
 	}
 }
 
-// S-06.1: cancel map stays bounded under flood.
+// Cancel map stays bounded under flood.
 func TestCancelMapBounded(t *testing.T) {
 	cancels = &cancelRouter{}
 	for i := uint32(0); i < 200000; i++ {

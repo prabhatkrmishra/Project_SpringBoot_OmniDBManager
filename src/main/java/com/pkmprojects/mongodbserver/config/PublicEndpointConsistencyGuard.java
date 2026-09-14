@@ -36,7 +36,7 @@ public class PublicEndpointConsistencyGuard implements ApplicationRunner {
                 throw new IllegalStateException("app.pgbouncer.max-db-connections must be >= 1");
         }
         if (proxy == null || !proxy.enabled()) {
-            log.info("DatabaseProxy disabled — legacy two-port strings stay authoritative (S-06 gate not passed)");
+            log.info("DatabaseProxy disabled — legacy two-port strings stay authoritative (bridge cutover gate not passed)");
             return;
         }
         if (proxy.host() == null || proxy.host().isBlank())

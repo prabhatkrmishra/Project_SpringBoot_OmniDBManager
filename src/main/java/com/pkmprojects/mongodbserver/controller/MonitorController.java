@@ -65,11 +65,9 @@ public class MonitorController {
 
     @GetMapping("/monitor")
     public String monitor(@RequestParam(name = "engine", required = false) String engine, Model model) {
-        String eng = engine != null ? engine.toLowerCase() : "mongo";
-        if (eng.equals("postgres") && postgresMonitorService.isEmpty()) eng = "mongo";
-        if (eng.equals("mysql") && mysqlMonitorService.isEmpty()) eng = "mongo";
-        if (!eng.equals("postgres") && !eng.equals("mysql")) eng = "mongo";
+        String eng = resolveEngine(engine);
         model.addAttribute("monitorEngine", eng);
+        model.addAttribute("mongoAvailable", monitorService != null);
         model.addAttribute("postgresAvailable", postgresMonitorService.isPresent());
         model.addAttribute("mysqlAvailable", mysqlMonitorService.isPresent());
         model.addAttribute("pgbouncerAvailable", pgbouncerMonitorService.isPresent());
@@ -78,11 +76,26 @@ public class MonitorController {
 
     @GetMapping("/monitor/stream")
     public ResponseEntity<SseEmitter> stream(@RequestParam(name = "engine", required = false) String engine) {
-        String eng = engine != null ? engine.toLowerCase() : "mongo";
-        if (eng.equals("postgres") && postgresMonitorService.isEmpty()) eng = "mongo";
-        if (eng.equals("mysql") && mysqlMonitorService.isEmpty()) eng = "mongo";
-        if (!eng.equals("postgres") && !eng.equals("mysql")) eng = "mongo";
-        String finalEng = eng;
+        String finalEng = resolveEngine(engine);
+        if (finalEng == null) {
+            SseEmitter none = new SseEmitter(60_000L);
+            // No enabled engine: emit one deterministic error tick instead of
+            // throwing IllegalStateException. Same engine the page landed on.
+            CompletableFuture.runAsync(() -> {
+                try {
+                    none.send(SseEmitter.event().name("tick").data("{\"error\":\"no monitoring engine available\"}"));
+                } catch (IOException ignored) {
+                    // Client gone before the single tick — nothing to report.
+                } finally {
+                    none.complete();
+                }
+            });
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.CACHE_CONTROL, "no-cache")
+                    .header("X-Accel-Buffering", "no")
+                    .contentType(MediaType.TEXT_EVENT_STREAM)
+                    .body(none);
+        }
         SseEmitter emitter = new SseEmitter(60_000L);
         // Heartbeat comment every 15s keeps proxies from buffering/closing idle SSE.
         ScheduledFuture<?> heartbeat = scheduler.scheduleWithFixedDelay(() -> {
@@ -114,6 +127,33 @@ public class MonitorController {
                 .body(emitter);
     }
 
+    /**
+     * Single enabled-engine selector shared by the page landing and
+     * the SSE stream. Explicit {@code engine=} wins when that engine is
+     * enabled; otherwise fall back to the first enabled engine in
+     * postgres → mysql → mongo order (never a disabled one). Returns
+     * {@code null} only when no monitoring engine is enabled at all, in
+     * which case both entry points render a deterministic unavailable state
+     * instead of throwing {@code IllegalStateException}.
+     */
+    String resolveEngine(String engine) {
+        boolean mongoOk = monitorService != null;
+        boolean pgOk = postgresMonitorService.isPresent();
+        boolean mysqlOk = mysqlMonitorService.isPresent();
+        if (engine != null) {
+            String want = engine.toLowerCase();
+            if (want.equals("postgres") && pgOk) return "postgres";
+            if (want.equals("mysql") && mysqlOk) return "mysql";
+            if (want.equals("mongo") && mongoOk) return "mongo";
+            // Explicit request for a disabled engine: fall through to the
+            // first enabled engine rather than erroring.
+        }
+        if (pgOk) return "postgres";
+        if (mysqlOk) return "mysql";
+        if (mongoOk) return "mongo";
+        return null;
+    }
+
     private void sendTick(SseEmitter emitter, String engine) {
         try {
             // Offload blocking JDBC snapshot to virtual threads with hard timeout
@@ -127,7 +167,10 @@ public class MonitorController {
                     return mysqlMonitorService.get().serialize(snapshot);
                 } else {
                     if (monitorService == null) {
-                        throw new IllegalStateException("Mongo monitoring is not available");
+                        // Unreachable by construction: resolveEngine never
+                        // returns "mongo" when the bean is absent. Kept as a
+                        // fail-closed guard for direct sendTick callers.
+                        return "{\"error\":\"no monitoring engine available\"}";
                     }
                     var snapshot = monitorService.getSnapshot();
                     return monitorService.serialize(snapshot);

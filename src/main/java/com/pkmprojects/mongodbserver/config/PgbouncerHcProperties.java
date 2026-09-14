@@ -3,7 +3,7 @@ package com.pkmprojects.mongodbserver.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * S-14 high-concurrency PgBouncer instance, bound from {@code app.pgbouncer-hc.*}.
+ * High-concurrency PgBouncer instance, bound from {@code app.pgbouncer-hc.*}.
  *
  * <p>Dedicated pooler for {@code profile=high_concurrency}: transaction pooling
  * with the same authentication model (auth_user + auth_query/user_lookup),

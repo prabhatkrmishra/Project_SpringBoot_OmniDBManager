@@ -20,7 +20,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
-/** S-14: HC validation is genuinely live-tested, never inferred from standard. */
+/** HC validation is genuinely live-tested, never inferred from standard. */
 @ExtendWith(MockitoExtension.class)
 class ConnectionValidationHcTest {
     @Mock PostgresDatabaseEngine engine;

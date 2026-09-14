@@ -1,4 +1,4 @@
-// S-06 single-host TLS-bridge Database Proxy.
+// Single-host TLS-bridge Database Proxy.
 //
 // Public contract: db.example.com:15432 serves BOTH modes. The mode comes
 // from the StartupMessage `options` field AFTER client TLS termination:

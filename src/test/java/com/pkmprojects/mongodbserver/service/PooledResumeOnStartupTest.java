@@ -18,7 +18,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * S-09 P2: a crash between PgBouncer PAUSE and RESUME must not wedge pooled
+ * A crash between PgBouncer PAUSE and RESUME must not wedge pooled
  * clients forever — startup best-effort RESUMEs every metadata-pooled PG
  * database, and never throws.
  */

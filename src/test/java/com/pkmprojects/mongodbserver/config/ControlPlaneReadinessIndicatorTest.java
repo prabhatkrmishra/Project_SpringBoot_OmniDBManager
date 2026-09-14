@@ -9,7 +9,7 @@ import org.springframework.boot.health.contributor.Status;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * S-12 P3-3: readiness reflects exactly the configured control-plane
+ * Readiness reflects exactly the configured control-plane
  * stores — never tenant databases, never absent engines.
  *
  * <p>Plain hand-rolled fakes (not Mockito mocks): the constructor takes

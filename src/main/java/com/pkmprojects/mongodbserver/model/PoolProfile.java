@@ -3,7 +3,7 @@ package com.pkmprojects.mongodbserver.model;
 import java.util.List;
 
 /**
- * S-14 named connection profiles for pooled PostgreSQL connections.
+ * Named connection profiles for pooled PostgreSQL connections.
  *
  * <p>Profile selection is per CLIENT CONNECTION; profile configuration is per
  * PGBOUNCER INSTANCE. The client selects a named policy and never controls
@@ -12,8 +12,7 @@ import java.util.List;
  * <p>Phase 1 supports exactly {@code standard} (existing pooler, zero behavior
  * change) and {@code high_concurrency} (dedicated pooler, transaction pooling
  * with larger but explicitly capped per-db sizing). Both are
- * {@link PoolMode#TRANSACTION}. There is intentionally no session profile in
- * S-14 and no {@code ManagedDatabase} profile field — profile is a
+ * {@link PoolMode#TRANSACTION}. There is intentionally no session profile and no {@code ManagedDatabase} profile field — profile is a
  * connection-policy selector, not a database property. Bare
  * {@code mode=pooled} strings mean {@code standard} for backwards
  * compatibility.

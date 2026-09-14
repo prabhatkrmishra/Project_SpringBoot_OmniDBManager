@@ -459,7 +459,7 @@ class ProvisioningServicePostgresTest {
                 .isInstanceOf(DatabaseNotFoundException.class);
     }
 
-    // ── S-02 unique roles: PG roles are cluster-wide ────────────────────
+    // ── unique roles: PG roles are cluster-wide ─────────────────────────
 
     @Test
     void secondDatabaseWithSameRequestedUserGetsDistinctRole() {
@@ -513,11 +513,11 @@ class ProvisioningServicePostgresTest {
         assertThat(service.isPooledAuthInstalled(DatabaseEngineType.MONGO, "myapp")).isFalse();
     }
 
-    // ── S-07 lifecycle hardening ────────────────────────────────────────
+    // ── lifecycle hardening ─────────────────────────────────────────────
 
     @Test
     void concurrentSameRoleProvisionsGetDistinctRoles() throws Exception {
-        // S-07 P1: PG roles are cluster-wide but the lifecycle lock is per
+        // PG roles are cluster-wide but the lifecycle lock is per
         // database, so two provisions for different DBs requesting the same
         // role must still serialize on the role name. The barrier forces the
         // worst-case interleave (both probes before either create); without
@@ -566,7 +566,7 @@ class ProvisioningServicePostgresTest {
 
     @Test
     void metadataSaveFailureCleansUpPostgresResources() {
-        // S-07 P1: the metadata save used to sit outside any cleanup — a
+        // The metadata save used to sit outside any cleanup — a
         // store failure left a live database+role with no metadata (retry
         // then reports "already exists" with nothing to manage).
         when(managedRepo.save(any())).thenThrow(new RuntimeException("disk full"));
@@ -581,7 +581,7 @@ class ProvisioningServicePostgresTest {
 
     @Test
     void directValidationFailureFailsProvisionWithCleanup() {
-        // S-07 P2: direct-only provisions are now proven end-to-end like
+        // Direct-only provisions are now proven end-to-end like
         // pooled ones (validator-wired only).
         ConnectionValidationService validator = mock(ConnectionValidationService.class);
         when(validator.validateDirect("myapp", "myapp_user", "mysecret123")).thenReturn(false);
@@ -612,7 +612,7 @@ class ProvisioningServicePostgresTest {
 
     @Test
     void postgresUnsafePasswordRejectedBeforeAnyLifecycleStep() {
-        // S-07 P2: ';' would throw a raw 500 deep in the repository; the API
+        // ';' would throw a raw 500 deep in the repository; the API
         // must answer 400 (NameNotAllowedException) with nothing created.
         assertThatThrownBy(() -> service.provision(
                 new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "bad;password1")))

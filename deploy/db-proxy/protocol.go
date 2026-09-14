@@ -72,7 +72,7 @@ func parseStartupParams(body []byte) ([][2]string, error) {
 	return out, nil
 }
 
-// S-14 connection profiles: per-connection policy selector, per-instance
+// Connection profiles: per-connection policy selector, per-instance
 // configuration. Only "standard" (existing pooler) and "high_concurrency"
 // (dedicated pooler) exist. Both are transaction pooling; the client selects
 // a named policy and never controls raw PgBouncer configuration.
@@ -180,7 +180,7 @@ func extractMode(options string) (string, error) {
 // from options, preserving every other byte of the options value exactly
 // (whitespace, quoting, order) and every other param byte-identically. If
 // options becomes empty, the key is dropped. Returns the new full packet.
-// S-06.1 P2 fix: the previous Fields+Join re-encoding collapsed repeated
+// The previous Fields+Join re-encoding collapsed repeated
 // whitespace (e.g. '-c myopt="a  b"' became '"a b"'); the routing span is
 // now excised from the original string instead.
 func rewriteStartup(full []byte, params [][2]string) ([]byte, error) {
@@ -279,7 +279,7 @@ func stripSinglePrefix(opt, prefix string) (rest string, ok bool, found bool) {
 // options are stripped so omnidb.mode/omnidb.pool_profile never leak to
 // PostgreSQL or PgBouncer.
 func stripRoutingToken(opt string) (rest string, ok bool) {
-	// Sequential excision preserves the S-06.1 whitespace guarantee for the
+	// Sequential excision preserves the whitespace guarantee for the
 	// single-token case (second strip is a no-op) and generalizes cleanly
 	// to two tokens in either order.
 	afterMode, modeRemains := stripOnePair(opt, "omnidb.mode=")

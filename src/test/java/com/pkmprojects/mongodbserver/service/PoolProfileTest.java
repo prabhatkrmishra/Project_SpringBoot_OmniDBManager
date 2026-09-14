@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * S-14 connection profiles: standard + high_concurrency, transaction pooling
+ * Connection profiles: standard + high_concurrency, transaction pooling
  * only, same host/port/credentials, profile token in options=.
  */
 @ExtendWith(MockitoExtension.class)
@@ -70,7 +70,7 @@ class PoolProfileTest {
         String stdUri = b.toUriBridged(ep, PoolProfile.STANDARD);
         String hcUri = b.toUriBridged(ep, PoolProfile.HIGH_CONCURRENCY);
         String bareUri = b.toUriBridged(ep);
-        // Canonical shapes from the S-14 contract.
+        // Canonical profile shapes.
         assertThat(hcUri).contains("options=-c%20omnidb.mode%3Dpooled%20-c%20omnidb.pool_profile%3Dhigh_concurrency");
         assertThat(stdUri).contains("options=-c%20omnidb.mode%3Dpooled%20-c%20omnidb.pool_profile%3Dstandard");
         // Bare pooled still works and means standard (backwards compat).

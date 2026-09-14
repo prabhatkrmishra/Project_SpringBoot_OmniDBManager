@@ -143,7 +143,7 @@ public class DatabaseNameValidator {
     }
 
     /**
-     * S-07 P2: PostgreSQL passwords are embedded in single-quoted
+     * PostgreSQL passwords are embedded in single-quoted
      * {@code CREATE/ALTER ROLE ... PASSWORD} literals server-side. The
      * repository defense-in-depth rejects semicolons, double-dashes and
      * C-style comment markers there with a raw 500; surface the same rule
@@ -160,7 +160,7 @@ public class DatabaseNameValidator {
     }
 
     /**
-     * S-08: MySQL passwords face the identical server-side literal
+     * MySQL passwords face the identical server-side literal
      * restriction ({@code MysqlDatabaseRepository.escapePassword}), so the
      * same early-400 rule applies.
      */

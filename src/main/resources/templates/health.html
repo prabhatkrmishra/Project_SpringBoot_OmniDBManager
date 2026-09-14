@@ -26,6 +26,7 @@
                         <span class="fw-medium">MongoDB</span>
                         <span class="ms-2" th:class="${health.mongoReachable} ? 'live-dot' : 'live-dot-off'"></span>
                         <span class="badge ms-auto" th:classappend="${health.mongoReachable} ? 'badge-soft-success' : 'badge-soft-danger'" th:text="${health.mongoReachable} ? 'Reachable' : 'Unreachable'">Reachable</span>
+                        <span class="badge badge-soft-secondary ms-2" th:if="${!health.mongoEnabled}">disabled</span>
                     </div>
                     <div class="card-body" th:if="${health.mongoReachable}">
                         <div class="row g-3">
@@ -61,8 +62,11 @@
                             <code>serverStatus</code> privileges.
                         </p>
                     </div>
-                    <div class="card-body text-center py-4" th:if="${!health.mongoReachable}">
-                        <p class="text-body-secondary mb-0">MongoDB could not be reached. Check that it is running and credentials are valid.</p>
+                    <div class="card-body text-center py-4" th:if="${!health.mongoReachable and health.mongoEnabled}">
+                        <p class="text-body-secondary mb-0">MongoDB could not be reached. Check that it is running and <code>MONGO_ENABLED=true</code> is set.</p>
+                    </div>
+                    <div class="card-body text-center py-4" th:if="${!health.mongoEnabled}">
+                        <p class="text-body-secondary mb-0">MongoDB is disabled. Set <code>MONGO_ENABLED=true</code> to enable.</p>
                     </div>
                     <div class="card-footer bg-transparent d-flex align-items-center gap-2" th:if="${health.mongoReachable}">
                         <i class="bi bi-database text-primary"></i>

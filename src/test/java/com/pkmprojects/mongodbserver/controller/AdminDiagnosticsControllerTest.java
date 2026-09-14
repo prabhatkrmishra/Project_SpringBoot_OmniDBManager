@@ -19,7 +19,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * S-12 P3-1: reconciliation is ADMIN-only structured JSON without secrets.
+ * Reconciliation is ADMIN-only structured JSON without secrets.
  */
 @WebMvcTest(AdminDiagnosticsController.class)
 @Import({SecurityConfig.class, AdminDiagnosticsControllerTest.SecurityTestConfig.class})

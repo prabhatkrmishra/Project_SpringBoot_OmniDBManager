@@ -2,6 +2,7 @@ package com.pkmprojects.mongodbserver.controller;
 
 import com.pkmprojects.mongodbserver.dto.WebhookForm;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
+import com.pkmprojects.mongodbserver.service.WebhookDeliveryTrail;
 import com.pkmprojects.mongodbserver.service.WebhookService;
 import jakarta.validation.Valid;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -18,14 +19,22 @@ import java.util.List;
 
 /**
  * Webhook endpoint management (admin only).
+ *
+ * <p>The management page also shows the bounded delivery-attempt
+ * trail (no secrets, no bodies) so failed deliveries are visible without
+ * reading server logs.</p>
  */
 @Controller
 public class WebhookController {
 
     private final WebhookService webhookService;
+    private final WebhookDeliveryTrail deliveryTrail;
 
-    public WebhookController(WebhookService webhookService) {
+    public WebhookController(WebhookService webhookService,
+                             @org.springframework.beans.factory.annotation.Autowired(required = false)
+                             WebhookDeliveryTrail deliveryTrail) {
         this.webhookService = webhookService;
+        this.deliveryTrail = deliveryTrail;
     }
 
     /**
@@ -36,6 +45,7 @@ public class WebhookController {
     public String webhooks(Model model) {
         model.addAttribute("webhooks", webhookService.listWebhooks());
         model.addAttribute("eventTypes", AuditEvent.ALL_TYPES);
+        model.addAttribute("deliveries", deliveryTrail != null ? deliveryTrail.recent() : List.of());
         if (!model.containsAttribute("form")) {
             model.addAttribute("form", new WebhookForm("", "", "", List.of()));
         }
@@ -52,6 +62,7 @@ public class WebhookController {
         if (bindingResult.hasErrors()) {
             model.addAttribute("webhooks", webhookService.listWebhooks());
             model.addAttribute("eventTypes", AuditEvent.ALL_TYPES);
+            model.addAttribute("deliveries", deliveryTrail != null ? deliveryTrail.recent() : List.of());
             return "webhooks";
         }
         webhookService.createWebhook(form);

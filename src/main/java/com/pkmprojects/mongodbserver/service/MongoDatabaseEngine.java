@@ -87,7 +87,11 @@ public class MongoDatabaseEngine implements DatabaseEngine {
                 + "?authSource=" + dbName + (resolveConnectionTls() ? "&tls=true" : "");
     }
 
-    String resolveConnectionHost() {
+    /**
+     * Public host for the structured connections API. Same
+     * resolution the string builder uses, so API and string agree.
+     */
+    public String resolveConnectionHost() {
         String publicHost = environment.getProperty("app.mongo.issued-host", "");
         if (publicHost != null && !publicHost.isBlank()) {
             return publicHost;
@@ -105,7 +109,11 @@ public class MongoDatabaseEngine implements DatabaseEngine {
         return slash < 0 ? rest : rest.substring(0, slash);
     }
 
-    private boolean resolveConnectionTls() {
+    /**
+     * Public TLS flag for the structured connections API. The
+     * builder consults the same property, so API and string agree.
+     */
+    public boolean resolveConnectionTls() {
         Boolean tls = environment.getProperty("app.mongo.tls", Boolean.class, false);
         return Boolean.TRUE.equals(tls);
     }

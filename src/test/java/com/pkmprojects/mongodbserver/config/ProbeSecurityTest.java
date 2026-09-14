@@ -23,7 +23,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * S-12 P3-3: orchestrator probes against the real actuator wiring.
+ * Orchestrator probes against the real actuator wiring.
  * Liveness/readiness are anonymous and minimal (UP/DOWN only); the full
  * health endpoint stays behind authentication; and a dead metadata store
  * degrades readiness WITHOUT taking liveness down (tenant/control-store

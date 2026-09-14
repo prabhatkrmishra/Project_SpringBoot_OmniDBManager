@@ -90,7 +90,7 @@ public class MysqlDatabaseRepository {
     }
 
     /**
-     * S-08 P1: cluster-wide account probe for provision-time uniquify.
+     * Cluster-wide account probe for provision-time uniquify.
      * MySQL accounts are {@code user@host} server-global; like PG roles, a
      * name requested for a second database must not reuse the first tenant's
      * account (shared password + accumulating cross-database grants).
@@ -109,7 +109,7 @@ public class MysqlDatabaseRepository {
     }
 
     /**
-     * S-12 read-only reconciliation: managed-shape accounts
+     * Read-only reconciliation: managed-shape accounts
      * ({@code host='%'}), excluding the {@code root} service account.
      * Read-only; password hashes are never selected.
      */
@@ -120,7 +120,7 @@ public class MysqlDatabaseRepository {
     }
 
     /**
-     * S-12 read-only reconciliation: deterministic grant text for one
+     * Read-only reconciliation: deterministic grant text for one
      * account, for operator inspection of orphan users. Read-only.
      */
     public java.util.List<String> listGrants(String userName) {

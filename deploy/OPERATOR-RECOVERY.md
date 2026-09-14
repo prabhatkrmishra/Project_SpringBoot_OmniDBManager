@@ -106,7 +106,7 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   covering `options`, or an OLD bridge that forwards `options=` unstripped)
   fails CLOSED with `unsupported startup parameter in options` — never silently
   downgraded. Live-verified: HEAD bridge forwards profiled strings to the
-  standard pooler, which rejects them (see S-14 report).
+  standard pooler, which rejects them.
 - Therefore treat newly generated profiled strings as requiring the new bridge
   when HC semantics matter; bare pooled strings keep working everywhere.
 - Delete-then-immediate-recreate of the same DB name can hit a pooler
@@ -115,7 +115,7 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   and the failed attempt's cleanup `DROP` can lose a race with pooler
   reconnects (`being accessed by other users`). Remediation: terminate
   backends for the name, `RECONNECT` on both poolers, retry once.
-  Live-observed on both instances during S-14 verification; pre-existing
+  Live-observed on both instances during verification; pre-existing
   single-pooler behavior, not profile-specific.
 
 ### PostgreSQL / PgBouncer / proxy unavailable

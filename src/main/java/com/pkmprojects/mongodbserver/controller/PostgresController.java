@@ -133,7 +133,7 @@ public class PostgresController {
             model.addAttribute("issuedHost", host.equals("127.0.0.1") ? "" : host);
             model.addAttribute("directPort", directPort);
             model.addAttribute("pooledPort", pooledPort);
-            // S-07 P2: in single-host bridge mode the two-port hint is wrong —
+            // In single-host bridge mode the two-port hint is wrong —
             // both modes share one public endpoint; the template shows the
             // single-host copy instead when present.
             engine.proxyPublicEndpoint().ifPresent(ep -> model.addAttribute("proxyEndpoint", ep));

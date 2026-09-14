@@ -12,7 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * S-12 P3-3: deterministic readiness signal for the control plane.
+ * Deterministic readiness signal for the control plane.
  *
  * <p>Actuator health groups fail startup on unknown contributor names, so a
  * static {@code include: readinessState,db,mongo,...} list cannot work when

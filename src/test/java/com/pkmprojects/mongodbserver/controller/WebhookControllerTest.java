@@ -59,6 +59,18 @@ class WebhookControllerTest {
     }
 
     @Test
+    void webhooksPageExposesDeliveryTrailModel() throws Exception {
+        // The page owns a deliveries model attribute (empty when
+        // nothing has fired yet) and renders the recent-deliveries section.
+        when(webhookService.listWebhooks()).thenReturn(List.of(webhook("w1", "Slack", true)));
+
+        mockMvc.perform(get("/webhooks").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(model().attributeExists("deliveries"))
+                .andExpect(content().string(containsString("Recent deliveries")));
+    }
+
+    @Test
     void webhooksPageRequiresAdminRole() throws Exception {
         mockMvc.perform(get("/webhooks").with(user("bob").roles("USER")))
                 .andExpect(status().isForbidden());

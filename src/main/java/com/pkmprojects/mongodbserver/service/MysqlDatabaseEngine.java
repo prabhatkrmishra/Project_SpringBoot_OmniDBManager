@@ -2,6 +2,7 @@ package com.pkmprojects.mongodbserver.service;
 
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
 import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,12 @@ public class MysqlDatabaseEngine implements DatabaseEngine {
     private final String issuedHost;
     private final boolean tls;
 
+    // With two public constructors and neither marked,
+    // Spring cannot choose one when the bean is actually created
+    // (MYSQL_ENABLED=true) — startup fails with "No default constructor
+    // found". The @Value-wired constructor is the injection target; the
+    // 5-arg legacy shape stays for tests only.
+    @Autowired
     public MysqlDatabaseEngine(MysqlDatabaseRepository mysqlDatabaseRepository,
                                @Value("${app.mysql.uri:jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}") String mysqlUri,
                                @Value("${app.mysql.issued-host:}") String issuedHost,
@@ -110,7 +117,11 @@ public class MysqlDatabaseEngine implements DatabaseEngine {
         return base;
     }
 
-    String resolveHost() {
+    /**
+     * Public host for the structured connections API. Same
+     * resolution the string builder uses, so API and string agree.
+     */
+    public String resolveHost() {
         if (issuedHost != null && !issuedHost.isBlank()) {
             return issuedHost.contains(":") ? issuedHost : issuedHost + ":9816";
         }
@@ -125,6 +136,14 @@ public class MysqlDatabaseEngine implements DatabaseEngine {
         int q = hostPort.indexOf('?');
         if (q >= 0) hostPort = hostPort.substring(0, q);
         return hostPort.isBlank() ? "127.0.0.1:9816" : hostPort;
+    }
+
+    /**
+     * Public TLS flag for the structured connections API. The
+     * builder consults the same field, so API and string can never disagree.
+     */
+    public boolean isTls() {
+        return tls;
     }
 
     static String uriEncode(String value) {

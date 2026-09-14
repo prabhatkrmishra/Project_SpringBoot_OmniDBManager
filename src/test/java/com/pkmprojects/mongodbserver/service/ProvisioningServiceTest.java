@@ -139,6 +139,34 @@ class ProvisioningServiceTest {
     }
 
     @Test
+    void mongoValidationFailureFailsProvisionWithCleanup() {
+        // Validator-wired Mongo provisions are proven end-to-end;
+        // a failed tenant login fails closed with best-effort cleanup.
+        TenantLoginValidationService validator = mock(TenantLoginValidationService.class);
+        when(validator.validateMongo("myapp", "appuser", "mysecret123")).thenReturn(false);
+        service.setTenantLoginValidationService(validator);
+
+        assertThatThrownBy(() -> service.provision(new CreateDatabaseForm("myapp", "appuser", "mysecret123")))
+                .isInstanceOf(com.pkmprojects.mongodbserver.error.ProvisioningException.class)
+                .hasMessageContaining("Could not provision database 'myapp'")
+                .hasStackTraceContaining("MongoDB validation failed");
+        verify(mongoDatabaseRepository).dropDatabase("myapp");
+        verify(mongoDatabaseRepository).dropUser("myapp", "appuser");
+    }
+
+    @Test
+    void mongoValidationSuccessProvisions() {
+        TenantLoginValidationService validator = mock(TenantLoginValidationService.class);
+        when(validator.validateMongo("myapp", "appuser", "mysecret123")).thenReturn(true);
+        service.setTenantLoginValidationService(validator);
+
+        DatabaseInfo info = service.provision(new CreateDatabaseForm("myapp", "appuser", "mysecret123"));
+
+        verify(validator).validateMongo("myapp", "appuser", "mysecret123");
+        assertThat(info.connectionString()).contains("appuser:mysecret123@");
+    }
+
+    @Test
     void buildConnectionStringPercentEncodesCredentials() {
         when(passwordGenerator.generate(16)).thenReturn("p@ss#word/x?y");
 

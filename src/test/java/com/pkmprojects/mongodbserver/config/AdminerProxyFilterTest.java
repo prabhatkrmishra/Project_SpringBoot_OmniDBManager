@@ -134,4 +134,72 @@ class AdminerProxyFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(502);
     }
+
+    @Test
+    void ssoFallbackStillServesUpstreamOr502WithoutCredentials() throws Exception {
+        // SSO failure must fall back (never throw, never leak
+        // credentials) — against a dead upstream that means a 502 with a
+        // safe message; the WARN signal itself is verified by log
+        // inspection in live validation, not asserted on content here.
+        AdminerProxyFilter unreachable =
+                new AdminerProxyFilter("http://127.0.0.1:9", "root", "s3cr3t-pw",
+                        java.net.http.HttpClient.newHttpClient());
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/adminer/");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        unreachable.doFilter(request, response, new MockFilterChain());
+
+        assertThat(response.getStatus()).isEqualTo(502);
+        assertThat(response.getContentAsString()).doesNotContain("s3cr3t-pw");
+    }
+
+    @Test
+    void successfulSsoRedirectsBareLoadToSessionUrl() throws Exception {
+        // Bare / renders Adminer's login form even for a live session, so a
+        // fresh SSO on a bare load must redirect the browser to Adminer's
+        // own post-login session URL instead of proxying / (which would look
+        // exactly like SSO failed). Stub upstream speaks just enough Adminer:
+        // GET / serves a token page, POST answers 302 + session + Location.
+        com.sun.net.httpserver.HttpServer upstream =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/", exchange -> {
+            try {
+                if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                    byte[] page = ("<html><form><input name=\"auth[username]\">"
+                            + "<input type='hidden' name='token' value='7:stub'></form></html>")
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
+                    exchange.getResponseHeaders().add("Set-Cookie", "adminer_sid=init; path=/; HttpOnly");
+                    exchange.sendResponseHeaders(200, page.length);
+                    exchange.getResponseBody().write(page);
+                } else {
+                    exchange.getRequestBody().readAllBytes();
+                    exchange.getResponseHeaders().add("Set-Cookie", "adminer_sid=sess123; path=/; HttpOnly");
+                    exchange.getResponseHeaders().add("Set-Cookie", "adminer_key=key456; path=/; HttpOnly");
+                    exchange.getResponseHeaders().add("Location", "?pgsql=postgres&username=root");
+                    exchange.sendResponseHeaders(302, -1);
+                }
+            } finally {
+                exchange.close();
+            }
+        });
+        upstream.start();
+        try {
+            int port = upstream.getAddress().getPort();
+            AdminerProxyFilter filter = new AdminerProxyFilter("http://127.0.0.1:" + port, "root", "pw",
+                    java.net.http.HttpClient.newHttpClient());
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/adminer/");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilter(request, response, new MockFilterChain());
+
+            assertThat(response.getStatus()).isEqualTo(302);
+            assertThat(response.getRedirectedUrl())
+                    .isEqualTo("/adminer/?pgsql=postgres&username=root");
+            // Session cookies still reach the browser scoped under /adminer.
+            assertThat(response.getHeaders("Set-Cookie").toString()).contains("adminer_sid");
+        } finally {
+            upstream.stop(0);
+        }
+    }
 }

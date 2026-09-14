@@ -14,7 +14,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * S-08 P1: plaintext tenant-password storage must never be silent in a real
+ * Plaintext tenant-password storage must never be silent in a real
  * deployment — warn always, fail fast under the {@code atlas} profile.
  */
 @ExtendWith(MockitoExtension.class)

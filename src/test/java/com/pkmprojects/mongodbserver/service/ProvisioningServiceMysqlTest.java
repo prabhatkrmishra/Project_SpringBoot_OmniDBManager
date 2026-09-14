@@ -39,7 +39,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * S-08 P1: MySQL accounts ({@code user@'%'}) are server-global like PG
+ * MySQL accounts ({@code user@'%'}) are server-global like PG
  * roles — a name requested for a second database must not reuse the first
  * tenant's account (shared password + accumulating cross-database grants).
  */
@@ -167,5 +167,37 @@ class ProvisioningServiceMysqlTest {
                 .isInstanceOf(ProvisioningException.class)
                 .hasMessageContaining("unique");
         verify(mysqlRepo, never()).createUser(any(), any(), any());
+    }
+
+    @Test
+    void mysqlValidationFailureFailsProvisionWithCleanup() {
+        // Validator-wired MySQL provisions are proven end-to-end
+        // like PG ones; a failed tenant login fails closed with cleanup.
+        when(mysqlRepo.userExists("app")).thenReturn(false);
+        TenantLoginValidationService validator = org.mockito.Mockito.mock(TenantLoginValidationService.class);
+        when(validator.validateMysql("dbalpha", "app", "secret111")).thenReturn(false);
+        service.setTenantLoginValidationService(validator);
+
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("dbalpha", DatabaseEngineType.MYSQL, "app", "secret111")))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("Could not provision database 'dbalpha'")
+                .hasStackTraceContaining("MySQL validation failed");
+        verify(mysqlRepo).dropDatabase("dbalpha");
+        verify(mysqlRepo).dropUser("dbalpha", "app");
+    }
+
+    @Test
+    void mysqlValidationSuccessProvisions() {
+        when(mysqlRepo.userExists("app")).thenReturn(false);
+        TenantLoginValidationService validator = org.mockito.Mockito.mock(TenantLoginValidationService.class);
+        when(validator.validateMysql("dbalpha", "app", "secret111")).thenReturn(true);
+        service.setTenantLoginValidationService(validator);
+
+        DatabaseInfo info = service.provision(
+                new CreateDatabaseForm("dbalpha", DatabaseEngineType.MYSQL, "app", "secret111"));
+
+        verify(validator).validateMysql("dbalpha", "app", "secret111");
+        assertThat(info.connectionString()).contains("app:secret111@");
     }
 }

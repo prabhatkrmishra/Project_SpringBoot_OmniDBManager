@@ -33,6 +33,13 @@ import java.util.regex.Pattern;
  * single sign-on as the Postgres superuser so one click from the dashboard
  * sees every provisioned database — no second login form.
  *
+ * <p>Scope: this SSO is <b>PostgreSQL-only by design</b> (it posts
+ * {@code auth[driver]=pgsql} against the PG superuser). MySQL is served by
+ * {@code PhpMyAdminProxyFilter} ({@code /phpmyadmin}) and MongoDB by
+ * {@code MongoExpressProxyFilter} ({@code /mongo-express}); the nav gates
+ * each explorer to its engine. Do not read Adminer's upstream multi-driver
+ * support as OmniDB MySQL support — the SSO path pins pgsql.</p>
+ *
  * <p>How it works: Adminer keeps its login in two cookies ({@code adminer_sid}
  * and {@code adminer_key}). On the first page load without them, this filter
  * logs in upstream server-side (GET the login page for its {@code token},
@@ -128,10 +135,38 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
         boolean isLoginPageLoad = "GET".equalsIgnoreCase(request.getMethod())
                 && (path.equals("/") || path.isEmpty());
         if (outboundCookie == null && isLoginPageLoad) {
-            List<String> ssoCookies = tryServerSideLogin();
+            List<String> landingPath = new ArrayList<>(1);
+            List<String> ssoCookies = tryServerSideLogin(landingPath);
             if (ssoCookies != null && !ssoCookies.isEmpty()) {
                 ssoCookies.forEach(value -> response.addHeader("Set-Cookie", value));
                 outboundCookie = cookieHeaderFromSetCookies(ssoCookies);
+                // Bare / renders the login form even for a live session, so
+                // send the browser to Adminer's own post-login session URL
+                // instead of proxying / (which would look like SSO failed).
+                // Only same-origin relative targets are honored; anything
+                // else falls through to the normal proxied load below.
+                if (!landingPath.isEmpty() && !response.isCommitted()) {
+                    String landing = rewriteLocation(landingPath.get(0));
+                    // Adminer's post-login Location is commonly a bare query
+                    // string anchored at its own / — resolve it against the
+                    // proxy root here (this call site only; generic upstream
+                    // redirects keep pass-through semantics).
+                    if (landing != null && landing.startsWith("?")) {
+                        landing = PROXY_PREFIX + "/" + landing;
+                    }
+                    if (landing != null && (landing.startsWith(PROXY_PREFIX + "/")
+                            || landing.startsWith(PROXY_PREFIX + "?"))) {
+                        response.sendRedirect(landing);
+                        return;
+                    }
+                }
+            } else {
+                // SSO failure is otherwise silent — the user just
+                // sees the upstream credential form with no signal that
+                // automatic login failed. WARN once per fallback (no
+                // password, no session secret, no POST body, no SQL).
+                log.warn("Adminer single sign-on failed for {} {}; serving upstream login form (check root credentials and Adminer availability)",
+                        request.getMethod(), PROXY_PREFIX + path);
             }
         }
 
@@ -187,6 +222,10 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
                     retried = true;
                     continue;
                 }
+                // Re-login refresh failed too — the login form the
+                // user is about to see is a fallback, not a normal state.
+                log.warn("Adminer session refresh failed for {} {}; serving upstream login form",
+                        request.getMethod(), PROXY_PREFIX + path);
             }
             writeUpstreamResponse(response, upstream);
             return;
@@ -219,10 +258,22 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
     /**
      * Logs in to Adminer upstream as the Postgres superuser and returns the
      * session cookies (with path rewritten to {@code /adminer}), or
-     * {@code null} when anything goes wrong so the caller falls back to the
-     * plain proxied login page. Never throws, never logs credentials.
-     */
+    * {@code null} when anything goes wrong so the caller falls back to the
+    * plain proxied login page. Never throws, never logs credentials.
+    */
     private List<String> tryServerSideLogin() {
+        return tryServerSideLogin(null);
+    }
+
+    /**
+     * Same login, additionally capturing the post-login landing path
+     * (Adminer's own session URL, e.g. {@code ?pgsql=postgres&username=root})
+     * into {@code landingPathOut} when provided. Bare {@code /} renders
+     * Adminer's login form even for an authenticated session, so callers
+     * that just established a session must send the browser to the session
+     * URL instead of proxying {@code /}.
+     */
+    private List<String> tryServerSideLogin(List<String> landingPathOut) {
         try {
             HttpRequest loginPage = HttpRequest.newBuilder(URI.create(targetBase + "/"))
                     .timeout(Duration.ofSeconds(10))
@@ -264,6 +315,12 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
             session.keySet().retainAll(ADMINER_COOKIES);
             if (!session.containsKey("adminer_sid")) {
                 return null;
+            }
+            if (landingPathOut != null) {
+                String location = login.headers().firstValue("location").orElse(null);
+                if (location != null && !location.isBlank()) {
+                    landingPathOut.add(location);
+                }
             }
             List<String> rewritten = new ArrayList<>();
             session.forEach((name, value) ->

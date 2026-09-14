@@ -342,7 +342,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # S-14 high-concurrency pooler — dedicated PgBouncer instance for
+  # High-concurrency pooler — dedicated PgBouncer instance for
   # profile=high_concurrency. Transaction pooling, same auth model
   # (auth_user + auth_query/user_lookup), same DISCARD ALL reset, larger but
   # explicitly capped per-db sizing. INTERNAL ONLY: no host port published
