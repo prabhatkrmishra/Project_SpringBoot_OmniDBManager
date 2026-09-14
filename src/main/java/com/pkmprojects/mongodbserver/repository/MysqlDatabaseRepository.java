@@ -108,6 +108,26 @@ public class MysqlDatabaseRepository {
         }
     }
 
+    /**
+     * S-12 read-only reconciliation: managed-shape accounts
+     * ({@code host='%'}), excluding the {@code root} service account.
+     * Read-only; password hashes are never selected.
+     */
+    public java.util.List<String> listAccountNames() {
+        return jdbcTemplate.queryForList(
+                "SELECT user FROM mysql.user WHERE host = '%' AND user <> 'root' ORDER BY user",
+                String.class);
+    }
+
+    /**
+     * S-12 read-only reconciliation: deterministic grant text for one
+     * account, for operator inspection of orphan users. Read-only.
+     */
+    public java.util.List<String> listGrants(String userName) {
+        return jdbcTemplate.queryForList(
+                "SHOW GRANTS FOR " + quoteUser(userName), String.class);
+    }
+
     public void createDatabase(String dbName) {
         String sql = "CREATE DATABASE " + quoteIdentifier(dbName) + " CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci";
         jdbcTemplate.execute(sql);

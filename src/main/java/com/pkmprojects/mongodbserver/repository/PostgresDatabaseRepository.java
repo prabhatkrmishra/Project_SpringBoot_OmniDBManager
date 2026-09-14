@@ -224,6 +224,39 @@ public class PostgresDatabaseRepository {
                 String.class);
     }
 
+    /**
+     * S-12 read-only reconciliation: non-system roles with privilege flags.
+     * Excludes built-in {@code pg_*} roles and {@code postgres}; service
+     * accounts (superuser roles such as the management user and the
+     * PgBouncer auth user) are reported with their flags so the reconciler
+     * can separate them from genuine orphan candidates. No Pm Role
+     * can separate them from genuine orphan candidates. Read-only: no role
+      * membership changes, no secrets (password hashes are never selected).
+      */
+     public List<RoleDescriptor> listRoleDescriptors() {
+        return jdbcTemplate.query(
+                "SELECT rolname, rolsuper, rolcanlogin FROM pg_roles "
+                        + "WHERE rolname NOT LIKE 'pg_%' AND rolname <> 'postgres' ORDER BY rolname",
+                (rs, rowNum) -> new RoleDescriptor(rs.getString("rolname"),
+                        rs.getBoolean("rolsuper"), rs.getBoolean("rolcanlogin")));
+    }
+
+    /** Owner role name of a database, or empty when the database is absent. */
+    public java.util.Optional<String> databaseOwner(String dbName) {
+        try {
+            String owner = jdbcTemplate.queryForObject(
+                    "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = ?",
+                    String.class, dbName);
+            return java.util.Optional.ofNullable(owner);
+        } catch (Exception e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** Role descriptor for reconciliation (name + privilege flags, never secrets). */
+    public record RoleDescriptor(String name, boolean superuser, boolean canLogin) {
+    }
+
     public boolean databaseExists(String dbName) {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM pg_database WHERE datname = ?", Integer.class, dbName);
