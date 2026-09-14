@@ -1,3 +1,5 @@
+> SUPERSEDED by `deploy/s06-bridge-gate.md`: the pooled-only nginx passthrough + dual-hostname plan is replaced by the single-host TLS-bridge (`db.example.com:15432`, `options=-c omnidb.mode=`). This file stays for history only.
+
 # Cutover Gate — single-port Database Proxy, pooled-only public (:14291)
 
 Deployment: `db.missionhelmai.com:14291` → Nginx stream (plain TCP

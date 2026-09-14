@@ -146,12 +146,11 @@ services:
       OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT: ${OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT:-3}
       OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS: ${OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS:-10}
       # Pooler-TLS gate: mirrors DatabaseProxyProperties.isConfigured().
-      # Set DATABASE_PROXY_ENABLED=true ONLY with the pooled hostname set
-      # (cutover gate preconditions) — enabling it switches the pooler to
-      # client_tls_sslmode=require because the proxy uses TLS passthrough.
+      # Set DATABASE_PROXY_ENABLED=true ONLY with the single public hostname
+      # set (cutover gate preconditions) — enabling it switches the pooler to
+      # client_tls_sslmode=require because the bridge terminates client TLS.
       DATABASE_PROXY_ENABLED: ${DATABASE_PROXY_ENABLED:-false}
-      DATABASE_PROXY_DIRECT_HOST: ${DATABASE_PROXY_DIRECT_HOST:-}
-      DATABASE_PROXY_POOLED_HOST: ${DATABASE_PROXY_POOLED_HOST:-}
+      DATABASE_PROXY_HOST: ${DATABASE_PROXY_HOST:-}
     command:
       - sh
       - -c
@@ -204,16 +203,18 @@ services:
         admin_users = pgbouncer_admin
         stats_users = pgbouncer_stats
         INI
-        # S-06 pooled-route TLS. Two legs (see deploy/database-proxy.stream.conf):
-        #   leg 1 (client->proxy->pooler): TLS passthrough, terminates at PgBouncer.
-        #   leg 2 (pooler->postgres): pooler is the TLS client (server_tls_*).
-        # Gate mirrors DatabaseProxyProperties.isConfigured(): enabled + both
-        # hostnames set + different. verify-full is deliberately NOT used for the
-        # backend leg: the pooler dials internal hostname `postgres`, which the
-        # public-SAN cert does not cover — `require` gives encryption without a
-        # hostname check that could never pass. Fail CLOSED when enabled but the
-        # cert files are missing (never silently run plaintext as public-TLS).
-        if [ "$${DATABASE_PROXY_ENABLED:-false}" = "true" ] && [ -n "$${DATABASE_PROXY_POOLED_HOST:-}" ]; then
+        # S-06 bridge TLS. Two legs (see deploy/db-proxy/):
+        #   leg 1 (client->proxy): terminates at the bridge (public cert).
+        #   leg 2a (proxy->postgres): bridge is the TLS client (verify-full).
+        #   leg 2b (proxy->pooler->postgres): bridge->pooler TLS + pooler->PG TLS.
+        # Gate mirrors DatabaseProxyProperties.isConfigured(): enabled + single
+        # public host set. verify-full is deliberately NOT used for the
+        # pooler->PG leg: the pooler dials internal hostname `postgres`, which
+        # the public-SAN cert does not cover — `require` gives encryption
+        # without a hostname check that could never pass. The bridge->backend
+        # legs use verify-full against the internal CA. Fail CLOSED when
+        # enabled but the cert files are missing (never silently plaintext).
+        if [ "$${DATABASE_PROXY_ENABLED:-false}" = "true" ] && [ -n "$${DATABASE_PROXY_HOST:-}" ]; then
           mkdir -p /etc/pgbouncer/certs
           if [ -f /host-certs/pool.crt ] && [ -f /host-certs/pool.key ]; then
             cp /host-certs/pool.crt /etc/pgbouncer/certs/pool.crt
@@ -247,65 +248,45 @@ services:
         # postgres name entry. The ini stays root-owned 644 (world-readable).
         chown 70:70 /etc/pgbouncer/userlist.txt
   # Single-port Database Proxy (plain TCP passthrough to the pooler).
+  # S-06 single-host TLS-bridge proxy (deploy/db-proxy/).
   # Opt-in via the `database-proxy` compose profile (NOT started by plain
-  # `up -d`) + DATABASE_PROXY_ENABLED=true with the pooled hostname set —
+  # `up -d`) + DATABASE_PROXY_ENABLED=true with DATABASE_PROXY_HOST set —
   # both required, per the cutover gate (deploy/s06-cutover-gate.md).
-  # Pooled-only public shape: the single public port serves the pooled link
-  # (db hostname → PgBouncer); direct has NO public route (loopback on-box,
-  # SSH tunnel from outside). No tenant passwords here — TLS passthrough
-  # only; PostgreSQL stays the auth authority. SCRAM is the access boundary.
+  # One public hostname + one public port serve BOTH modes; the mode comes
+  # from StartupMessage options=-c omnidb.mode=<direct|pooled> (stripped by
+  # the bridge before PG/PgBouncer). No tenant passwords here — PostgreSQL
+  # stays the auth authority; SCRAM is the access boundary. No SQL logging.
   database-proxy:
     profiles:
       - database-proxy
-    # Pinned to the multi-arch index digest (resolves per-arch on pull).
-    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
+    build:
+      context: ./deploy/db-proxy
+      dockerfile: Dockerfile
+    image: omnidb/db-proxy:1.7.0
     container_name: omnidb-database-proxy
     restart: unless-stopped
     read_only: true
     security_opt:
       - no-new-privileges:true
-    # Dropped everything except the two nginx needs to shed root for its
-    # workers (`user nginx;` + setgid/setuid at startup — without these the
-    # workers die with "setgid failed / cannot be respawned" and the port
-    # accepts but never proxies). Filesystem stays read-only + no-new-privs.
     cap_drop:
       - ALL
-    cap_add:
-      - SETUID
-      - SETGID
     tmpfs:
       - /tmp
-      - /var/cache/nginx
-      - /var/log/nginx
-      - /run
-      - /run-rendered
     ports:
-      - "${DATABASE_PROXY_BIND:-127.0.0.1}:${DATABASE_PROXY_PORT:-14291}:14291"
+      - "${DATABASE_PROXY_BIND:-127.0.0.1}:${DATABASE_PROXY_PORT:-15432}:15432"
     environment:
-      # Pooled public hostname (informational; routing needs none — single backend). DIRECT_HOST optional —
-      # set it (different value) only for the dual-link shape.
-      DATABASE_PROXY_POOLED_HOST: ${DATABASE_PROXY_POOLED_HOST:-db.example.com}
-      DATABASE_PROXY_DIRECT_HOST: ${DATABASE_PROXY_DIRECT_HOST:-}
+      PROXY_PORT: "15432"
+      PROXY_PUBLIC_HOST: ${DATABASE_PROXY_HOST:-db.example.com}
+      PROXY_DIRECT_ADDR: "postgres:5432"
+      PROXY_POOLED_ADDR: "pgbouncer:6432"
+      PROXY_CERT_FILE: /certs/server.crt
+      PROXY_KEY_FILE: /certs/server.key
+      PROXY_BACKEND_CA: /certs/ca.crt
+      PROXY_DIRECT_SAN: "postgres"
+      PROXY_POOLED_SAN: "pgbouncer"
+      PROXY_MAX_CONNS: ${DATABASE_PROXY_MAX_CONNS:-2000}
     volumes:
-      # Template uses envsubst placeholders ONLY for the hostname
-      # (nginx-native $vars are $$-escaped); rendered at container start.
-      - ./deploy/database-proxy.stream.conf:/tpl/nginx.conf.tpl:ro
-    command:
-      - sh
-      - -c
-      - |
-        set -eu
-        # Allow-listed render: only the pooled hostname is substituted; all
-        # nginx-native $$variables pass through (a bare `envsubst` with no
-        # allow-list would blank every nginx variable and fail nginx -t).
-        # NOTE the double $$: compose interpolates this file first, so $$
-        # collapses to $ and envsubst receives the allow-list literally.
-        # (Single $ here made compose bake the HOSTNAME into the allow-list,
-        # so the template variable survived unsubstituted and every SNI
-        # fell into the blackhole — fail-closed, but nothing routed.)
-        envsubst '$$DATABASE_PROXY_POOLED_HOST' < /tpl/nginx.conf.tpl > /run-rendered/nginx.conf
-        nginx -t -c /run-rendered/nginx.conf
-        exec nginx -c /run-rendered/nginx.conf -g 'daemon off;'
+      - ./certs:/certs:ro
     depends_on:
       postgres:
         condition: service_healthy
