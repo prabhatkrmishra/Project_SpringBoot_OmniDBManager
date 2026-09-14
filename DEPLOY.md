@@ -2,6 +2,15 @@
 
 > **For deploying OmniDB Manager** on any VPS. Covers **all three engines** — MongoDB, PostgreSQL, MySQL — as Docker containers on loopback ports, with the Manager (Java 25) connecting via loopback `*_URI` and your apps dialing the **issued per-DB strings** via public DNS. Manager UI on `443` (HTTPS); Postgres via the single-host TLS bridge on one public TCP port `:15432` serving BOTH modes (`direct` → `127.0.0.1:9813`, `pooled` → `127.0.0.1:6432`) — see `deploy/database-bridge-gate.md`. Until the bridge cutover gate passes, Postgres stays on the interim two-port Nginx `stream` path (`A` direct → `127.0.0.1:9813`, `B` pooled → `127.0.0.1:6432`, TLS + IP allowlist, grey-cloud DNS). Adapt placeholders `<YOUR_DOMAIN>`, `<YOUR_VPS_IP>`, `<NON_STD_1>`/`<NON_STD_2>` (e.g. `27431`/`27432`) to your environment.
 
+> **Placeholder convention:** `db.example.com` and `:15432` are
+> *example* values used consistently through this guide — substitute your
+> own public database hostname and public bridge port everywhere they
+> appear (including `DATABASE_PROXY_HOST` / `DATABASE_PROXY_PORT`, the
+> issued-string host/port, firewall rules, and the bridge SAN check in
+> §11-step-7). The topology (one public port → bridge → internal
+> `postgres:5432` / `pgbouncer:6432` / `pgbouncer-hc:6433`) stays the same
+> whatever values you choose.
+
 ## Architecture
 
 ```

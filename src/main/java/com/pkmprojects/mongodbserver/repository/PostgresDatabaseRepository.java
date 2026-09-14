@@ -225,7 +225,7 @@ public class PostgresDatabaseRepository {
     }
 
     /**
-     * S-12 read-only reconciliation: non-system roles with privilege flags.
+     * Read-only reconciliation: non-system roles with privilege flags.
      * Excludes built-in {@code pg_*} roles and {@code postgres}; service
      * accounts (superuser roles such as the management user and the
      * PgBouncer auth user) are reported with their flags so the reconciler
@@ -427,7 +427,7 @@ public class PostgresDatabaseRepository {
         }
     }
 
-    /** Cluster-wide role probe for S-02 unique-role wiring (provision-time uniquify). */
+    /** Cluster-wide role probe for unique-role wiring (provision-time uniquify). */
     public boolean roleExists(String userName) {
         try {
             Integer n = jdbcTemplate.queryForObject(

@@ -25,7 +25,7 @@ public class PgbouncerMonitorService {
     private static final Logger log = LoggerFactory.getLogger(PgbouncerMonitorService.class);
 
     private final PgbouncerProperties properties;
-    // Same proxy-TLS switch as PgbouncerAdminService (S-06): passthrough proxy
+    // Same proxy-TLS switch as PgbouncerAdminService: passthrough proxy
     // => pooler requires client TLS => stats polling must use sslmode=require.
     private volatile com.pkmprojects.mongodbserver.config.DatabaseProxyProperties proxyProperties;
 

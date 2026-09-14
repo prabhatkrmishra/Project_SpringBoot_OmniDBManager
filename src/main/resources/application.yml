@@ -134,7 +134,7 @@ app:
     # via auth_query. Must match the pooler container's userlist (see
     # compose.postgres.yaml pgbouncer-init) or every pooled login fails.
     auth-password: ${PGBOUNCER_AUTH_PASSWORD:change-me-now}
-  # S-14 high-concurrency pooler (dedicated instance pgbouncer-hc:6433,
+  # High-concurrency pooler (dedicated instance pgbouncer-hc:6433,
   # internal only). Transaction pooling with larger but explicitly capped
   # per-db sizing. Aggregate backend budget across BOTH instances must respect
   # PostgreSQL max_connections (see OPERATOR-RECOVERY capacity notes):

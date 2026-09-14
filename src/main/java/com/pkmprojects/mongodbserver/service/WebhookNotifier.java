@@ -3,6 +3,7 @@ package com.pkmprojects.mongodbserver.service;
 import com.pkmprojects.mongodbserver.model.AuditEvent;
 import com.pkmprojects.mongodbserver.model.AuditEventRecorded;
 import com.pkmprojects.mongodbserver.model.WebhookConfig;
+import com.pkmprojects.mongodbserver.model.WebhookDeliveryAttempt;
 import com.pkmprojects.mongodbserver.store.WebhookConfigStore;
 import com.pkmprojects.mongodbserver.util.Json;
 import org.slf4j.Logger;
@@ -23,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -39,6 +41,10 @@ import java.util.concurrent.TimeUnit;
  * <p>Payloads are signed with HMAC-SHA256 ({@code X-Webhook-Signature:
  * sha256=<hex>}) when the webhook has a secret. Delivery retries transient
  * failures up to {@value #MAX_DELIVERY_ATTEMPTS} times.
+ *
+ * <p>Every settled attempt is also recorded on the bounded
+ * {@link WebhookDeliveryTrail} (no secrets, no bodies) so failures are
+ * visible on the webhooks page instead of only in server logs.</p>
  */
 @Service
 public class WebhookNotifier {
@@ -54,23 +60,31 @@ public class WebhookNotifier {
     private final WebhookConfigStore webhookConfigStore;
     private final HttpClient httpClient;
     private final ExecutorService executor;
+    private final WebhookDeliveryTrail deliveryTrail;
 
     @Autowired
-    public WebhookNotifier(WebhookConfigStore webhookConfigStore, HttpClient httpClient) {
+    public WebhookNotifier(WebhookConfigStore webhookConfigStore, HttpClient httpClient,
+                           @Autowired(required = false) WebhookDeliveryTrail deliveryTrail) {
         this(webhookConfigStore, httpClient, new ThreadPoolExecutor(
                 MAX_CONCURRENT_DELIVERIES, MAX_CONCURRENT_DELIVERIES, 0L, TimeUnit.MILLISECONDS,
                 // Bound the pending queue so a burst of events cannot grow memory
                 // without limit. Saturation rejects the submit, which onAuditEvent
                 // catches and logs - delivery is best-effort by design.
                 new ArrayBlockingQueue<>(MAX_QUEUED_DELIVERIES),
-                new ThreadPoolExecutor.AbortPolicy()));
+                new ThreadPoolExecutor.AbortPolicy()), deliveryTrail);
     }
 
     WebhookNotifier(WebhookConfigStore webhookConfigStore, HttpClient httpClient,
                     ExecutorService executor) {
+        this(webhookConfigStore, httpClient, executor, null);
+    }
+
+    WebhookNotifier(WebhookConfigStore webhookConfigStore, HttpClient httpClient,
+                    ExecutorService executor, WebhookDeliveryTrail deliveryTrail) {
         this.webhookConfigStore = webhookConfigStore;
         this.httpClient = httpClient;
         this.executor = executor;
+        this.deliveryTrail = deliveryTrail;
     }
 
     /**
@@ -112,20 +126,27 @@ public class WebhookNotifier {
             if (host != null && WebhookService.isBlockedDeliveryHost(host)) {
                 log.warn("Skipping delivery to webhook '{}': target host '{}' is blocked (private/internal or reserved)",
                         webhook.getName(), host);
+                trail(webhook, event, 1, WebhookDeliveryAttempt.DeliveryResult.FAILED, null, "blocked-host", true);
                 return;
             }
             String payload = toJson(event);
             HttpRequest request = buildRequest(webhook, payload);
             for (int attempt = 1; attempt <= MAX_DELIVERY_ATTEMPTS; attempt++) {
-                if (send(request, webhook.getName(), attempt)) {
+                if (send(request, webhook, event, attempt)) {
                     return;
                 }
                 if (attempt < MAX_DELIVERY_ATTEMPTS && !sleep(RETRY_DELAY_MILLIS)) {
+                    // Interrupted between attempts: the last send() already
+                    // recorded its RETRYING attempt; nothing more to record.
                     return;
                 }
             }
+            // Exhausted all attempts: the final send() already recorded its
+            // FAILED attempt with finalAttempt=true. No extra record here —
+            // one record per attempt, never a synthetic summary.
         } catch (Exception e) {
             log.error("Could not deliver webhook '{}' for event {}", webhook.getName(), event.getEventType(), e);
+            trail(webhook, event, 1, WebhookDeliveryAttempt.DeliveryResult.FAILED, null, "error", true);
         }
     }
 
@@ -134,27 +155,58 @@ public class WebhookNotifier {
      * or a permanent failure that retrying cannot fix), {@code false} when the
      * attempt is worth retrying.
      */
-    private boolean send(HttpRequest request, String webhookName, int attempt) {
+    private boolean send(HttpRequest request, WebhookConfig webhook, AuditEvent event, int attempt) {
+        String webhookName = webhook.getName();
+        boolean last = attempt >= MAX_DELIVERY_ATTEMPTS;
         try {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             int statusCode = response.statusCode();
             if (statusCode >= 200 && statusCode < 300) {
+                trail(webhook, event, attempt, WebhookDeliveryAttempt.DeliveryResult.DELIVERED,
+                        statusCode, null, true);
                 return true;
             }
             if (statusCode >= 400 && statusCode < 500 && statusCode != 429) {
                 log.warn("Webhook '{}' permanently rejected payload with status {}; not retrying",
                         webhookName, statusCode);
+                trail(webhook, event, attempt, WebhookDeliveryAttempt.DeliveryResult.FAILED,
+                        statusCode, "client-error", true);
                 return true;
             }
             log.warn("Webhook '{}' returned status {} (attempt {}/{})",
                     webhookName, statusCode, attempt, MAX_DELIVERY_ATTEMPTS);
+            trail(webhook, event, attempt,
+                    last ? WebhookDeliveryAttempt.DeliveryResult.FAILED
+                            : WebhookDeliveryAttempt.DeliveryResult.RETRYING,
+                    statusCode, "server-error", last);
             return false;
         } catch (IOException e) {
             log.warn("Webhook '{}' delivery failed (attempt {}/{})", webhookName, attempt, MAX_DELIVERY_ATTEMPTS, e);
+            trail(webhook, event, attempt,
+                    last ? WebhookDeliveryAttempt.DeliveryResult.FAILED
+                            : WebhookDeliveryAttempt.DeliveryResult.RETRYING,
+                    null, "io-error", last);
             return false;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            trail(webhook, event, attempt, WebhookDeliveryAttempt.DeliveryResult.FAILED,
+                    null, "interrupted", true);
             return true;
+        }
+    }
+
+    private void trail(WebhookConfig webhook, AuditEvent event, int attempt,
+                       WebhookDeliveryAttempt.DeliveryResult result, Integer httpStatus,
+                       String failureCategory, boolean finalAttempt) {
+        if (deliveryTrail == null) return;
+        try {
+            deliveryTrail.record(new WebhookDeliveryAttempt(
+                    webhook.getId() != null ? webhook.getId() : webhook.getName(),
+                    webhook.getName(), event.getEventType(), Instant.now(),
+                    attempt, result, httpStatus, failureCategory, finalAttempt));
+        } catch (RuntimeException e) {
+            // Telemetry must never break delivery.
+            log.debug("Could not record webhook delivery attempt", e);
         }
     }
 

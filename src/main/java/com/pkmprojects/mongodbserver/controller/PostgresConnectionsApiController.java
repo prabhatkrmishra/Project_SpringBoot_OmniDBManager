@@ -44,7 +44,7 @@ public class PostgresConnectionsApiController {
         PublicConnectionEndpoint direct = conns.direct().withoutSecret();
         PublicConnectionEndpoint pooledEp = conns.pooled() == null ? null : conns.pooled().withoutSecret();
         boolean pooledHealthy = pooled && provisioningService.isPooledAuthInstalled(DatabaseEngineType.POSTGRES, dbName);
-        // S-14: profile is a connection-policy selector, not a database
+        // Profile is a connection-policy selector, not a database
         // property. Same host/port/credentials for both profiles; the profile
         // token in options= selects the pooler instance. Internal hostnames
         // and ports (pgbouncer:6432, pgbouncer-hc:6433) are never exposed.

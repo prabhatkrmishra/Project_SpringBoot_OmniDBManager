@@ -60,12 +60,16 @@ public class ProvisioningService {
     private final Optional<MysqlDatabaseEngine> mysqlEngine;
     private final Optional<MysqlDatabaseRepository> mysqlRepository;
     private final EncryptionService encryptionService;
-    // Optional collaborators for pooled lifecycle (S-07/S-09). Setter-injected
+    // Optional collaborators for pooled lifecycle. Setter-injected
     // so all legacy/test constructors keep working; absent = previous behavior
     // (install without live tenant validation, no Bouncer eviction).
     private volatile ConnectionValidationService connectionValidationService;
     private volatile PgbouncerAdminService pgbouncerAdminService;
-    // Unique-role generator (S-02). Setter-injected so legacy/test constructors
+    // Provision-time tenant-login proof for MySQL/Mongo.
+    // Setter-injected so legacy/test constructors keep working; absent =
+    // previous behavior (create without live tenant validation).
+    private volatile TenantLoginValidationService tenantLoginValidationService;
+    // Unique-role generator. Setter-injected so legacy/test constructors
     // keep working; null = lazily defaulted (stateless) so provisioning is safe
     // even when the setter was never called. POSTGRES-only; Mongo/MySQL untouched.
     private volatile PostgresRoleNameGenerator postgresRoleNameGenerator;
@@ -83,6 +87,11 @@ public class ProvisioningService {
     @Autowired(required = false)
     public void setPostgresRoleNameGenerator(PostgresRoleNameGenerator postgresRoleNameGenerator) {
         this.postgresRoleNameGenerator = postgresRoleNameGenerator;
+    }
+
+    @Autowired(required = false)
+    public void setTenantLoginValidationService(TenantLoginValidationService tenantLoginValidationService) {
+        this.tenantLoginValidationService = tenantLoginValidationService;
     }
 
     @Autowired
@@ -218,7 +227,7 @@ public class ProvisioningService {
     }
 
     /**
-     * S-07 P1: PostgreSQL roles are cluster-wide but the lifecycle lock is
+     * PostgreSQL roles are cluster-wide but the lifecycle lock is
      * per database name, so two provisions for <i>different</i> databases
      * requesting the <i>same</i> role never mutually exclude. The
      * resolve-then-create sequence must additionally serialize per requested
@@ -248,13 +257,13 @@ public class ProvisioningService {
             nameValidator.validateUserName(userName);
         }
         nameValidator.validatePassword(requestedPassword);
-        // S-07 P2: reject PG-unsafe passwords with HTTP 400 here, before the
+        // Reject PG-unsafe passwords with HTTP 400 here, before the
         // lock or any lifecycle step (the repository would throw a raw 500).
         // Blank = generated password (always safe charset).
         if (engineType == DatabaseEngineType.POSTGRES && !requestedPassword.isBlank()) {
             nameValidator.validatePostgresPassword(requestedPassword);
         }
-        // S-08: identical server-side literal restriction for MySQL.
+        // Identical server-side literal restriction for MySQL.
         if (engineType == DatabaseEngineType.MYSQL && !requestedPassword.isBlank()) {
             nameValidator.validateMysqlPassword(requestedPassword);
         }
@@ -270,11 +279,11 @@ public class ProvisioningService {
                     : requestedPassword;
 
             DatabaseEngine engine = engineFor(engineType);
-            // S-02: PG roles are cluster-wide — a second database requesting an
+            // PG roles are cluster-wide — a second database requesting an
             // already-taken role must NOT reuse/ALTER it (would rotate the other
             // tenant's password). Keep the requested name when free; otherwise
             // mint omni_<db>_<rand6> until free (bounded, fail-closed).
-            // S-07 P1: resolve + create serialize per requested role name (see
+            // Resolve + create serialize per requested role name (see
             // roleLockKey) so concurrent same-name provisions cannot interleave
             // probe and create across different database locks.
             final String effectiveUser;
@@ -282,7 +291,7 @@ public class ProvisioningService {
             boolean mysqlUserCreated = false;
             if (engineType == DatabaseEngineType.POSTGRES) {
                 final String requestedUser = userName;
-                // S-07: kept inside the same failure contract as the rest of
+                // Kept inside the same failure contract as the rest of
                 // provisioning (a role-creation failure is a plain
                 // ProvisioningException with nothing yet to clean up).
                 try {
@@ -301,7 +310,7 @@ public class ProvisioningService {
                 }
                 pgUserCreated = true;
             } else if (engineType == DatabaseEngineType.MYSQL) {
-                // S-08 P1: MySQL accounts are server-global like PG roles —
+                // MySQL accounts are server-global like PG roles —
                 // same resolve-then-create serialization, same failure
                 // contract (see resolveUniqueMysqlUser).
                 final String requestedUser = userName;
@@ -328,7 +337,7 @@ public class ProvisioningService {
                     engine.createDatabase(dbName, effectiveUser);
                     pgDbCreated = true;
                     engine.grantPrivileges(dbName, effectiveUser);
-                    // S-07 P2: previously only pooled provisions were proven
+                    // Previously only pooled provisions were proven
                     // end-to-end; a direct-only provision never validated the
                     // tenant login it just created. Mirror the pooled
                     // fail-closed behavior (validator-wired only; unit tests
@@ -358,11 +367,11 @@ public class ProvisioningService {
                             }
                             if (result.path() != ConnectionValidationService.ValidationPath.PUBLIC) {
                                 // LOOPBACK proves pooler + SCRAM but not DNS/NSG/proxy —
-                                // honest confidence level, full proof only via PUBLIC after S-06.
+                                // honest confidence level, full proof only via PUBLIC once the bridge cutover lands.
                                 log.warn("Provisioned pooled database '{}' — pooled health proven via {} path only, public proxy path unproven",
                                         dbName, result.path());
                             }
-                            // S-14 choice A: standard validation is the gate;
+                            // Standard validation is the gate;
                             // HC route validation is also performed when the HC
                             // capability is enabled. HC failure warns only —
                             // it never blocks standard provisioning (GATE G/H
@@ -392,9 +401,26 @@ public class ProvisioningService {
                     engine.createDatabase(dbName, effectiveUser);
                     mysqlDbCreated = true;
                     engine.grantPrivileges(dbName, effectiveUser);
+                    // End-to-end tenant login proof (validator-wired
+                    // only; unit tests and MySQL-disabled installs keep
+                    // previous behavior). Failure fails provisioning — the
+                    // catch below drops the half-created database + user.
+                    if (tenantLoginValidationService != null
+                            && !tenantLoginValidationService.validateMysql(dbName, effectiveUser, password)) {
+                        throw new ProvisioningException(
+                                "MySQL validation failed for '" + dbName + "' — tenant logins cannot authenticate");
+                    }
                 } else {
                     engine.createUser(dbName, userName, password);
                     engine.createDatabase(dbName, userName);
+                    // Same tenant-login proof for MongoDB
+                    // (validator-wired only). Failure fails provisioning —
+                    // the catch below drops the half-created user + database.
+                    if (tenantLoginValidationService != null
+                            && !tenantLoginValidationService.validateMongo(dbName, userName, password)) {
+                        throw new ProvisioningException(
+                                "MongoDB validation failed for '" + dbName + "' — tenant logins cannot authenticate");
+                    }
                 }
             } catch (MongoException e) {
                 if (e instanceof MongoCommandException ce && ce.getErrorCode() == MONGO_CODE_USER_ALREADY_EXISTS) {
@@ -441,7 +467,7 @@ public class ProvisioningService {
             if (engineType == DatabaseEngineType.POSTGRES) {
                 metadata.setPooled(form.isPooled());
             }
-            // S-07 P1: the save used to sit outside any cleanup — a store
+            // The save used to sit outside any cleanup — a store
             // failure after DB/role/grants/validation left live PG resources
             // with no metadata (orphan; retry then reports "already exists"
             // with nothing to manage). Fail closed with best-effort cleanup.
@@ -469,7 +495,7 @@ public class ProvisioningService {
     }
 
     /**
-     * S-02 provision-time uniquify. Returns the requested name when no live
+     * Provision-time role uniquify. Returns the requested name when no live
      * role collides; otherwise a generated {@code omni_<db>_<rand6>} name
      * verified free via {@code pg_roles}. Probe failures fail OPEN toward the
      * requested name (provisioning itself remains authoritative — CREATE ROLE
@@ -483,7 +509,7 @@ public class ProvisioningService {
         try {
             taken = repo.roleExists(requestedUser);
         } catch (Exception e) {
-            log.warn("S-02 role probe failed for '{}' — provisioning with requested name", requestedUser, e);
+            log.warn("role probe failed for '{}' — provisioning with requested name", requestedUser, e);
             return requestedUser;
         }
         if (!taken) return requestedUser;
@@ -495,7 +521,7 @@ public class ProvisioningService {
             try {
                 candidateTaken = repo.roleExists(candidate);
             } catch (Exception e) {
-                log.warn("S-02 role probe failed for candidate on '{}' — failing closed", dbName, e);
+                log.warn("role probe failed for candidate on '{}' — failing closed", dbName, e);
                 throw new ProvisioningException("Could not verify a unique role for database '" + dbName + "'");
             }
             if (!candidateTaken) {
@@ -508,7 +534,7 @@ public class ProvisioningService {
     }
 
     /**
-     * S-08 P1: MySQL counterpart of {@link #resolveUniquePostgresRole}.
+     * MySQL counterpart of {@link #resolveUniquePostgresRole}.
      * MySQL accounts ({@code user@'%'}) are server-global, so a name
      * requested for a second database must not reuse the first tenant's
      * account (shared password plus accumulating cross-database grants).
@@ -521,7 +547,7 @@ public class ProvisioningService {
         try {
             taken = repo.userExists(requestedUser);
         } catch (Exception e) {
-            log.warn("S-08 user probe failed for '{}' — provisioning with requested name", requestedUser, e);
+            log.warn("user probe failed for '{}' — provisioning with requested name", requestedUser, e);
             return requestedUser;
         }
         if (!taken) return requestedUser;
@@ -533,7 +559,7 @@ public class ProvisioningService {
             try {
                 candidateTaken = repo.userExists(candidate);
             } catch (Exception e) {
-                log.warn("S-08 user probe failed for candidate on '{}' — failing closed", dbName, e);
+                log.warn("user probe failed for candidate on '{}' — failing closed", dbName, e);
                 throw new ProvisioningException("Could not verify a unique user for database '" + dbName + "'");
             }
             if (!candidateTaken) {
@@ -560,11 +586,11 @@ public class ProvisioningService {
         else nameValidator.validateDatabaseName(dbName);
         String requestedPassword = form.password() == null ? "" : form.password().trim();
         nameValidator.validatePassword(requestedPassword);
-        // S-07 P2: same early-400 rule as provision (see above).
+        // Same early-400 rule as provision (see above).
         if (engineType == DatabaseEngineType.POSTGRES && !requestedPassword.isBlank()) {
             nameValidator.validatePostgresPassword(requestedPassword);
         }
-        // S-08: identical server-side literal restriction for MySQL.
+        // Identical server-side literal restriction for MySQL.
         if (engineType == DatabaseEngineType.MYSQL && !requestedPassword.isBlank()) {
             nameValidator.validateMysqlPassword(requestedPassword);
         }
@@ -578,13 +604,13 @@ public class ProvisioningService {
                     : requestedPassword;
 
             try {
-                // S-07 P1: serialize with concurrent provisions for the same
+                // Serialize with concurrent provisions for the same
                 // role name (db → role lock order, matching provision).
                 if (engineType == DatabaseEngineType.POSTGRES) {
                     String u = metadata.getUserName();
                     databaseLocks.withLock(roleLockKey(engineType, u), () -> engineFor(engineType).updateUserPassword(dbName, u, password));
                 } else if (engineType == DatabaseEngineType.MYSQL) {
-                    // S-08 P1: same serialization for server-global MySQL accounts.
+                    // Same serialization for server-global MySQL accounts.
                     String u = metadata.getUserName();
                     databaseLocks.withLock(roleLockKey(engineType, u), () -> engineFor(engineType).updateUserPassword(dbName, u, password));
                 } else {
@@ -609,7 +635,7 @@ public class ProvisioningService {
             // RECONNECT closes them (best-effort — rotation already committed,
             // so validate-and-warn instead of throwing on failure).
             if (engineType == DatabaseEngineType.POSTGRES && metadata.isPooled()) {
-                // S-14: credentials are profile-independent — evict on ALL
+                // Credentials are profile-independent — evict on ALL
                 // pooled instances (standard + HC). No profile-specific
                 // credential behavior.
                 if (pgbouncerAdminService != null && !pgbouncerAdminService.reconnectAll(dbName)) {
@@ -694,7 +720,7 @@ public class ProvisioningService {
                 // must never turn a direct-path delete into a failed delete
                 // (§57). RESUME is unconditional in finally (also on partial
                 // failure) so held clients fail cleanly instead of hanging.
-                // S-14: PAUSE ALL relevant poolers for the DB (standard + HC).
+                // PAUSE ALL relevant poolers for the DB (standard + HC).
                 boolean pooledPaused = engineType == DatabaseEngineType.POSTGRES
                         && pgbouncerAdminService != null
                         && metadata.map(ManagedDatabase::isPooled).orElse(false)
@@ -726,7 +752,7 @@ public class ProvisioningService {
                     });
                     metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
                 } finally {
-                    // S-14: RESUME ALL relevant poolers (standard + HC), even
+                    // RESUME ALL relevant poolers (standard + HC), even
                     // on partial failure. Failure of one pooler never prevents
                     // attempting the other (handled inside resumeAll).
                     if (pooledPaused) pgbouncerAdminService.resumeAll(dbName);

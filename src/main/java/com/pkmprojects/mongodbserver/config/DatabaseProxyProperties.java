@@ -3,7 +3,7 @@ package com.pkmprojects.mongodbserver.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Single-host TLS-bridge Database Proxy (S-06 final).
+ * Single-host TLS-bridge Database Proxy.
  *
  * <p>One public hostname + one public port serve BOTH modes:
  * {@code db.example.com:15432} with {@code options=-c omnidb.mode=direct}

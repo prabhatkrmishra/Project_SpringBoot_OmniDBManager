@@ -27,7 +27,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
     private final String sslmode;
     private final com.pkmprojects.mongodbserver.config.PgbouncerProperties pgbouncerProperties;
 
-    // Single-port proxy (S-06). Setter-injected optional so all existing
+    // Single-port proxy. Setter-injected optional so all existing
     // constructors/tests keep working; null = legacy two-port behavior.
     // When configured, pooled strings carry only proxy hostname + public port; direct stays internal in pooled-only shape.
     private volatile com.pkmprojects.mongodbserver.config.DatabaseProxyProperties proxyProperties;
@@ -171,13 +171,13 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         return postgresDatabaseRepository.isAuthLookupInstalled(dbName);
     }
 
-    /** True only when the single-port proxy is explicitly configured (S-06 gate). */
+    /** True only when the single-port proxy is explicitly configured. */
     boolean isProxyMode() {
         return proxyProperties != null && proxyProperties.isConfigured();
     }
 
     /**
-     * S-07 P2: public single-host endpoint for views
+     * Public single-host endpoint for views
      * ({@code db.example.com:15432} both modes). Empty when the proxy is off
      * (legacy two-port display still applies).
      */
@@ -250,7 +250,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         String modeSuffix = "";
         if (isProxyMode()) {
             host = proxyProperties.normalizedHost() + ":" + proxyProperties.port();
-            // S-06 closure: PLUS channel binding cannot survive the TLS
+            // PLUS channel binding cannot survive the TLS
             // bridge (client cert != backend-leg cert), so bridged strings
             // pin channel_binding=disable for plain SCRAM-SHA-256.
             modeSuffix = "&channel_binding=" + PostgresConnectionStringBuilder.CHANNEL_BINDING_DISABLE
@@ -276,7 +276,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
     }
 
     /**
-     * S-14: pooled connection string for an explicit profile. {@code null}
+     * Pooled connection string for an explicit profile. {@code null}
      * profile means bare pooled (backwards-compatible {@code standard}).
      * Non-proxy (legacy two-port) strings never carry a profile token —
      * profile routing exists only on the single-host bridge.

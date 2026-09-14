@@ -17,7 +17,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** S-14: startup RESUME iterates standard then HC per pooled DB, never throws. */
+/** Startup RESUME iterates standard then HC per pooled DB, never throws. */
 @ExtendWith(MockitoExtension.class)
 class PooledResumeHcTest {
     @Mock ManagedDatabaseStore store;

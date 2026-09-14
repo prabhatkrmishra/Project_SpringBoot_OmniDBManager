@@ -22,7 +22,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * S-12 P3-1: read-only reconciliation. Every test also guards the critical
+ * Read-only reconciliation. Every test also guards the critical
  * safety rule — no DROP/CREATE/ALTER/metadata-write/PgBouncer call may ever
  * happen here (verified explicitly on the happy path).
  */

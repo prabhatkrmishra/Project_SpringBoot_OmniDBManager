@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * S-12 P3-1: operator diagnostics. ADMIN-only JSON surface for the
+ * Operator diagnostics. ADMIN-only JSON surface for the
  * read-only resource reconciliation (metadata vs live engine catalogs).
  * Structured output, no secrets: names, statuses, and non-sensitive
  * details only. Never mutates anything — see

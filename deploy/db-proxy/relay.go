@@ -18,7 +18,7 @@ func relay(client, backend net.Conn, mode string) {
 	defer backend.Close()
 	// Keys learned on THIS connection; removed when the relay exits so the
 	// shared cancel map cannot grow without bound and stale entries can
-	// never outlive their owning session (S-06.1 P1 fix: cancels.del was
+	// never outlive their owning session (cancels.del was
 	// previously never called).
 	learned := make(map[[2]uint32]struct{})
 	defer func() {
@@ -41,7 +41,7 @@ func relay(client, backend net.Conn, mode string) {
 		// authentication phase, always before ReadyForQuery ('Z', len 5).
 		// Stop learning at the first ReadyForQuery so result-row bytes
 		// later in the session can never plant bogus cancel mappings
-		// (S-06.1 P2 hardening). Fail-closed bias: if a 'Z' pattern ever
+		// Fail-closed bias: if a 'Z' pattern ever
 		// false-positives early, the only effect is that cancel tracking
 		// for this connection stops (cancel fails closed), never a
 		// cross-backend misroute.
@@ -83,7 +83,7 @@ func relay(client, backend net.Conn, mode string) {
 }
 
 // writeFull loops until the whole frame is flushed; a single Write call is
-// not contractually obliged to accept everything (S-06.1 P3 fix).
+// not contractually obliged to accept everything.
 func writeFull(c net.Conn, b []byte) error {
 	for len(b) > 0 {
 		n, err := c.Write(b)

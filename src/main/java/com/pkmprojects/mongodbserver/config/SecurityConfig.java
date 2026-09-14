@@ -41,7 +41,7 @@ public class SecurityConfig {
                         .requestMatchers("/login", "/css/**", "/js/**", "/webjars/**", "/error", "/favicon.ico").permitAll()
                         // Actuator is manager-only: nginx already returns 404 on the public name,
                         // but the app itself must also never answer anonymously (direct IP hit).
-                        // S-12 P3-3: orchestrator liveness/readiness probes stay
+                        // Orchestrator liveness/readiness probes stay
                         // minimal (UP/DOWN only, details never shown) and need no
                         // credentials. Everything else under /actuator stays ADMIN.
                         .requestMatchers("/actuator/health/liveness", "/actuator/health/readiness").permitAll()

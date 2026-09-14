@@ -55,6 +55,31 @@ class HealthControllerTest {
     }
 
     @Test
+    void healthPageRendersMongoDisabledState() throws Exception {
+        // Disabled Mongo must show the disabled badge + enable
+        // hint (MONGO_ENABLED=true), not the bare "check credentials" text.
+        when(healthService.getHealth()).thenReturn(new ServerHealth(false, null, null, 0, null, null, false, false, null, false, false, null, false, false));
+
+        mockMvc.perform(get("/health").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(view().name("health"))
+                .andExpect(content().string(containsString("disabled")))
+                .andExpect(content().string(containsString("MONGO_ENABLED")));
+    }
+
+    @Test
+    void healthPageRendersMongoUnreachableStateWhenEnabled() throws Exception {
+        // Enabled-but-unreachable Mongo keeps the unreachable
+        // wording and must NOT show the disabled badge path.
+        when(healthService.getHealth()).thenReturn(new ServerHealth(false, null, null, 0, null, null, false, false, null, true, false, null, true, true));
+
+        mockMvc.perform(get("/health").with(user("admin").roles("ADMIN")))
+                .andExpect(status().isOk())
+                .andExpect(view().name("health"))
+                .andExpect(content().string(containsString("could not be reached")));
+    }
+
+    @Test
     void healthPageRendersForNonAdminReader() throws Exception {
         when(healthService.getHealth()).thenReturn(new ServerHealth(true, "7.0.39", 60L, 1, 1024L, 1));
 

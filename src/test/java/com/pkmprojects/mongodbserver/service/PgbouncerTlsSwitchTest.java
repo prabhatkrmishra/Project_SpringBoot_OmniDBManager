@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 /**
- * S-06 pooler-TLS switch: with the TLS-bridge proxy configured, even
+ * Pooler-TLS switch: with the TLS-bridge proxy configured, even
  * loopback pooler connections (admin console, stats polling) must use
  * {@code sslmode=require} because PgBouncer itself terminates client TLS
  * ({@code client_tls_sslmode=require}). Otherwise the pooler is plaintext

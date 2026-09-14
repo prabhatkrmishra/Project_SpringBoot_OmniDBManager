@@ -19,7 +19,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * S-12 P3-1: read-only resource reconciliation for operators.
+ * Read-only resource reconciliation for operators.
  *
  * <p>Compares Mongo managed-database metadata against live engine catalogs
  * and reports mismatches (missing/orphan/inconsistent resources) as

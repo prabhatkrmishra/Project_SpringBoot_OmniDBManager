@@ -10,7 +10,7 @@ import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Component;
 
 /**
- * S-08 P1: startup guard for tenant-password encryption at rest. Without
+ * Startup guard for tenant-password encryption at rest. Without
  * {@code APP_ENCRYPTION_KEY}, {@code storedPassword} persists in plaintext
  * (dev/test convenience) — previously with no warning at all, so a real
  * deployment could silently run unencrypted. Mirrors

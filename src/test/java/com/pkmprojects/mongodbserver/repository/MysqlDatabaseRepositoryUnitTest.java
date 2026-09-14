@@ -111,7 +111,7 @@ class MysqlDatabaseRepositoryUnitTest {
         org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("ALTER USER")));
     }
 
-    // ── userExists (S-08 P1 provision-time uniquify) ────────────────────
+    // ── userExists (provision-time uniquify) ────────────────────────────
 
     @Test
     void userExistsReturnsTrueWhenAccountPresent() {

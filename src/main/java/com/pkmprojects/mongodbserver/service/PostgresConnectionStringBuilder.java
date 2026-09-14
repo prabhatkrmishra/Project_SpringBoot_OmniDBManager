@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
  * PostgreSQL/PgBouncer, which must not see an unknown {@code omnidb.mode}.
  * {@code application_name=omnidb} stays non-routing in all shapes.
  *
- * <p>TLS-bridge channel binding (S-06 closure): the bridge terminates
+ * <p>TLS-bridge channel binding: the bridge terminates
  * client TLS, so {@code SCRAM-SHA-256-PLUS} bound to the client-facing
  * certificate can never verify against the bridge→backend leg. DIRECT
  * PostgreSQL advertises {@code PLUS} and clients with
@@ -34,7 +34,7 @@ public class PostgresConnectionStringBuilder {
     public static final String MODE_OPTION_DIRECT = "-c omnidb.mode=direct";
     public static final String MODE_OPTION_POOLED = "-c omnidb.mode=pooled";
     /**
-     * S-14 profile routing directives (stripped by the bridge alongside the
+     * Profile routing directives (stripped by the bridge alongside the
      * mode token; never reach PG/PgBouncer). Bare pooled strings carry only
      * {@link #MODE_OPTION_POOLED} and mean {@code standard}.
      */
@@ -87,7 +87,7 @@ public class PostgresConnectionStringBuilder {
     }
 
     /**
-     * S-14: routing directive for an explicit pooled profile. Direct profiles
+     * Routing directive for an explicit pooled profile. Direct profiles
      * are rejected (profile is pooled-only); unknown ids are rejected (no
      * fallback, no normalization, exact case-sensitive match).
      */
@@ -99,7 +99,7 @@ public class PostgresConnectionStringBuilder {
         };
     }
 
-    /** S-14: bridged URI carrying an explicit pooled profile. */
+    /** Bridged URI carrying an explicit pooled profile. */
     public String toUriBridged(ConnectionEndpoint ep, com.pkmprojects.mongodbserver.model.PoolProfile profile) {
         String directive = ep.mode() == com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED
                 ? modeOptionForProfile(profile) : MODE_OPTION_DIRECT;
@@ -107,7 +107,7 @@ public class PostgresConnectionStringBuilder {
                 + "&options=" + encode(directive);
     }
 
-    /** S-14: bridged JDBC carrying an explicit pooled profile. */
+    /** Bridged JDBC carrying an explicit pooled profile. */
     public String toJdbcBridged(ConnectionEndpoint ep, com.pkmprojects.mongodbserver.model.PoolProfile profile) {
         String directive = ep.mode() == com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED
                 ? modeOptionForProfile(profile) : MODE_OPTION_DIRECT;

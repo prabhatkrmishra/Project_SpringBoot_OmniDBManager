@@ -28,7 +28,7 @@ public class PostgresRoleNameGenerator {
     }
 
     /**
-     * S-08 P1: same scheme with a total-length cap (MySQL usernames are
+     * Same scheme with a total-length cap (MySQL usernames are
      * limited to 32 chars: {@code omni_} + base + {@code _} + 6-char suffix
      * leaves 20 for the base).
      */

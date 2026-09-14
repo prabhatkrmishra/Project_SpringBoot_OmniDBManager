@@ -32,7 +32,7 @@ public class PgbouncerAdminService {
     private final PgbouncerProperties properties;
     private volatile com.pkmprojects.mongodbserver.config.PgbouncerHcProperties hcProperties;
 
-    // Single-port proxy TLS (S-06): when the proxy is configured, Nginx uses TLS
+    // Single-port proxy TLS: when the proxy is configured, Nginx uses TLS
     // passthrough, so client TLS terminates at PgBouncer (client_tls_sslmode=require
     // in compose) and even loopback admin connections must use sslmode=require.
     // Otherwise the pooler is plaintext (two-port TLS-termination model) and admin
@@ -54,7 +54,7 @@ public class PgbouncerAdminService {
         this.hcProperties = hcProperties;
     }
 
-    /** True when the high-concurrency pooler is configured (S-14). */
+    /** True when the high-concurrency pooler is configured. */
     public boolean isHcEnabled() {
         return hcProperties != null;
     }
@@ -81,7 +81,7 @@ public class PgbouncerAdminService {
     }
 
     /**
-     * S-14 HC counterparts. No-op {@code false} when the HC pooler is not
+     * High-concurrency counterparts. No-op {@code false} when the HC pooler is not
      * configured (unit tests, HC-disabled installs) — callers must still
      * attempt the standard instance first and treat HC absence as healthy
      * absence, not failure.
@@ -102,7 +102,7 @@ public class PgbouncerAdminService {
     }
 
     /**
-     * S-14 lifecycle across both poolers. Failure of one instance never
+     * Lifecycle across both poolers. Failure of one instance never
      * prevents attempting the other; returns {@code true} only when every
      * configured instance succeeded. Deterministic order: standard, then HC.
      */

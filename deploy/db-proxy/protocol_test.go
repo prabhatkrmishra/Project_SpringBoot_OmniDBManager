@@ -127,7 +127,7 @@ func TestCertStoreKeepsLastGoodOnBadReload(t *testing.T) {
 	certFile := filepath.Join(dir, "server.crt")
 	keyFile := filepath.Join(dir, "server.key")
 	// Use the live GOOD test certs as the initial pair (present on the
-	// S-06 live rig; skip — do not fake — when absent).
+	// Live rig; skip — do not fake — when absent).
 	goodCrt, err := os.ReadFile("/tmp/s06live2/certs/public.crt")
 	if err != nil {
 		t.Skip("no live GOOD certs; refusing to fake rotation")
@@ -166,7 +166,7 @@ func TestCertStoreKeepsLastGoodOnBadReload(t *testing.T) {
 	}
 }
 
-// S-14: profile contract — valid mode/profile combinations.
+// Profile contract — valid mode/profile combinations.
 func TestExtractRouteValid(t *testing.T) {
 	cases := []struct {
 		in      string

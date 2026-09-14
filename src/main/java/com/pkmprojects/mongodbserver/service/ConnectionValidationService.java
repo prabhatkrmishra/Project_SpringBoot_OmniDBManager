@@ -10,8 +10,8 @@ import org.springframework.stereotype.Service;
  * {@code SELECT 1}. Exercises the real PgBouncer route for pooled (not just
  * {@code SHOW POOLS}) and the direct route for migrations. Until the
  * single-port proxy lands, pooled validation uses the internal-equivalent
- * pooled address; the same method targets the single-host bridge once
- * S-06 without caller changes.
+ * pooled address; the same method targets the single-host bridge
+ * without caller changes once the bridge cutover lands.
  */
 @Service
 @ConditionalOnProperty(name = "app.postgres.enabled", havingValue = "true", matchIfMissing = false)
@@ -54,7 +54,7 @@ public class ConnectionValidationService {
      * {@code LOOPBACK} proves only tenant → pooler → PG with tenant SCRAM
      * (same pooler, same {@code auth_query}) — necessary but <b>not
      * equivalent</b> to the production path. Callers must log the path and
-     * only the {@code PUBLIC} tier proves the complete contract after S-06.
+     * only the {@code PUBLIC} tier proves the complete contract once the bridge cutover lands.
      */
     public PooledValidation validatePooledDetailed(String dbName, String user, String password) {
         var conns = engine.connectionEndpoints(dbName, user, password, true);
@@ -80,8 +80,8 @@ public class ConnectionValidationService {
     }
 
     /**
-     * S-14 HC validation (choice A: standard mandatory + HC route also
-     * performed when HC capability is enabled). PUBLIC exercises the full
+     * High-concurrency validation (standard is the mandatory gate; the HC route is also
+     * exercised when the HC pooler is enabled). PUBLIC exercises the full
      * bridge path with {@code profile=high_concurrency}; LOOPBACK proves the
      * HC pooler + auth_query + tenant SCRAM via {@code 127.0.0.1:<hc-port>}
      * bypassing the bridge. HC failure never fails provisioning — it is
