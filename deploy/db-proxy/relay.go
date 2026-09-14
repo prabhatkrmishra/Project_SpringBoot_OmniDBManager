@@ -9,8 +9,10 @@ import (
 
 // relay becomes a blind bidirectional byte pump after routing. It also
 // watches backend->client traffic for BackendKeyData (B + pid + secret) so a
-// later CancelRequest can be pinned to the owning backend. No passwords,
-// SCRAM, SQL, or results are parsed or logged.
+// later CancelRequest can be pinned to the owning backend instance
+// ("direct" | "pooled" = standard | "pooled-hc" = high-concurrency).
+// Cancel is never broadcast: the stored label selects exactly one backend.
+// No passwords, SCRAM, SQL, or results are parsed or logged.
 func relay(client, backend net.Conn, mode string) {
 	defer client.Close()
 	defer backend.Close()

@@ -133,15 +133,15 @@ class ProvisioningPooledLifecycleTest {
     void deletePooledPausesAndResumesAroundDrop() {
         when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp"))
                 .thenReturn(Optional.of(pooledMetadata()));
-        when(admin.pauseDb("myapp")).thenReturn(true);
+        when(admin.pauseAll("myapp")).thenReturn(true);
         pooled.setPgbouncerAdminService(admin);
 
         pooled.delete(DatabaseEngineType.POSTGRES, "myapp");
 
         var order = inOrder(admin, postgresRepo);
-        order.verify(admin).pauseDb("myapp");
+        order.verify(admin).pauseAll("myapp");
         order.verify(postgresRepo).dropDatabase("myapp");
-        order.verify(admin).resumeDb("myapp");
+        order.verify(admin).resumeAll("myapp");
     }
 
     @Test
@@ -149,7 +149,7 @@ class ProvisioningPooledLifecycleTest {
         when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp"))
                 .thenReturn(Optional.of(pooledMetadata()));
         doThrow(new RuntimeException("drop failed")).when(postgresRepo).dropDatabase("myapp");
-        when(admin.pauseDb("myapp")).thenReturn(true);
+        when(admin.pauseAll("myapp")).thenReturn(true);
         pooled.setPgbouncerAdminService(admin);
 
         assertThatThrownBy(() -> pooled.delete(DatabaseEngineType.POSTGRES, "myapp"))
@@ -158,8 +158,8 @@ class ProvisioningPooledLifecycleTest {
         verify(postgresRepo, never()).dropUser(any(), any());
         verify(managedRepo, never()).deleteByEngineTypeAndDbName(any(), any());
         // RESUME unconditional even on the failure arm — held clients fail clean, never hang.
-        verify(admin).pauseDb("myapp");
-        verify(admin).resumeDb("myapp");
+        verify(admin).pauseAll("myapp");
+        verify(admin).resumeAll("myapp");
     }
 
     @Test
@@ -174,6 +174,8 @@ class ProvisioningPooledLifecycleTest {
 
         verify(admin, never()).pauseDb(any());
         verify(admin, never()).resumeDb(any());
+        verify(admin, never()).pauseAll(any());
+        verify(admin, never()).resumeAll(any());
         verify(postgresRepo).dropDatabase("myapp");
     }
 
@@ -181,7 +183,7 @@ class ProvisioningPooledLifecycleTest {
     void resetPasswordPooledReconnects() {
         when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp"))
                 .thenReturn(Optional.of(pooledMetadata()));
-        when(admin.reconnectDb("myapp")).thenReturn(true);
+        when(admin.reconnectAll("myapp")).thenReturn(true);
         when(validator.validatePooledDetailed(eq("myapp"), eq("myapp_user"), any()))
                 .thenReturn(new ConnectionValidationService.PooledValidation(true,
                         ConnectionValidationService.ValidationPath.PUBLIC));
@@ -191,7 +193,7 @@ class ProvisioningPooledLifecycleTest {
         pooled.resetPassword(DatabaseEngineType.POSTGRES, "myapp", new ResetPasswordForm("newpass123"));
 
         verify(postgresRepo).updateUserPassword("myapp", "myapp_user", "newpass123");
-        verify(admin).reconnectDb("myapp");
+        verify(admin).reconnectAll("myapp");
     }
 
     @Test
@@ -205,5 +207,6 @@ class ProvisioningPooledLifecycleTest {
         pooled.resetPassword(DatabaseEngineType.POSTGRES, "myapp", new ResetPasswordForm("newpass123"));
 
         verify(admin, never()).reconnectDb(any());
+        verify(admin, never()).reconnectAll(any());
     }
 }

@@ -272,14 +272,26 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
      * Legacy two-port shape (DNS + PGBOUNCER_ISSUED_PORT) only when proxy is off.
      */
     public String buildPooledConnectionString(String userName, String password, String dbName) {
+        return buildPooledConnectionString(userName, password, dbName, null);
+    }
+
+    /**
+     * S-14: pooled connection string for an explicit profile. {@code null}
+     * profile means bare pooled (backwards-compatible {@code standard}).
+     * Non-proxy (legacy two-port) strings never carry a profile token —
+     * profile routing exists only on the single-host bridge.
+     */
+    public String buildPooledConnectionString(String userName, String password, String dbName,
+            com.pkmprojects.mongodbserver.model.PoolProfile profile) {
         String host = isProxyMode()
                 ? proxyProperties.normalizedHost() + ":" + proxyProperties.port()
                 : resolvePooledHost();
-        String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
+        String directive = PostgresConnectionStringBuilder.modeOptionForProfile(profile);
         String modeSuffix = isProxyMode()
                 ? "&channel_binding=" + PostgresConnectionStringBuilder.CHANNEL_BINDING_DISABLE
-                        + "&options=" + uriEncode(PostgresConnectionStringBuilder.MODE_OPTION_POOLED)
+                        + "&options=" + uriEncode(directive)
                 : "";
+        String base = "postgresql://" + uriEncode(userName) + ":" + uriEncode(password) + "@" + host + "/" + uriEncode(dbName);
         return base + "?sslmode=" + sslmode + "&application_name=omnidb" + modeSuffix;
     }
 

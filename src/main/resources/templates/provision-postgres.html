@@ -68,6 +68,7 @@
                                         <strong th:if="${proxyEndpoint == null}">Two links:</strong>
                                         <strong th:if="${proxyEndpoint != null}">One endpoint, two modes:</strong>
                                         <code>A</code> direct = DDL/migrations/break-glass (tighter IP allowlist). <code>B</code> pooled = runtime (transaction pooling). Both need TLS (<code>sslmode=require</code>) + per-DB SCRAM + IP allowlist. Non-standard port is camouflage only.
+                                        <span th:if="${proxyEndpoint != null}"><br/>Pooled offers two connection profiles (same credentials, same endpoint): <code>Standard</code> (default) and <code>High Concurrency</code> (more pool headroom, transaction pooling — not session affinity). Select via <code>options=-c omnidb.mode=pooled -c omnidb.pool_profile=&lt;standard|high_concurrency&gt;</code>; see <code>/api/postgres/databases/{db}/connections</code>.</span>
                                     </div>
                                 </div>
                                 <div class="form-actions">

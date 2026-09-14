@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 public class PgbouncerAdminService {
     private static final Logger log = LoggerFactory.getLogger(PgbouncerAdminService.class);
     private final PgbouncerProperties properties;
+    private volatile com.pkmprojects.mongodbserver.config.PgbouncerHcProperties hcProperties;
 
     // Single-port proxy TLS (S-06): when the proxy is configured, Nginx uses TLS
     // passthrough, so client TLS terminates at PgBouncer (client_tls_sslmode=require
@@ -48,19 +49,82 @@ public class PgbouncerAdminService {
         this.properties = properties;
     }
 
-    /** Hold new pooled clients + drain servers for {@code dbName}. */
+    @Autowired(required = false)
+    public void setHcProperties(com.pkmprojects.mongodbserver.config.PgbouncerHcProperties hcProperties) {
+        this.hcProperties = hcProperties;
+    }
+
+    /** True when the high-concurrency pooler is configured (S-14). */
+    public boolean isHcEnabled() {
+        return hcProperties != null;
+    }
+
+    /** HC instance port for health checks (internal only, never public). */
+    public int hcPort() {
+        return hcProperties != null ? hcProperties.port()
+                : com.pkmprojects.mongodbserver.config.PgbouncerHcProperties.DEFAULT_PORT;
+    }
+
+    /** Hold new pooled clients + drain servers for {@code dbName} (standard instance). */
     public boolean pauseDb(String dbName) {
         return exec("PAUSE", dbName);
     }
 
-    /** Release clients held by {@link #pauseDb}. Always call in {@code finally}. */
+    /** Release clients held by {@link #pauseDb} (standard instance). Always call in {@code finally}. */
     public boolean resumeDb(String dbName) {
         return exec("RESUME", dbName);
     }
 
-    /** Close pooled server connections so rotation takes effect promptly. */
+    /** Close pooled server connections so rotation takes effect promptly (standard instance). */
     public boolean reconnectDb(String dbName) {
         return exec("RECONNECT", dbName);
+    }
+
+    /**
+     * S-14 HC counterparts. No-op {@code false} when the HC pooler is not
+     * configured (unit tests, HC-disabled installs) — callers must still
+     * attempt the standard instance first and treat HC absence as healthy
+     * absence, not failure.
+     */
+    public boolean pauseDbHc(String dbName) {
+        if (!isHcEnabled()) return false;
+        return execHc("PAUSE", dbName);
+    }
+
+    public boolean resumeDbHc(String dbName) {
+        if (!isHcEnabled()) return false;
+        return execHc("RESUME", dbName);
+    }
+
+    public boolean reconnectDbHc(String dbName) {
+        if (!isHcEnabled()) return false;
+        return execHc("RECONNECT", dbName);
+    }
+
+    /**
+     * S-14 lifecycle across both poolers. Failure of one instance never
+     * prevents attempting the other; returns {@code true} only when every
+     * configured instance succeeded. Deterministic order: standard, then HC.
+     */
+    public boolean pauseAll(String dbName) {
+        boolean std = pauseDb(dbName);
+        if (!isHcEnabled()) return std;
+        boolean hc = pauseDbHc(dbName);
+        return std && hc;
+    }
+
+    public boolean resumeAll(String dbName) {
+        boolean std = resumeDb(dbName);
+        if (!isHcEnabled()) return std;
+        boolean hc = resumeDbHc(dbName);
+        return std && hc;
+    }
+
+    public boolean reconnectAll(String dbName) {
+        boolean std = reconnectDb(dbName);
+        if (!isHcEnabled()) return std;
+        boolean hc = reconnectDbHc(dbName);
+        return std && hc;
     }
 
     private boolean exec(String command, String dbName) {
@@ -76,6 +140,18 @@ public class PgbouncerAdminService {
         }
     }
 
+    private boolean execHc(String command, String dbName) {
+        String target = quoted(dbName);
+        try (PgbouncerConsoleClient c = openAdminConnectionHc()) {
+            c.query(command + " " + target);
+            log.info("PgBouncer-hc {} {} ok", command, dbName);
+            return true;
+        } catch (Exception e) {
+            log.warn("PgBouncer-hc {} {} failed (continuing): {}", command, dbName, e.getMessage());
+            return false;
+        }
+    }
+
     /** sslmode for pooler admin connections: require iff the TLS-passthrough proxy is configured. */
     String poolerSslMode() {
         return proxyProperties != null && proxyProperties.isConfigured() ? "require" : "disable";
@@ -87,6 +163,13 @@ public class PgbouncerAdminService {
         // connect-time SET probe dies on the console db with "SET failed".
         return PgbouncerConsoleClient.connect("127.0.0.1", properties.port(),
                 properties.adminUser(), pass == null ? "" : pass,
+                poolerSslMode().equals("require"), 2000, 5000);
+    }
+
+    private PgbouncerConsoleClient openAdminConnectionHc() throws Exception {
+        String pass = hcProperties.adminPassword();
+        return PgbouncerConsoleClient.connect("127.0.0.1", hcProperties.port(),
+                hcProperties.adminUser(), pass == null ? "" : pass,
                 poolerSslMode().equals("require"), 2000, 5000);
     }
 

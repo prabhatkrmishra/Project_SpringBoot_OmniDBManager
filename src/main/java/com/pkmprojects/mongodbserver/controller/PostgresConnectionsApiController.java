@@ -44,13 +44,25 @@ public class PostgresConnectionsApiController {
         PublicConnectionEndpoint direct = conns.direct().withoutSecret();
         PublicConnectionEndpoint pooledEp = conns.pooled() == null ? null : conns.pooled().withoutSecret();
         boolean pooledHealthy = pooled && provisioningService.isPooledAuthInstalled(DatabaseEngineType.POSTGRES, dbName);
+        // S-14: profile is a connection-policy selector, not a database
+        // property. Same host/port/credentials for both profiles; the profile
+        // token in options= selects the pooler instance. Internal hostnames
+        // and ports (pgbouncer:6432, pgbouncer-hc:6433) are never exposed.
+        var profiles = java.util.List.of(
+                Map.of("id", com.pkmprojects.mongodbserver.model.PoolProfile.STANDARD.id(),
+                        "poolMode", "TRANSACTION",
+                        "description", "Standard transaction pooling (default; bare pooled strings)"),
+                Map.of("id", com.pkmprojects.mongodbserver.model.PoolProfile.HIGH_CONCURRENCY.id(),
+                        "poolMode", "TRANSACTION",
+                        "description", "High-concurrency transaction pooling (more headroom, same credentials)"));
         return ResponseEntity.ok(Map.of(
                 "database", dbName,
                 "direct", Map.of("enabled", true, "host", direct.host(), "port", direct.port(),
                         "database", direct.database(), "sslMode", direct.sslMode().wireValue(), "mode", "DIRECT"),
-                "pooled", pooledEp == null ? Map.of("enabled", false)
+                "pooled", pooledEp == null ? Map.of("enabled", false, "profiles", profiles)
                         : Map.of("enabled", true, "host", pooledEp.host(), "port", pooledEp.port(),
                                 "database", pooledEp.database(), "sslMode", pooledEp.sslMode().wireValue(),
-                                "mode", "POOLED", "poolMode", "TRANSACTION", "authInstalled", pooledHealthy)));
+                                "mode", "POOLED", "poolMode", "TRANSACTION", "authInstalled", pooledHealthy,
+                                "profiles", profiles)));
     }
 }

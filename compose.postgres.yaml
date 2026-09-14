@@ -278,11 +278,13 @@ services:
       PROXY_PUBLIC_HOST: ${DATABASE_PROXY_HOST:-db.example.com}
       PROXY_DIRECT_ADDR: "postgres:5432"
       PROXY_POOLED_ADDR: "pgbouncer:6432"
+      PROXY_POOLED_HC_ADDR: "pgbouncer-hc:6433"
       PROXY_CERT_FILE: /certs/server.crt
       PROXY_KEY_FILE: /certs/server.key
       PROXY_BACKEND_CA: /certs/ca.crt
       PROXY_DIRECT_SAN: "postgres"
       PROXY_POOLED_SAN: "pgbouncer"
+      PROXY_POOLED_HC_SAN: "pgbouncer-hc"
       PROXY_MAX_CONNS: ${DATABASE_PROXY_MAX_CONNS:-2000}
     volumes:
       - ./certs:/certs:ro
@@ -290,6 +292,8 @@ services:
       postgres:
         condition: service_healthy
       pgbouncer:
+        condition: service_healthy
+      pgbouncer-hc:
         condition: service_healthy
     logging:
       driver: json-file
@@ -338,6 +342,139 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # S-14 high-concurrency pooler — dedicated PgBouncer instance for
+  # profile=high_concurrency. Transaction pooling, same auth model
+  # (auth_user + auth_query/user_lookup), same DISCARD ALL reset, larger but
+  # explicitly capped per-db sizing. INTERNAL ONLY: no host port published
+  # (no ports: mapping); the Go TLS bridge (db.example.com:15432) is the only
+  # public entrypoint. 5432/6432/6433 stay private.
+  pgbouncer-hc-init:
+    image: busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662
+    container_name: omnidb-pgbouncer-hc-init
+    restart: "no"
+    user: "0:0"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    volumes:
+      - pgbouncer-hc-data:/etc/pgbouncer
+      - ./certs:/host-certs:ro
+    environment:
+      PGBOUNCER_ADMIN_PASSWORD: ${PGBOUNCER_ADMIN_PASSWORD:-change-me-now}
+      PGBOUNCER_STATS_PASSWORD: ${PGBOUNCER_STATS_PASSWORD:-change-me-now}
+      PGBOUNCER_AUTH_PASSWORD: ${PGBOUNCER_AUTH_PASSWORD:-change-me-now}
+      OVERRIDE_PGBOUNCER_POOL_MODE: ${OVERRIDE_PGBOUNCER_POOL_MODE:-transaction}
+      OVERRIDE_PGBOUNCER_HC_MAX_CLIENT_CONN: ${OVERRIDE_PGBOUNCER_HC_MAX_CLIENT_CONN:-1000}
+      OVERRIDE_PGBOUNCER_HC_DEFAULT_POOL_SIZE: ${OVERRIDE_PGBOUNCER_HC_DEFAULT_POOL_SIZE:-15}
+      OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_SIZE: ${OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_SIZE:-5}
+      OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_TIMEOUT: ${OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_TIMEOUT:-3}
+      OVERRIDE_PGBOUNCER_HC_MAX_DB_CONNECTIONS: ${OVERRIDE_PGBOUNCER_HC_MAX_DB_CONNECTIONS:-25}
+      DATABASE_PROXY_ENABLED: ${DATABASE_PROXY_ENABLED:-false}
+      DATABASE_PROXY_HOST: ${DATABASE_PROXY_HOST:-}
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        ADMIN_USER=pgbouncer_admin
+        STATS_USER=pgbouncer_stats
+        AUTH_USER=pgbouncer_auth
+        POOL_MODE="$${OVERRIDE_PGBOUNCER_POOL_MODE:-transaction}"
+        MAX_CLIENT_CONN="$${OVERRIDE_PGBOUNCER_HC_MAX_CLIENT_CONN:-1000}"
+        DEFAULT_POOL_SIZE="$${OVERRIDE_PGBOUNCER_HC_DEFAULT_POOL_SIZE:-15}"
+        RESERVE_POOL_SIZE="$${OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_SIZE:-5}"
+        RESERVE_POOL_TIMEOUT="$${OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_TIMEOUT:-3}"
+        MAX_DB_CONNECTIONS="$${OVERRIDE_PGBOUNCER_HC_MAX_DB_CONNECTIONS:-25}"
+        authline() { u="$$1"; p="$$2"; printf '"%s" "%s"\n' "$$u" "$$p"; }
+        cat > /etc/pgbouncer/pgbouncer.ini <<INI
+        [databases]
+        * = host=postgres port=5432 auth_user=$${AUTH_USER} auth_query='SELECT * FROM pgbouncer.user_lookup(\$$1)'
+        [pgbouncer]
+        listen_port = 6433
+        listen_addr = *
+        auth_type = scram-sha-256
+        auth_file = /etc/pgbouncer/userlist.txt
+        auth_user = $${AUTH_USER}
+        pool_mode = $${POOL_MODE}
+        max_client_conn = $${MAX_CLIENT_CONN}
+        default_pool_size = $${DEFAULT_POOL_SIZE}
+        reserve_pool_size = $${RESERVE_POOL_SIZE}
+        reserve_pool_timeout = $${RESERVE_POOL_TIMEOUT}
+        max_db_connections = $${MAX_DB_CONNECTIONS}
+        server_reset_query = DISCARD ALL
+        ignore_startup_parameters = extra_float_digits
+        admin_users = pgbouncer_admin
+        stats_users = pgbouncer_stats
+        INI
+        if [ "$${DATABASE_PROXY_ENABLED:-false}" = "true" ] && [ -n "$${DATABASE_PROXY_HOST:-}" ]; then
+          mkdir -p /etc/pgbouncer/certs
+          if [ -f /host-certs/pool.crt ] && [ -f /host-certs/pool.key ]; then
+            cp /host-certs/pool.crt /etc/pgbouncer/certs/pool.crt
+            cp /host-certs/pool.key /etc/pgbouncer/certs/pool.key
+          elif [ -f /host-certs/server.crt ] && [ -f /host-certs/server.key ]; then
+            echo "pgbouncer-hc-init: no pool.crt/pool.key — reusing server.crt/server.key (SAN must cover pooled hostname)"
+            cp /host-certs/server.crt /etc/pgbouncer/certs/pool.crt
+            cp /host-certs/server.key /etc/pgbouncer/certs/pool.key
+          else
+            echo "FATAL: DATABASE_PROXY_ENABLED=true but no pool.{crt,key} or server.{crt,key} in ./certs — refusing plaintext pooler" >&2
+            exit 1
+          fi
+          if [ -f /host-certs/ca.crt ]; then cp /host-certs/ca.crt /etc/pgbouncer/certs/ca.crt; fi
+          chmod 644 /etc/pgbouncer/certs/pool.crt
+          chmod 600 /etc/pgbouncer/certs/pool.key
+          chown 70:70 /etc/pgbouncer/certs/pool.crt /etc/pgbouncer/certs/pool.key
+          cat >> /etc/pgbouncer/pgbouncer.ini <<'TLSINI'
+        client_tls_sslmode = require
+        client_tls_cert_file = /etc/pgbouncer/certs/pool.crt
+        client_tls_key_file = /etc/pgbouncer/certs/pool.key
+        client_tls_protocols = secure
+        server_tls_sslmode = require
+        server_tls_protocols = secure
+        TLSINI
+        fi
+                { authline "$$ADMIN_USER" "$$PGBOUNCER_ADMIN_PASSWORD"; authline "$$STATS_USER" "$$PGBOUNCER_STATS_PASSWORD"; authline "$$AUTH_USER" "$$PGBOUNCER_AUTH_PASSWORD"; } > /etc/pgbouncer/userlist.txt
+        chmod 600 /etc/pgbouncer/userlist.txt
+        chown 70:70 /etc/pgbouncer/userlist.txt
+
+  pgbouncer-hc:
+    image: edoburu/pgbouncer:v1.24.1-p1@sha256:3db3d7223e93af52b4116f642951a1a5fa44702a88c2a59cf7562cac19320c9e
+    container_name: omnidb-pgbouncer-hc
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+      - /run
+    # INTERNAL ONLY — no ports: mapping. Reachable as pgbouncer-hc:6433 on the
+    # compose network (bridge only). Public clients never dial 6433 directly.
+    environment:
+      DATABASE_PROXY_ENABLED: ${DATABASE_PROXY_ENABLED:-false}
+      PGBOUNCER_STATS_PASSWORD: ${PGBOUNCER_STATS_PASSWORD:-change-me-now}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer-hc-init:
+        condition: service_completed_successfully
+    volumes:
+      - pgbouncer-hc-data:/etc/pgbouncer:ro
+    healthcheck:
+      test: ["CMD-SHELL", "if [ \"$${DATABASE_PROXY_ENABLED:-false}\" = \"true\" ]; then export PGSSLMODE=require; fi; PGPASSWORD=\"$PGBOUNCER_STATS_PASSWORD\" psql -h 127.0.0.1 -p 6433 -U pgbouncer_stats -d pgbouncer -tAc 'SHOW POOLS' | grep -q ."]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres-data:
   pgbouncer-data:
+  pgbouncer-hc-data:

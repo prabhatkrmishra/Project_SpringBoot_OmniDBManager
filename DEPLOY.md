@@ -10,7 +10,8 @@ Internet:443 (<YOUR_DOMAIN>)
 Internet:15432 (db.example.com, grey-cloud, TLS, allowlist) — target path
   → bridge (TLS endpoint, SNI + options=-c omnidb.mode= routing)
     ├── direct → postgres:5432 (127.0.0.1:9813)
-    └── pooled → pgbouncer:6432 (pool_mode=transaction) → postgres:5432
+    ├── pooled bare/standard → pgbouncer:6432 (pool_mode=transaction) → postgres:5432
+  └── pooled/high_concurrency → pgbouncer-hc:6433 (pool_mode=transaction, internal only) → postgres:5432
 Interim until cutover (Nginx stream, two ports):
   Internet:<NON_STD_1> → Nginx stream → 127.0.0.1:9813 (pgvector, ssl=on) — direct A
   Internet:<NON_STD_2> → Nginx stream → 127.0.0.1:6432 (PgBouncer) → 127.0.0.1:9813 — pooled B
@@ -401,6 +402,10 @@ PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=db.example.com port=15432 dbnam
 # → <DB_USER> | <DB_NAME> | 1 row
 PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=db.example.com port=15432 dbname=<DB_NAME> user=<DB_USER> sslmode=require channel_binding=disable options='-c omnidb.mode=pooled'" -c "select current_user;"
 # → <DB_USER> (1 row)
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=db.example.com port=15432 dbname=<DB_NAME> user=<DB_USER> sslmode=require channel_binding=disable options='-c omnidb.mode=pooled -c omnidb.pool_profile=standard'" -c "select current_user;"
+# → <DB_USER> (1 row, standard pooler :6432)
+PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=db.example.com port=15432 dbname=<DB_NAME> user=<DB_USER> sslmode=require channel_binding=disable options='-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency'" -c "select current_user;"
+# → <DB_USER> (1 row, HC pooler :6433 internal)
 
 # Postgres direct A interim (migrations/admin) via <NON_STD_1> → 9813
 PGPASSWORD='<DB_PASSWORD>' timeout 10 psql "host=pg.example.com port=27431 dbname=<DB_NAME> user=<DB_USER> sslmode=require" -c "select current_user, current_database(), now();"
@@ -432,6 +437,8 @@ mongodb://<DB_USER>:<DB_PASSWORD>@mongo.example.com/<DB_NAME>?authSource=<DB_NAM
 # PostgreSQL via the bridge (after cutover) — same host/port both modes, options selects route
 postgresql://<DB_USER>:<DB_PASSWORD>@db.example.com:15432/<DB_NAME>?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Ddirect
 postgresql://<DB_USER>:<DB_PASSWORD>@db.example.com:15432/<DB_NAME>?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Dpooled
+postgresql://<DB_USER>:<DB_PASSWORD>@db.example.com:15432/<DB_NAME>?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Dpooled%20-c%20omnidb.pool_profile%3Dstandard
+postgresql://<DB_USER>:<DB_PASSWORD>@db.example.com:15432/<DB_NAME>?sslmode=require&application_name=omnidb&channel_binding=disable&options=-c%20omnidb.mode%3Dpooled%20-c%20omnidb.pool_profile%3Dhigh_concurrency
 
 # PostgreSQL direct A interim (migrations/admin) — POSTGRES_ISSUED_PORT (e.g. 27431)
 postgresql://<DB_USER>:<DB_PASSWORD>@pg.example.com:27431/<DB_NAME>?sslmode=require&application_name=omnidb

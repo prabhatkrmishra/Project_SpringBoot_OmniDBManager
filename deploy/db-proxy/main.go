@@ -43,16 +43,18 @@ const (
 )
 
 type config struct {
-	listenAddr string
-	publicHost string
-	directAddr string
-	pooledAddr string
-	certFile   string
-	keyFile    string
-	backendCA  string
-	maxConns   int
-	directSAN  string
-	pooledSAN  string
+	listenAddr   string
+	publicHost   string
+	directAddr   string
+	pooledAddr   string
+	pooledHcAddr string
+	certFile     string
+	keyFile      string
+	backendCA    string
+	maxConns     int
+	directSAN    string
+	pooledSAN    string
+	pooledHcSAN  string
 }
 
 func getenv(key, def string) string {
@@ -71,16 +73,18 @@ func loadConfig() config {
 		}
 	}
 	return config{
-		listenAddr: ":" + port,
-		publicHost: strings.ToLower(getenv("PROXY_PUBLIC_HOST", "db.example.com")),
-		directAddr: getenv("PROXY_DIRECT_ADDR", "postgres:5432"),
-		pooledAddr: getenv("PROXY_POOLED_ADDR", "pgbouncer:6432"),
-		certFile:   getenv("PROXY_CERT_FILE", "/certs/server.crt"),
-		keyFile:    getenv("PROXY_KEY_FILE", "/certs/server.key"),
-		backendCA:  getenv("PROXY_BACKEND_CA", "/certs/ca.crt"),
-		maxConns:   maxConns,
-		directSAN:  getenv("PROXY_DIRECT_SAN", "postgres"),
-		pooledSAN:  getenv("PROXY_POOLED_SAN", "pgbouncer"),
+		listenAddr:   ":" + port,
+		publicHost:   strings.ToLower(getenv("PROXY_PUBLIC_HOST", "db.example.com")),
+		directAddr:   getenv("PROXY_DIRECT_ADDR", "postgres:5432"),
+		pooledAddr:   getenv("PROXY_POOLED_ADDR", "pgbouncer:6432"),
+		pooledHcAddr: getenv("PROXY_POOLED_HC_ADDR", "pgbouncer-hc:6433"),
+		certFile:     getenv("PROXY_CERT_FILE", "/certs/server.crt"),
+		keyFile:      getenv("PROXY_KEY_FILE", "/certs/server.key"),
+		backendCA:    getenv("PROXY_BACKEND_CA", "/certs/ca.crt"),
+		maxConns:     maxConns,
+		directSAN:    getenv("PROXY_DIRECT_SAN", "postgres"),
+		pooledSAN:    getenv("PROXY_POOLED_SAN", "pgbouncer"),
+		pooledHcSAN:  getenv("PROXY_POOLED_HC_SAN", "pgbouncer-hc"),
 	}
 }
 
@@ -158,8 +162,8 @@ func main() {
 		log.Fatalf("proxy: listen %s: %v", cfg.listenAddr, err)
 	}
 	sem := make(chan struct{}, cfg.maxConns)
-	log.Printf("proxy: single-host TLS-bridge listening %s public=%s direct=%s pooled=%s",
-		cfg.listenAddr, cfg.publicHost, cfg.directAddr, cfg.pooledAddr)
+	log.Printf("proxy: single-host TLS-bridge listening %s public=%s direct=%s pooled=%s pooled-hc=%s",
+		cfg.listenAddr, cfg.publicHost, cfg.directAddr, cfg.pooledAddr, cfg.pooledHcAddr)
 	for {
 		raw, err := ln.Accept()
 		if err != nil {
