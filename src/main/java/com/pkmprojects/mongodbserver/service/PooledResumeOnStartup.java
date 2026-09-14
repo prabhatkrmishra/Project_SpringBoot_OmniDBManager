@@ -45,11 +45,21 @@ public class PooledResumeOnStartup implements ApplicationRunner {
                     .filter(m -> m.getEngineType() == DatabaseEngineType.POSTGRES && m.isPooled())
                     .map(com.pkmprojects.mongodbserver.model.ManagedDatabase::getDbName)
                     .toList();
+            // S-14: deterministic order — standard, then high_concurrency.
+            // Per-instance failure warns and continues; never throws from
+            // the ApplicationRunner.
             for (String dbName : pooled) {
                 try {
                     pgbouncerAdminService.resumeDb(dbName);
                 } catch (Exception e) {
-                    log.warn("Startup RESUME for pooled database '{}' failed (pooler may be down) — continuing", dbName, e);
+                    log.warn("Startup RESUME (standard) for pooled database '{}' failed (pooler may be down) — continuing", dbName, e);
+                }
+                if (pgbouncerAdminService.isHcEnabled()) {
+                    try {
+                        pgbouncerAdminService.resumeDbHc(dbName);
+                    } catch (Exception e) {
+                        log.warn("Startup RESUME (hc) for pooled database '{}' failed (pooler may be down) — continuing", dbName, e);
+                    }
                 }
             }
             if (!pooled.isEmpty()) {

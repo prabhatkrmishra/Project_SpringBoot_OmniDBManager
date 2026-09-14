@@ -72,34 +72,108 @@ func parseStartupParams(body []byte) ([][2]string, error) {
 	return out, nil
 }
 
-// extractMode finds exactly one "-c omnidb.mode=<direct|pooled>" token in the
-// options value. Anything else -> fail closed.
-func extractMode(options string) (string, error) {
+// S-14 connection profiles: per-connection policy selector, per-instance
+// configuration. Only "standard" (existing pooler) and "high_concurrency"
+// (dedicated pooler) exist. Both are transaction pooling; the client selects
+// a named policy and never controls raw PgBouncer configuration.
+const (
+	profileStandard        = "standard"
+	profileHighConcurrency = "high_concurrency"
+	maxProfileLen          = 32
+)
+
+// Backend labels for cancel routing. "pooled" is the standard pooler
+// (backwards compatible); "pooled-hc" is the high-concurrency pooler.
+const (
+	backendDirect   = "direct"
+	backendPooled   = "pooled"
+	backendPooledHc = "pooled-hc"
+)
+
+func isValidProfileName(s string) bool {
+	if s == "" || len(s) > maxProfileLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// extractRoute finds exactly one "-c omnidb.mode=<direct|pooled>" token and
+// zero or one "-c omnidb.pool_profile=<standard|high_concurrency>" tokens in
+// the options value. Anything else -> fail closed (no fallback, no
+// normalization, exact case-sensitive matching).
+//
+// Rules: direct+profile REJECT, unknown profile REJECT, duplicate profile
+// REJECT, duplicate/conflicting mode REJECT, bare pool_profile without -c
+// REJECT, empty profile REJECT, malformed options REJECT.
+func extractRoute(options string) (mode, profile string, err error) {
 	toks := strings.Fields(options)
-	found := ""
-	count := 0
+	foundMode := ""
+	modeCount := 0
+	foundProfile := ""
+	profileCount := 0
 	for i := 0; i < len(toks); i++ {
 		if toks[i] == "-c" && i+1 < len(toks) {
 			kv := toks[i+1]
 			if strings.HasPrefix(kv, "omnidb.mode=") {
-				count++
-				found = strings.TrimPrefix(kv, "omnidb.mode=")
+				modeCount++
+				foundMode = strings.TrimPrefix(kv, "omnidb.mode=")
+			} else if strings.HasPrefix(kv, "omnidb.pool_profile=") {
+				profileCount++
+				foundProfile = strings.TrimPrefix(kv, "omnidb.pool_profile=")
 			}
 			i++
 			continue
 		}
 		if strings.HasPrefix(toks[i], "omnidb.mode=") {
 			// bare token without -c is not a valid carrier
-			return "", fmt.Errorf("malformed mode token")
+			return "", "", fmt.Errorf("malformed mode token")
+		}
+		if strings.HasPrefix(toks[i], "omnidb.pool_profile=") {
+			// bare token without -c is not a valid carrier
+			return "", "", fmt.Errorf("malformed profile token")
 		}
 	}
-	if count != 1 {
-		return "", fmt.Errorf("mode count=%d", count)
+	if modeCount != 1 {
+		return "", "", fmt.Errorf("mode count=%d", modeCount)
 	}
-	if found != "direct" && found != "pooled" {
-		return "", fmt.Errorf("bad mode")
+	if foundMode != "direct" && foundMode != "pooled" {
+		return "", "", fmt.Errorf("bad mode")
 	}
-	return found, nil
+	if profileCount > 1 {
+		return "", "", fmt.Errorf("profile count=%d", profileCount)
+	}
+	if profileCount == 1 {
+		if foundMode == "direct" {
+			return "", "", fmt.Errorf("profile on direct")
+		}
+		if foundProfile == "" {
+			return "", "", fmt.Errorf("empty profile")
+		}
+		if !isValidProfileName(foundProfile) {
+			return "", "", fmt.Errorf("bad profile name")
+		}
+		if foundProfile != profileStandard && foundProfile != profileHighConcurrency {
+			return "", "", fmt.Errorf("unknown profile")
+		}
+		return foundMode, foundProfile, nil
+	}
+	return foundMode, "", nil
+}
+
+// extractMode finds exactly one "-c omnidb.mode=<direct|pooled>" token in the
+// options value. Anything else -> fail closed. Preserved for backwards
+// compatibility; new code prefers extractRoute (which additionally enforces
+// the profile contract — a direct+profile input fails here too).
+func extractMode(options string) (string, error) {
+	mode, _, err := extractRoute(options)
+	return mode, err
 }
 
 // rewriteStartup removes only the routing "-c omnidb.mode=<v>" token pair
@@ -138,11 +212,13 @@ func rewriteStartup(full []byte, params [][2]string) ([]byte, error) {
 	return b, nil
 }
 
-// stripRoutingToken excises exactly the "-c omnidb.mode=<v>" token pair
-// from an options value, returning the remainder byte-identically (aside
-// from the excision point, where surrounding whitespace collapses to at
-// most one space, trimmed at the ends). ok=false means nothing remains.
-func stripRoutingToken(opt string) (rest string, ok bool) {
+// stripSinglePrefix excises exactly the first "-c <prefix>..." token pair
+// from an options value, preserving every other byte exactly (aside from the
+// excision point, where surrounding whitespace collapses to at most one
+// space, trimmed at the ends). ok=false means nothing remains after excision
+// OR nothing was excised and the input was blank. found reports whether a
+// pair was excised.
+func stripSinglePrefix(opt, prefix string) (rest string, ok bool, found bool) {
 	type span struct{ s, e int }
 	var toks []span
 	i, n := 0, len(opt)
@@ -162,20 +238,17 @@ func stripRoutingToken(opt string) (rest string, ok bool) {
 	}
 	cut := -1
 	for j := 0; j+1 < len(toks); j++ {
-		if opt[toks[j].s:toks[j].e] == "-c" && strings.HasPrefix(opt[toks[j+1].s:toks[j+1].e], "omnidb.mode=") {
+		if opt[toks[j].s:toks[j].e] == "-c" && strings.HasPrefix(opt[toks[j+1].s:toks[j+1].e], prefix) {
 			cut = j
 			break
 		}
 	}
 	if cut < 0 {
-		// No routing pair: return the value as-is (caller only invokes
-		// this for options values already known to carry routing, but
-		// stay total for direct unit use).
 		t := strings.Trim(opt, " \t\n\r\v\f")
 		if t == "" {
-			return "", false
+			return "", false, false
 		}
-		return opt, true
+		return opt, true, false
 	}
 	s, e := toks[cut].s, toks[cut+1].e
 	left, right := opt[:s], opt[e:]
@@ -192,9 +265,46 @@ func stripRoutingToken(opt string) (rest string, ok bool) {
 	}
 	rest = strings.Trim(rest, " \t\n\r\v\f")
 	if rest == "" {
+		return "", false, true
+	}
+	return rest, true, true
+}
+
+// stripRoutingToken excises exactly the "-c omnidb.mode=<v>" and
+// "-c omnidb.pool_profile=<v>" token pairs from an options value, returning
+// the remainder byte-identically (aside from each excision point, where
+// surrounding whitespace collapses to at most one space, trimmed at the
+// ends). ok=false means nothing remains. Unrelated -c options, unrelated
+// StartupMessage keys, and byte/order fidelity are preserved; only routing
+// options are stripped so omnidb.mode/omnidb.pool_profile never leak to
+// PostgreSQL or PgBouncer.
+func stripRoutingToken(opt string) (rest string, ok bool) {
+	// Sequential excision preserves the S-06.1 whitespace guarantee for the
+	// single-token case (second strip is a no-op) and generalizes cleanly
+	// to two tokens in either order.
+	afterMode, modeRemains := stripOnePair(opt, "omnidb.mode=")
+	afterBoth, bothRemain := stripOnePair(afterMode, "omnidb.pool_profile=")
+	// stripOnePair returns ("", false) both when input was blank and when
+	// the pair was the only content. Distinguish by checking whether any
+	// non-routing content remains: if the original held only routing pairs,
+	// the remainder is empty -> ok=false (caller drops the options key).
+	if !modeRemains && !bothRemain {
+		// Nothing non-routing remains (blank input or only routing tokens).
 		return "", false
 	}
-	return rest, true
+	// At least one pass left non-routing content, or the input had no
+	// routing pair at all (returned as-is). afterBoth is the final remainder.
+	_ = afterMode
+	return afterBoth, bothRemain
+}
+
+// stripOnePair excises exactly the first "-c <prefix>..." token pair.
+// Returns ("", false) when nothing remains (blank input or pair was the only
+// content); otherwise (remainder, true). When no pair is present the input
+// is returned byte-identically (or ("",false) when blank).
+func stripOnePair(opt, prefix string) (rest string, ok bool) {
+	r, ok2, _ := stripSinglePrefix(opt, prefix)
+	return r, ok2
 }
 
 func isOptSpace(c byte) bool {
@@ -309,15 +419,30 @@ func handleConn(raw net.Conn, cfg config, store *certStore, caPool *x509.CertPoo
 			break
 		}
 	}
-	mode, err := extractMode(options)
+	mode, profile, err := extractRoute(options)
 	if err != nil || options == "" {
 		sendError(tlsConn, "missing or invalid connection mode")
 		tlsConn.Close()
 		return
 	}
-	backendAddr, backendSAN := cfg.directAddr, cfg.directSAN
+	backendAddr, backendSAN, backendLabel := cfg.directAddr, cfg.directSAN, backendDirect
+	profileLabel := "none"
 	if mode == "pooled" {
-		backendAddr, backendSAN = cfg.pooledAddr, cfg.pooledSAN
+		if profile == "" || profile == profileStandard {
+			backendAddr, backendSAN, backendLabel = cfg.pooledAddr, cfg.pooledSAN, backendPooled
+			if profile == profileStandard {
+				profileLabel = profileStandard
+			} else {
+				profileLabel = profileStandard + "(default)"
+			}
+		} else if profile == profileHighConcurrency {
+			backendAddr, backendSAN, backendLabel = cfg.pooledHcAddr, cfg.pooledHcSAN, backendPooledHc
+			profileLabel = profileHighConcurrency
+		} else {
+			sendError(tlsConn, "missing or invalid connection mode")
+			tlsConn.Close()
+			return
+		}
 	}
 	rewritten, err := rewriteStartup(append(lenBuf, sbody...), params)
 	if err != nil {
@@ -332,13 +457,13 @@ func handleConn(raw net.Conn, cfg config, store *certStore, caPool *x509.CertPoo
 	options = ""
 	backend, err := dialBackend(cfg, caPool, backendAddr, backendSAN, rewritten)
 	if err != nil {
-		log.Printf("proxy: backend dial mode=%s err=%v", mode, err)
+		log.Printf("proxy: backend dial mode=%s profile=%s err=%v", mode, profileLabel, err)
 		sendError(tlsConn, "backend unavailable")
 		tlsConn.Close()
 		return
 	}
-	log.Printf("proxy: route mode=%s backend=%s", mode, backendAddr)
-	relay(tlsConn, backend, mode)
+	log.Printf("proxy: route mode=%s profile=%s backend=%s", mode, profileLabel, backendAddr)
+	relay(tlsConn, backend, backendLabel)
 }
 
 // dialBackend opens TLS (verify-full) to the backend, replays the rewritten
@@ -406,9 +531,14 @@ func handleCancel(raw net.Conn, cfg config, rest []byte, caPool *x509.CertPool) 
 	}
 	addr := cfg.directAddr
 	san := cfg.directSAN
-	if backend == "pooled" {
+	if backend == backendPooled {
 		addr = cfg.pooledAddr
 		san = cfg.pooledSAN
+	} else if backend == backendPooledHc {
+		addr = cfg.pooledHcAddr
+		san = cfg.pooledHcSAN
+	} else if backend != backendDirect {
+		return // unknown backend label: fail closed, no broadcast
 	}
 	d := &net.Dialer{Timeout: backendTimeout}
 	braw, err := d.Dial("tcp", addr)

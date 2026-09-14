@@ -5,7 +5,8 @@ Deployment:
 ```text
 INTERNET :15432 ──► bridge (db.example.com, TLS endpoint)
   ├── options=-c omnidb.mode=direct ──TLS──► postgres:5432
-  └── options=-c omnidb.mode=pooled  ──TLS──► pgbouncer:6432 ──TLS──► postgres:5432
+  ├── options=-c omnidb.mode=pooled (bare | -c omnidb.pool_profile=standard) ──TLS──► pgbouncer:6432 ──TLS──► postgres:5432
+  └── options=-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency ──TLS──► pgbouncer-hc:6433 ──TLS──► postgres:5432
 ```
 
 One public hostname + one public port serve BOTH modes. The proxy terminates
@@ -24,13 +25,17 @@ rejects a missing `database.proxy.host` at startup).
 - [ ] Public cert for the host installed (`./certs/server.crt|key`).
 - [ ] Internal CA installed (`./certs/ca.crt`); backend certs for
       `postgres` and `pgbouncer` SANs chain to it.
-- [ ] SG/NSG: expose ONLY TCP `:15432`; `5432`/`6432`/`9813`/`9815` denied
+- [ ] SG/NSG: expose ONLY TCP `:15432`; `5432`/`6432`/`6433`/`9813`/`9815` denied
       externally (verified, not assumed).
 
 ## Routing proof
 
 - [ ] `options=-c omnidb.mode=direct → PostgreSQL` (packet/log evidence).
-- [ ] `options=-c omnidb.mode=pooled → PgBouncer` (packet/log evidence).
+- [ ] `options=-c omnidb.mode=pooled → PgBouncer standard` (packet/log evidence).
+- [ ] `options=-c omnidb.mode=pooled -c omnidb.pool_profile=standard → PgBouncer standard` (packet/log evidence).
+- [ ] `options=-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency → PgBouncer-HC :6433` (packet/log evidence, SHOW POOLS on both instances).
+- [ ] Unknown/duplicate/misplaced profile rejected fail-closed (no fallback to standard on the new bridge).
+- [ ] No public 5432/6432/6433 (published-ports evidence).
 - [ ] Missing mode → rejected, no backend contact.
 - [ ] Invalid mode → rejected, no backend contact.
 - [ ] Duplicate/conflicting mode → rejected, no backend contact.
@@ -94,7 +99,9 @@ Issued bridged strings therefore pin `channel_binding=disable`
 
 - [ ] Proxy down → both unavailable.
 - [ ] PG down → both unavailable.
-- [ ] Pooler down → DIRECT available, POOLED unavailable.
+- [ ] Standard pooler down → DIRECT + HC available, standard unavailable (no fallback between profiles).
+- [ ] HC pooler down → DIRECT + standard available, HC unavailable.
+- [ ] Both poolers down → DIRECT available, both pooled profiles unavailable.
 - [ ] Pooled auth failure → DIRECT available.
 - [ ] Direct backend TLS failure → POOLED independently routable.
 
@@ -110,7 +117,7 @@ Issued bridged strings therefore pin `channel_binding=disable`
 
 - [ ] Full Maven suite green; lifecycle intact.
 - [ ] OmniDB management stays direct/private; Mongo/MySQL unchanged.
-- [ ] No public 5432/6432; structured builders only, no URL surgery.
+- [ ] No public 5432/6432/6433; structured builders only, no URL surgery.
 
 ## Adversarial hardening (implemented, live re-proven)
 

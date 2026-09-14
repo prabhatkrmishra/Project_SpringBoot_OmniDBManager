@@ -19,10 +19,25 @@ public class ConnectionValidationService {
     private static final Logger log = LoggerFactory.getLogger(ConnectionValidationService.class);
     private final PostgresDatabaseEngine engine;
     private final PostgresConnectionStringBuilder strings;
+    private volatile com.pkmprojects.mongodbserver.config.PgbouncerHcProperties hcProperties;
 
     public ConnectionValidationService(PostgresDatabaseEngine engine, PostgresConnectionStringBuilder strings) {
         this.engine = engine;
         this.strings = strings;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setHcProperties(com.pkmprojects.mongodbserver.config.PgbouncerHcProperties hcProperties) {
+        this.hcProperties = hcProperties;
+    }
+
+    boolean isHcConfigured() {
+        return hcProperties != null;
+    }
+
+    int hcLoopbackPort() {
+        return hcProperties != null ? hcProperties.port()
+                : com.pkmprojects.mongodbserver.config.PgbouncerHcProperties.DEFAULT_PORT;
     }
 
     public boolean validateDirect(String dbName, String user, String password) {
@@ -62,6 +77,64 @@ public class ConnectionValidationService {
                 com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
         if (runLoopback(loopback)) return new PooledValidation(true, ValidationPath.LOOPBACK);
         return new PooledValidation(false, ValidationPath.NONE);
+    }
+
+    /**
+     * S-14 HC validation (choice A: standard mandatory + HC route also
+     * performed when HC capability is enabled). PUBLIC exercises the full
+     * bridge path with {@code profile=high_concurrency}; LOOPBACK proves the
+     * HC pooler + auth_query + tenant SCRAM via {@code 127.0.0.1:<hc-port>}
+     * bypassing the bridge. HC failure never fails provisioning — it is
+     * logged as capability health (standard remains the gate) — but HC
+     * support is never claimed from standard validation alone.
+     */
+    public PooledValidation validateHcDetailed(String dbName, String user, String password) {
+        if (!isHcConfigured()) return new PooledValidation(false, ValidationPath.NONE);
+        var conns = engine.connectionEndpoints(dbName, user, password, true);
+        if (conns.pooled() == null) return new PooledValidation(false, ValidationPath.NONE);
+        if (runHcPublic(conns.pooled())) return new PooledValidation(true, ValidationPath.PUBLIC);
+        var loopbackSsl = engine.isProxyMode()
+                ? conns.pooled().sslMode()
+                : com.pkmprojects.mongodbserver.model.SslMode.DISABLE;
+        var loopback = new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                "127.0.0.1:" + hcLoopbackPort(), hcLoopbackPort(),
+                dbName, user, password, loopbackSsl,
+                com.pkmprojects.mongodbserver.model.ConnectionMode.POOLED,
+                com.pkmprojects.mongodbserver.model.PoolMode.TRANSACTION);
+        if (runLoopback(loopback)) return new PooledValidation(true, ValidationPath.LOOPBACK);
+        return new PooledValidation(false, ValidationPath.NONE);
+    }
+
+    boolean runHcPublic(com.pkmprojects.mongodbserver.model.ConnectionEndpoint standardPooledEp) {
+        String jdbc;
+        if (engine.isProxyMode()) {
+            jdbc = strings.toJdbcBridged(standardPooledEp,
+                    com.pkmprojects.mongodbserver.model.PoolProfile.HIGH_CONCURRENCY);
+        } else {
+            // No bridge: public HC is the HC pooler port directly (legacy
+            // two-port model extended). Never leak bridge options= here.
+            // Host mirrors resolvePooledHost with the port swapped to the HC
+            // port (same DNS host, never 127.0.0.1 in prod).
+            String hcHost = engine.resolvePooledHost();
+            int colon = hcHost.lastIndexOf(':');
+            String hostOnly = colon >= 0 ? hcHost.substring(0, colon) : hcHost;
+            var hcEp = new com.pkmprojects.mongodbserver.model.ConnectionEndpoint(
+                    hostOnly + ":" + hcLoopbackPort(), hcLoopbackPort(),
+                    standardPooledEp.database(), standardPooledEp.username(), standardPooledEp.password(),
+                    standardPooledEp.sslMode(), standardPooledEp.mode(), standardPooledEp.poolMode());
+            jdbc = strings.toJdbc(hcEp);
+        }
+        try (var c = java.sql.DriverManager.getConnection(jdbc);
+                var st = c.createStatement()) {
+            st.setQueryTimeout(5);
+            try (var rs = st.executeQuery("SELECT 1")) {
+                return rs.next() && rs.getInt(1) == 1;
+            }
+        } catch (Exception e) {
+            log.debug("ConnectionValidationService hc-public validation failed for db={} host={}",
+                    standardPooledEp.database(), standardPooledEp.host(), e);
+            return false;
+        }
     }
 
     /** Which tier proved pooled health — see {@link #validatePooledDetailed}. */

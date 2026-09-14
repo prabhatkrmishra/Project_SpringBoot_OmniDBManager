@@ -126,9 +126,15 @@ MYSQL_ISSUED_HOST=mysql.example.com
 | `OVERRIDE_PGBOUNCER_RESERVE_POOL_SIZE` | `2` | `pgbouncer.ini:reserve_pool_size` | Burst headroom per DB. |
 | `OVERRIDE_PGBOUNCER_RESERVE_POOL_TIMEOUT` | `3` | `pgbouncer.ini:reserve_pool_timeout` | Seconds to use reserve pool. |
 | `OVERRIDE_PGBOUNCER_MAX_DB_CONNECTIONS` | `10` | `pgbouncer.ini:max_db_connections` | Hard cap per DB (was `50`). |
+| `OVERRIDE_PGBOUNCER_HC_PORT` | `6433` | `app.pgbouncer-hc.port` + `compose.postgres.yaml:pgbouncer-hc` | Internal HC pooler port. **Never published** — bridge-only (`pgbouncer-hc:6433`). |
+| `OVERRIDE_PGBOUNCER_HC_MAX_CLIENT_CONN` | `1000` | `pgbouncer-hc.ini:max_client_conn` | HC client cap. |
+| `OVERRIDE_PGBOUNCER_HC_DEFAULT_POOL_SIZE` | `15` | `pgbouncer-hc.ini:default_pool_size` | HC per-db pool (vs 5 standard). |
+| `OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_SIZE` | `5` | `pgbouncer-hc.ini:reserve_pool_size` | HC burst headroom (vs 2 standard). |
+| `OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_TIMEOUT` | `3` | `pgbouncer-hc.ini:reserve_pool_timeout` | Seconds to use HC reserve pool. |
+| `OVERRIDE_PGBOUNCER_HC_MAX_DB_CONNECTIONS` | `25` | `pgbouncer-hc.ini:max_db_connections` | HC hard cap per DB (vs 10 standard). Aggregate across BOTH instances must respect PG `max_connections` (~100) — see `deploy/OPERATOR-RECOVERY.md` capacity notes. |
 | `DATABASE_PROXY_ENABLED` | `false` | `database.proxy.enabled` | Bridge gate: keep `false` until prod hostname + `:15432` cert + NSG single-port approval. Legacy two-port strings stay authoritative until then. |
 | `DATABASE_PROXY_PORT` | `15432` | `database.proxy.port` | Single public TCP port (both modes). |
-| `DATABASE_PROXY_HOST` | `` | `database.proxy.host` | e.g. `db.example.com`. Required when enabled. Same host/port serve DIRECT+POOLED; options selects mode. Unknown SNI and missing/invalid mode fail closed. |
+| `DATABASE_PROXY_HOST` | `` | `database.proxy.host` | e.g. `db.example.com`. Required when enabled. Same host/port serve DIRECT+POOLED(+profiles); `options=-c omnidb.mode=` selects mode, `options=-c omnidb.pool_profile=<standard\|high_concurrency>` selects the pooled instance. Unknown SNI, missing/invalid mode, and unknown/duplicate/misplaced profile fail closed. |
 | `DATABASE_PROXY_BIND` | `127.0.0.1` | — (compose `ports`) | Loopback bind for the published `:15432`. Set `0.0.0.0` only with an SG allowlist in front. |
 | `DATABASE_PROXY_MAX_CONNS` | `2000` | — (compose only) | Bridge max concurrent client connections; excess refused without backend contact. |
 | `PGBOUNCER_ADMIN_PASSWORD` | `change-me-now` | `compose.postgres.yaml:pgbouncer-init` + `app.pgbouncer.admin-password` | **Must change when Postgres enabled.** Never logged. |

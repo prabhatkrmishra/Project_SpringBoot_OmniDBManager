@@ -134,6 +134,24 @@ app:
     # via auth_query. Must match the pooler container's userlist (see
     # compose.postgres.yaml pgbouncer-init) or every pooled login fails.
     auth-password: ${PGBOUNCER_AUTH_PASSWORD:change-me-now}
+  # S-14 high-concurrency pooler (dedicated instance pgbouncer-hc:6433,
+  # internal only). Transaction pooling with larger but explicitly capped
+  # per-db sizing. Aggregate backend budget across BOTH instances must respect
+  # PostgreSQL max_connections (see OPERATOR-RECOVERY capacity notes):
+  # usable ~= max_connections(100) - control-plane(10) - operational(5) ~= 85
+  # for tenants; e.g. 10 pooled DBs x standard(5) + 10 x HC(15) = 200 server
+  # connections would EXCEED the budget — operators must cap pooled DB count
+  # or lower per-db sizes before enabling HC broadly.
+  pgbouncer-hc:
+    port: ${OVERRIDE_PGBOUNCER_HC_PORT:6433}
+    max-client-conn: ${OVERRIDE_PGBOUNCER_HC_MAX_CLIENT_CONN:1000}
+    default-pool-size: ${OVERRIDE_PGBOUNCER_HC_DEFAULT_POOL_SIZE:15}
+    reserve-pool-size: ${OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_SIZE:5}
+    reserve-pool-timeout: ${OVERRIDE_PGBOUNCER_HC_RESERVE_POOL_TIMEOUT:3}
+    max-db-connections: ${OVERRIDE_PGBOUNCER_HC_MAX_DB_CONNECTIONS:25}
+    admin-password: ${PGBOUNCER_ADMIN_PASSWORD:change-me-now}
+    stats-password: ${PGBOUNCER_STATS_PASSWORD:change-me-now}
+    auth-password: ${PGBOUNCER_AUTH_PASSWORD:change-me-now}
   # Single-host TLS-bridge Database Proxy.
   # Disabled until the cutover gate passes (deploy/database-bridge-gate.md).
   # One public hostname + one public port serve BOTH modes; the mode travels

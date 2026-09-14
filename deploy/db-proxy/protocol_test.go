@@ -165,3 +165,112 @@ func TestCertStoreKeepsLastGoodOnBadReload(t *testing.T) {
 		t.Fatal("failed reload displaced the last-good certificate")
 	}
 }
+
+// S-14: profile contract — valid mode/profile combinations.
+func TestExtractRouteValid(t *testing.T) {
+	cases := []struct {
+		in      string
+		mode    string
+		profile string
+	}{
+		{"-c omnidb.mode=direct", "direct", ""},
+		{"-c omnidb.mode=pooled", "pooled", ""},
+		{"-c omnidb.mode=pooled -c omnidb.pool_profile=standard", "pooled", "standard"},
+		{"-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency", "pooled", "high_concurrency"},
+		{"-c omnidb.pool_profile=standard -c omnidb.mode=pooled", "pooled", "standard"},
+		{"-c search_path=foo -c omnidb.mode=pooled -c omnidb.pool_profile=standard", "pooled", "standard"},
+	}
+	for _, c := range cases {
+		m, p, err := extractRoute(c.in)
+		if err != nil || m != c.mode || p != c.profile {
+			t.Errorf("%q: got %q,%q,%v want %q,%q", c.in, m, p, err, c.mode, c.profile)
+		}
+	}
+}
+
+func TestExtractRouteRejects(t *testing.T) {
+	bad := []string{
+		"-c omnidb.mode=direct -c omnidb.pool_profile=standard",   // profile on direct
+		"-c omnidb.mode=direct -c omnidb.pool_profile=high_concurrency",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=banana",     // unknown
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=Standard",   // case-sensitive
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=STANDARD",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=",           // empty
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=standard -c omnidb.pool_profile=standard", // duplicate same
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=standard -c omnidb.pool_profile=high_concurrency", // duplicate different
+		"omnidb.pool_profile=standard -c omnidb.mode=pooled",      // bare profile without -c
+		"-c omnidb.mode=pooled omnidb.pool_profile=standard",      // bare second token
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=a_very_long_profile_name_over_32_chars_xx",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=has-dash",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=has space",
+		"-c omnidb.mode=direct -c omnidb.mode=pooled",             // duplicate mode still rejected
+	}
+	for _, in := range bad {
+		if _, _, err := extractRoute(in); err == nil {
+			t.Errorf("%q: expected rejection", in)
+		}
+	}
+}
+
+func TestStripBothRoutingTokens(t *testing.T) {
+	cases := map[string]string{
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=standard":            "",
+		"-c omnidb.pool_profile=standard -c omnidb.mode=pooled":            "",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency":    "",
+		"-c search_path=foo -c omnidb.mode=pooled -c omnidb.pool_profile=standard": "-c search_path=foo",
+		"-c a=1 -c omnidb.mode=pooled -c omnidb.pool_profile=standard -c b=2":      "-c a=1 -c b=2",
+		"-c myopt=\"a  b\" -c omnidb.mode=pooled -c omnidb.pool_profile=standard":  "-c myopt=\"a  b\"",
+	}
+	for in, want := range cases {
+		got, ok := stripRoutingToken(in)
+		if want == "" {
+			if ok {
+				t.Errorf("%q: expected empty, got %q", in, got)
+			}
+			continue
+		}
+		if !ok || got != want {
+			t.Errorf("%q: got %q,%v want %q", in, got, ok, want)
+		}
+	}
+}
+
+func TestRewriteStripsBothTokensNoLeak(t *testing.T) {
+	pkt := buildStartup(t, [][2]string{
+		{"user", "u"},
+		{"options", "-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency -c search_path=foo"},
+	})
+	params := parseAll(t, pkt)
+	out, err := rewriteStartup(pkt, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Contains(s, "omnidb.mode") || strings.Contains(s, "omnidb.pool_profile") {
+		t.Fatalf("routing leaked: %q", s)
+	}
+	if !strings.Contains(s, "search_path=foo") {
+		t.Fatal("unrelated option lost")
+	}
+}
+
+func TestCancelLabelIsolation(t *testing.T) {
+	cancels = &cancelRouter{}
+	cancels.put(11, 22, backendPooled)
+	cancels.put(33, 44, backendPooledHc)
+	cancels.put(55, 66, backendDirect)
+	if v, _ := cancels.get(11, 22); v != backendPooled {
+		t.Fatalf("standard label lost: %q", v)
+	}
+	if v, _ := cancels.get(33, 44); v != backendPooledHc {
+		t.Fatalf("hc label lost: %q", v)
+	}
+	if v, _ := cancels.get(55, 66); v != backendDirect {
+		t.Fatalf("direct label lost: %q", v)
+	}
+	// Unknown key fails closed.
+	if _, ok := cancels.get(99, 99); ok {
+		t.Fatal("unknown cancel should fail closed")
+	}
+	cancels = &cancelRouter{}
+}

@@ -154,7 +154,7 @@
                                     <i class="bi bi-clipboard"></i>
                                 </button>
                             </div>
-                            <div class="form-text" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and alternateConnectionString != null}">Primary — pooled via PgBouncer (app/workers, <code>sslmode=require</code>)</div>
+                            <div class="form-text" th:if="${database.engineType != null and database.engineType.name() == 'POSTGRES' and alternateConnectionString != null}">Primary — pooled via PgBouncer Standard (app/workers, <code>sslmode=require</code>). High Concurrency profile available with the same endpoint + credentials via <code>options=-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency</code> (transaction pooling, more headroom).</div>
                         </div>
                         <!-- Pooled link only when this DB was provisioned with pooling -->
                         <div class="mb-3" th:if="${alternateConnectionString != null}">

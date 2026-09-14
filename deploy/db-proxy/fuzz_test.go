@@ -13,6 +13,11 @@ func FuzzExtractMode(f *testing.F) {
 		"-c search_path=foo",
 		"-c omnidb.mode=direct -c omnidb.mode=pooled",
 		"omnidb.mode=direct",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=standard",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency",
+		"-c omnidb.mode=direct -c omnidb.pool_profile=standard",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=banana",
+		"omnidb.pool_profile=standard -c omnidb.mode=pooled",
 		"-c omnidb.mode=",
 		"-c omnidb.mode=direct\x00",
 		"-c omnidb.mode=Direct",
@@ -36,7 +41,7 @@ func FuzzRewriteNoLeak(f *testing.F) {
 	mk := func(opts string) []byte {
 		return buildStartupT(opts)
 	}
-	for _, o := range []string{"-c omnidb.mode=direct", "-c a=1 -c omnidb.mode=pooled", "-c omnidb.mode=direct -c x=\"a  b\""} {
+	for _, o := range []string{"-c omnidb.mode=direct", "-c a=1 -c omnidb.mode=pooled", "-c omnidb.mode=direct -c x=\"a  b\"", "-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency", "-c omnidb.mode=pooled -c omnidb.pool_profile=standard -c a=1"} {
 		f.Add([]byte(mk(o)))
 	}
 	f.Fuzz(func(t *testing.T, pkt []byte) {
@@ -56,12 +61,12 @@ func FuzzRewriteNoLeak(f *testing.F) {
 		}
 		for _, kv := range params {
 			if kv[0] == "options" {
-				if _, err := extractMode(kv[1]); err == nil {
+				if _, _, err := extractRoute(kv[1]); err == nil {
 					// input carried routing: output must not
 					if _, err2 := parseStartupParams(out[8:]); err2 == nil {
 						for _, kv2 := range mustParse(out) {
 							if kv2[0] == "options" {
-								if _, err3 := extractMode(kv2[1]); err3 == nil {
+								if _, _, err3 := extractRoute(kv2[1]); err3 == nil {
 									t.Fatalf("routing leaked: %q", kv2[1])
 								}
 							}
@@ -88,4 +93,31 @@ func buildStartupT(opts string) []byte {
 func mustParse(pkt []byte) [][2]string {
 	p, _ := parseStartupParams(pkt[8:])
 	return p
+}
+
+func FuzzExtractRoute(f *testing.F) {
+	for _, s := range []string{
+		"-c omnidb.mode=pooled",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=standard",
+		"-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency",
+		"-c omnidb.mode=direct",
+		"-c omnidb.mode=direct -c omnidb.pool_profile=standard",
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, opt string) {
+		m, pr, err := extractRoute(opt)
+		if err != nil {
+			return
+		}
+		if m != "direct" && m != "pooled" {
+			t.Fatalf("bad mode %q", m)
+		}
+		if pr != "" && pr != profileStandard && pr != profileHighConcurrency {
+			t.Fatalf("bad profile %q", pr)
+		}
+		if m == "direct" && pr != "" {
+			t.Fatalf("profile on direct accepted: %q", opt)
+		}
+	})
 }

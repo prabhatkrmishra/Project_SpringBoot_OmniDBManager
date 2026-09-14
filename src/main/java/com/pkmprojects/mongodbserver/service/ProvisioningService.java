@@ -362,6 +362,28 @@ public class ProvisioningService {
                                 log.warn("Provisioned pooled database '{}' — pooled health proven via {} path only, public proxy path unproven",
                                         dbName, result.path());
                             }
+                            // S-14 choice A: standard validation is the gate;
+                            // HC route validation is also performed when the HC
+                            // capability is enabled. HC failure warns only —
+                            // it never blocks standard provisioning (GATE G/H
+                            // independence) — but HC support is never claimed
+                            // from standard validation alone.
+                            try {
+                                var hcResult = connectionValidationService.validateHcDetailed(dbName, effectiveUser, password);
+                                if (hcResult == null) {
+                                    log.debug("Provisioned pooled database '{}' — HC validation returned no result (validator stub) — standard pooled healthy", dbName);
+                                } else if (!hcResult.healthy()) {
+                                    log.warn("Provisioned pooled database '{}' — HC profile validation failed/unconfigured (path={}) — standard pooled healthy, HC capability unproven",
+                                            dbName, hcResult.path());
+                                } else if (hcResult.path() != ConnectionValidationService.ValidationPath.PUBLIC) {
+                                    log.warn("Provisioned pooled database '{}' — HC health proven via {} path only, public bridge HC path unproven",
+                                            dbName, hcResult.path());
+                                } else {
+                                    log.info("Provisioned pooled database '{}' — HC profile health proven via PUBLIC path", dbName);
+                                }
+                            } catch (Exception hcEx) {
+                                log.warn("Provisioned pooled database '{}' — HC validation errored (standard healthy) — continuing", dbName, hcEx);
+                            }
                         }
                     }
                 } else if (engineType == DatabaseEngineType.MYSQL) {
@@ -587,7 +609,10 @@ public class ProvisioningService {
             // RECONNECT closes them (best-effort — rotation already committed,
             // so validate-and-warn instead of throwing on failure).
             if (engineType == DatabaseEngineType.POSTGRES && metadata.isPooled()) {
-                if (pgbouncerAdminService != null && !pgbouncerAdminService.reconnectDb(dbName)) {
+                // S-14: credentials are profile-independent — evict on ALL
+                // pooled instances (standard + HC). No profile-specific
+                // credential behavior.
+                if (pgbouncerAdminService != null && !pgbouncerAdminService.reconnectAll(dbName)) {
                     log.warn("Password rotated on pooled database '{}' but PgBouncer RECONNECT failed — pooled backends may serve stale auth until recycled", dbName);
                 }
                 if (connectionValidationService != null) {
@@ -669,10 +694,11 @@ public class ProvisioningService {
                 // must never turn a direct-path delete into a failed delete
                 // (§57). RESUME is unconditional in finally (also on partial
                 // failure) so held clients fail cleanly instead of hanging.
+                // S-14: PAUSE ALL relevant poolers for the DB (standard + HC).
                 boolean pooledPaused = engineType == DatabaseEngineType.POSTGRES
                         && pgbouncerAdminService != null
                         && metadata.map(ManagedDatabase::isPooled).orElse(false)
-                        && pgbouncerAdminService.pauseDb(dbName);
+                        && pgbouncerAdminService.pauseAll(dbName);
                 // Failure arm is terminal for this attempt: the role and the
                 // metadata are preserved, the failure is recorded, and the
                 // error surfaces as recoverable (retry-safe: PAUSE, terminate
@@ -700,7 +726,10 @@ public class ProvisioningService {
                     });
                     metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
                 } finally {
-                    if (pooledPaused) pgbouncerAdminService.resumeDb(dbName);
+                    // S-14: RESUME ALL relevant poolers (standard + HC), even
+                    // on partial failure. Failure of one pooler never prevents
+                    // attempting the other (handled inside resumeAll).
+                    if (pooledPaused) pgbouncerAdminService.resumeAll(dbName);
                 }
             }
             audit(AuditEvent.DELETE, dbName, engineType, metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());

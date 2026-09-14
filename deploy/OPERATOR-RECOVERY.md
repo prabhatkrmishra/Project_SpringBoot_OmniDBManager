@@ -10,18 +10,25 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   `DATABASE_PROXY_HOST` / `DATABASE_PROXY_PORT`, loopback-bound by default
   via `DATABASE_PROXY_BIND`).
 - Go TLS bridge terminates client TLS, reads `options=-c omnidb.mode=`
-  from the StartupMessage, then opens backend TLS (verify-full):
-  `direct` → `postgres:5432`, `pooled` → `pgbouncer:6432` → PostgreSQL.
+  (+ optional `-c omnidb.pool_profile=` for pooled) from the StartupMessage,
+  then opens backend TLS (verify-full): `direct` → `postgres:5432`,
+  `pooled` bare/`standard` → `pgbouncer:6432` → PostgreSQL,
+  `pooled` + `high_concurrency` → `pgbouncer-hc:6433` → PostgreSQL.
 - PostgreSQL is the final authentication/authorization authority (per-DB
   SCRAM roles, `REVOKE CONNECT FROM PUBLIC` on tenant databases).
 - PgBouncer runs transaction pooling with `auth_query` against a
   least-privilege lookup function; MongoDB holds control-plane metadata
   (source of truth, incl. encrypted tenant passwords); MySQL is a second
   managed engine with server-global `user@'%'` accounts.
-- Internal-only: PostgreSQL `5432`, PgBouncer `6432`, MongoDB `27017`,
-  MySQL `3306`, admin UIs (Adminer/mongo-express/phpMyAdmin, loopback +
-  ADMIN-gated in-app proxy). Externally reachable: the app UI/API (via
-  nginx) and the single database gateway `:15432`.
+- Internal-only: PostgreSQL `5432`, PgBouncer `6432`, PgBouncer-HC `6433`,
+  MongoDB `27017`, MySQL `3306`, admin UIs (Adminer/mongo-express/phpMyAdmin,
+  loopback + ADMIN-gated in-app proxy). Externally reachable: the app UI/API
+  (via nginx) and the single database gateway `:15432`.
+- Pooled profiles: `standard` (existing pooler, default) and
+  `high_concurrency` (dedicated pooler, transaction pooling with larger
+  capped sizing). Profile selection is per connection; configuration is per
+  pooler instance. Both use the same credentials/database; `5432`/`6432`/
+  `6433` are never public.
 
 ## Normal verification
 
@@ -31,15 +38,19 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
   UP means Spring serves management work; it never enumerates tenants.
   Dependency detail stays behind ADMIN-only `/actuator/health`.
 - Proxy: `docker logs omnidb-database-proxy --tail 5` shows
-  `route mode=direct|pooled backend=...`; no passwords/SCRAM/SQL appear.
+  `route mode=direct|pooled profile=none|standard|high_concurrency backend=...`;
+  no passwords/SCRAM/SQL/raw-options appear.
 - PostgreSQL: `docker exec omnidb-postgres pg_isready` (also the container
   healthcheck).
 - PgBouncer: stats login + `SHOW POOLS;` (also the container healthcheck).
 - Direct (tenant creds, CA file): connect with
   `sslmode=verify-full` + `options="-c omnidb.mode=direct"`, expect the
   tenant identity from `SELECT current_user`.
-- Pooled: same with `-c omnidb.mode=pooled`; `wrong password` must fail on
-  both modes.
+- Pooled: same with `-c omnidb.mode=pooled` (bare = standard),
+  `-c omnidb.mode=pooled -c omnidb.pool_profile=standard`, and
+  `-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency`;
+  `wrong password` must fail on all modes/profiles. Unknown, duplicate, or
+  direct+profile tokens fail closed (`missing or invalid connection mode`).
 - Reconciliation (ADMIN): `GET /api/admin/reconcile` lists
   HEALTHY / MISSING_* / ORPHAN_* / INCONSISTENT per engine, read-only.
 
@@ -63,9 +74,49 @@ into shared logs; never expose PostgreSQL/PgBouncer ports publicly.
 ### PgBouncer stuck PAUSED (pooled logins hang after a crash)
 
 - Check: pooler console `SHOW POOLS;` — a paused database shows clients waiting.
+  Check BOTH instances: standard (`127.0.0.1:6432`) and HC (`pgbouncer-hc:6433`
+  via the compose network).
 - Remediate: restart OmniDB (startup RESUME reconciles every
-  metadata-pooled database), or console `RESUME "<db>";` directly.
-- Verify: new pooled logins succeed promptly on the public bridge.
+  metadata-pooled database on BOTH poolers, standard then HC), or console
+  `RESUME "<db>";` on each instance directly.
+- Verify: new pooled logins succeed promptly on the public bridge on both profiles.
+
+### Capacity budget (aggregate PostgreSQL backends)
+
+- Usable tenant backend budget ~= `max_connections` (100) - control-plane (10)
+  - operational reserve (5) ~= 85 server connections.
+- Standard per-db worst case: `default_pool_size`(5) + `reserve_pool_size`(2);
+  HC per-db worst case: `15 + 5`. With N pooled DBs on each profile, worst-case
+  backends ~= N_std * 7 + N_hc * 20 (plus `max_db_connections` caps 10/25).
+  Example: 10 pooled DBs x standard(5) + 2 HC DBs x HC(15) ~= 50 + 30 = 80 —
+  fits; 10 x standard + 10 x HC ~= 50 + 150 = 200 EXCEEDS the budget.
+- Operators must cap pooled DB count or lower per-db sizes before enabling HC
+  broadly. HC bursts never resize standard pools (separate instances), but
+  PostgreSQL itself remains the shared ceiling — document, do not overcommit.
+- Bridge `max_conns`(2000) >> pooler `max_client_conn`(1000/instance) >>
+  per-db server caps >> PG `max_connections`(100): backpressure narrows toward
+  PostgreSQL, never the reverse.
+
+### Rollback / mixed-version behavior
+
+- NEW bridge: unknown profile is rejected (`missing or invalid connection
+  mode`); no fallback to standard.
+- A profiled HC string that reaches a pooler/backend that rejects unknown
+  StartupMessage `options` (e.g. PgBouncer `ignore_startup_parameters` not
+  covering `options`, or an OLD bridge that forwards `options=` unstripped)
+  fails CLOSED with `unsupported startup parameter in options` — never silently
+  downgraded. Live-verified: HEAD bridge forwards profiled strings to the
+  standard pooler, which rejects them (see S-14 report).
+- Therefore treat newly generated profiled strings as requiring the new bridge
+  when HC semantics matter; bare pooled strings keep working everywhere.
+- Delete-then-immediate-recreate of the same DB name can hit a pooler
+  drop-window: server connections held by either pooler to the dropped DB
+  crash on the first post-recreate `auth_query` (`server conn crashed?`),
+  and the failed attempt's cleanup `DROP` can lose a race with pooler
+  reconnects (`being accessed by other users`). Remediation: terminate
+  backends for the name, `RECONNECT` on both poolers, retry once.
+  Live-observed on both instances during S-14 verification; pre-existing
+  single-pooler behavior, not profile-specific.
 
 ### PostgreSQL / PgBouncer / proxy unavailable
 
