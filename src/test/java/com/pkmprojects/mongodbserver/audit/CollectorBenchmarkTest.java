@@ -22,7 +22,7 @@ class CollectorBenchmarkTest {
     void benchmarkIngestionRates() throws Exception {
         InMemoryQueryAuditStore store = new InMemoryQueryAuditStore();
         AuditCollectorService c = new AuditCollectorService(store,
-                new QueryAuditProperties(true, 30, 2000, true, true, true));
+                QueryAuditProperties.forTests(true, 30, 2000, true, true, true));
 
         String pgLine = "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"bench\","
                 + "\"dbname\":\"benchdb\",\"pid\":1,\"remote_host\":\"10.0.0.1\","
@@ -82,7 +82,7 @@ class CollectorBenchmarkTest {
     void repeatedShapesDedupeEfficiently() {
         InMemoryQueryAuditStore store = new InMemoryQueryAuditStore();
         AuditCollectorService c = new AuditCollectorService(store,
-                new QueryAuditProperties(true, 30, 2000, true, false, false));
+                QueryAuditProperties.forTests(true, 30, 2000, true, false, false));
         String line = "{\"error_severity\":\"LOG\",\"message\":\"statement: SELECT 1;\"}";
         long t0 = System.nanoTime();
         for (int i = 0; i < 20000; i++) {

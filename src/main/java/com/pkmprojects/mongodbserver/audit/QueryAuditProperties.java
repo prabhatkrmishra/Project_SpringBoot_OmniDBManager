@@ -19,10 +19,17 @@ public record QueryAuditProperties(
         String mysqlSlowlog,
         String bridgeLog) {
 
-    /** Convenience constructor for tests/legacy call sites (default tail paths). */
-    public QueryAuditProperties(boolean enabled, int retentionDays, int maxNormalizedLength,
-                                boolean postgresEnabled, boolean mysqlEnabled, boolean mongoEnabled) {
-        this(enabled, retentionDays, maxNormalizedLength, postgresEnabled, mysqlEnabled, mongoEnabled,
+    /**
+     * Test-only factory with default tail paths. A static factory (not a
+     * constructor overload): Spring Boot applies record constructor binding
+     * only with a single canonical constructor, so a second constructor
+     * would silently break application startup ("No default constructor
+     * found"). Never used by runtime configuration binding.
+     */
+    public static QueryAuditProperties forTests(boolean enabled, int retentionDays, int maxNormalizedLength,
+                                                boolean postgresEnabled, boolean mysqlEnabled, boolean mongoEnabled) {
+        return new QueryAuditProperties(enabled, retentionDays, maxNormalizedLength,
+                postgresEnabled, mysqlEnabled, mongoEnabled,
                 "/var/lib/postgresql/log/postgresql.json", "/var/lib/mysql/slow.log", "/var/log/omnidb/bridge.log");
     }
 

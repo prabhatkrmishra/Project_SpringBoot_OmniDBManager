@@ -17,7 +17,7 @@ class AuditCollectorServiceTest {
 
     private AuditCollectorService collector(InMemoryQueryAuditStore store, boolean pg, boolean my, boolean mo) {
         return new AuditCollectorService(store,
-                new QueryAuditProperties(true, 30, 2000, pg, my, mo));
+                QueryAuditProperties.forTests(true, 30, 2000, pg, my, mo));
     }
 
     @Test
