@@ -89,6 +89,7 @@ public final class QueryShapeRedactor {
             }
         }
         s = WS.matcher(flat.toString().trim()).replaceAll(" ");
+        s = collapseValuesTuples(s);
         // Collapse long placeholder runs (?, ?, ?) to a single marker.
         s = s.replaceAll("\\(\\s*(\\?\\s*,\\s*){2,}\\?\\s*\\)", "(?)");
         s = s.replaceAll("(\\?\\s*,\\s*){3,}\\?", "?");
@@ -249,6 +250,142 @@ public final class QueryShapeRedactor {
             i++;
         }
         return out.toString();
+    }
+
+    /**
+     * Canonicalizes multi-row {@code VALUES (...), (...), ...} tuple runs into
+     * one deterministic shape: the first tuple is kept verbatim and every
+     * subsequent tuple is dropped, so tuple count never changes the shape
+     * hash. Runs after literal folding, so tuple bodies already consist of
+     * {@code ?} placeholders, whitespace, commas and nested parentheses only.
+     *
+     * <p>Linear scan with paren-depth tracking: only the {@code VALUES}
+     * keyword outside any nesting starts a run; unbalanced input is left
+     * untouched (fail-safe). Single-tuple statements pass through
+     * byte-identical.</p>
+     */
+    private static String collapseValuesTuples(String s) {
+        int idx = indexOfValuesKeyword(s);
+        if (idx < 0) {
+            return s;
+        }
+        StringBuilder out = new StringBuilder(s.length());
+        out.append(s, 0, idx + 6);
+        int i = idx + 6;
+        int n = s.length();
+        boolean firstTupleKept = false;
+        int droppedTuples = 0;
+        while (i < n) {
+            char c = s.charAt(i);
+            if (c == '(') {
+                int depth = 1;
+                int j = i + 1;
+                while (j < n && depth > 0) {
+                    char k = s.charAt(j);
+                    if (k == '(') depth++;
+                    else if (k == ')') depth--;
+                    j++;
+                }
+                if (depth != 0) {
+                    // Unbalanced: fail safe, keep the remainder verbatim.
+                    out.append(s, i, n);
+                    return out.toString();
+                }
+                if (!firstTupleKept) {
+                    out.append(s, i, j);
+                    firstTupleKept = true;
+                } else {
+                    droppedTuples++;
+                }
+                i = j;
+                // Peek past separators: if dropped tuples are followed by a
+                // non-tuple continuation (e.g. RETURNING), keep exactly one
+                // separator space so words don't fuse.
+                if (droppedTuples > 0) {
+                    // If another tuple follows, the run continues: no space.
+                    // Otherwise keep exactly one separator space before a
+                    // trailing continuation (e.g. RETURNING) so words fuse.
+                    int t = i;
+                    boolean runContinues = false;
+                    while (t < n && (s.charAt(t) == ',' || Character.isWhitespace(s.charAt(t)))) {
+                        if (s.charAt(t) == ',') {
+                            int u = t + 1;
+                            while (u < n && Character.isWhitespace(s.charAt(u))) u++;
+                            if (u < n && s.charAt(u) == '(') {
+                                runContinues = true;
+                                break;
+                            }
+                        }
+                        t++;
+                    }
+                    if (!runContinues && t < n && s.charAt(t) != ')' && s.charAt(t) != ';'
+                            && s.charAt(t) != ',') {
+                        out.append(' ');
+                    }
+                }
+                // Skip separators between tuples: whitespace runs and commas
+                // that are followed by another '('.
+                while (i < n) {
+                    char sep = s.charAt(i);
+                    if (Character.isWhitespace(sep)) {
+                        if (!firstTupleKept) {
+                            out.append(sep);
+                        }
+                        i++;
+                    } else if (sep == ',') {
+                        int t = i + 1;
+                        while (t < n && Character.isWhitespace(s.charAt(t))) t++;
+                        if (t < n && s.charAt(t) == '(' && firstTupleKept) {
+                            // Another tuple: drop it (skip comma, loop continues).
+                            i++;
+                        } else {
+                            out.append(s, i, n);
+                            return out.toString();
+                        }
+                    } else {
+                        break;
+                    }
+                }
+                continue;
+            } else if (c == ',' || Character.isWhitespace(c)) {
+                out.append(c);
+                i++;
+            } else {
+                // Not a tuple run (DEFAULT, ROW expressions, CTE edge cases):
+                // keep the remainder verbatim.
+                out.append(s, i, n);
+                return out.toString();
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Finds the {@code VALUES} keyword outside any parenthesis nesting,
+     * case-insensitive, bounded by non-identifier characters. Returns the
+     * start index or -1.
+     */
+    private static int indexOfValuesKeyword(String s) {
+        int depth = 0;
+        int n = s.length();
+        for (int i = 0; i + 6 <= n; i++) {
+            char c = s.charAt(i);
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                if (depth > 0) depth--;
+            } else if (depth == 0 && (c == 'V' || c == 'v')) {
+                if (s.regionMatches(true, i, "VALUES", 0, 6)) {
+                    boolean beforeOk = i == 0 || (!Character.isLetterOrDigit(s.charAt(i - 1)) && s.charAt(i - 1) != '_');
+                    int e = i + 6;
+                    boolean afterOk = e >= n || (!Character.isLetterOrDigit(s.charAt(e)) && s.charAt(e) != '_');
+                    if (beforeOk && afterOk) {
+                        return i;
+                    }
+                }
+            }
+        }
+        return -1;
     }
 
     /**

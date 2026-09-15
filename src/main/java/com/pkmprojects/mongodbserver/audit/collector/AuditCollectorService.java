@@ -56,6 +56,7 @@ public class AuditCollectorService {
     private final Set<String> seen = ConcurrentHashMap.newKeySet();
     private final Deque<String> seenOrder = new ArrayDeque<>();
     private final Map<String, BridgeSessionEvent> sessions = new ConcurrentHashMap<>();
+    private final PostgresStatementCorrelator statementCorrelator = new PostgresStatementCorrelator();
     private final ScheduledExecutorService drainer;
 
     public AuditCollectorService(QueryAuditStore store, QueryAuditProperties properties) {
@@ -104,16 +105,59 @@ public class AuditCollectorService {
                     ingress != null ? ingress.clientIp() : null,
                     ingress != null ? ingress.username() : null,
                     ingress != null ? ingress.database() : null);
-            if (parsed.event().isPresent()) {
-                // Stamp the correlated bridge session id when present.
-                if (ingress != null && parsed.event().get().getSessionId() == null) {
-                    parsed.event().get().setSessionId("bridge:" + ingress.sessionId());
+            if (parsed.duration().isPresent()) {
+                // Duration sibling: join to the pending statement with the
+                // same backend identity, or drop when unmatched. Never an
+                // event of its own.
+                var sib = parsed.duration().get();
+                QueryAuditEvent enriched = statementCorrelator.match(
+                        sib.pid(), sib.sessionId(), sib.durationMs());
+                if (enriched != null) {
+                    stampBridgeSession(enriched, ingress);
+                    offer(enriched);
                 }
-                offer(parsed.event().get());
+            }
+            if (parsed.event().isPresent()) {
+                // Statement (or error) line: retain pending its duration
+                // sibling; flush any duplicate/TTL-expired entries first.
+                QueryAuditEvent event = parsed.event().get();
+                stampBridgeSession(event, ingress);
+                String pid = event.getConnectionId();
+                String sessionId = event.getSessionId();
+                if (pid != null && sessionId != null && event.getErrorCode() == null) {
+                    for (QueryAuditEvent flushed : statementCorrelator.retain(pid, sessionId, event)) {
+                        offer(flushed);
+                    }
+                } else {
+                    // Error events (already complete) and identity-less lines
+                    // bypass correlation: errors must never wait for, or be
+                    // merged with, a later duration.
+                    offer(event);
+                }
+            }
+            for (QueryAuditEvent expired : statementCorrelator.flushExpired()) {
+                offer(expired);
             }
         } catch (Exception e) {
             log.debug("postgres audit line skipped: {}", e.getMessage());
         }
+    }
+
+    /** Stamps the correlated bridge session id when the event lacks one. */
+    private static void stampBridgeSession(QueryAuditEvent event, BridgeSessionEvent ingress) {
+        if (ingress != null && event.getSessionId() == null) {
+            event.setSessionId("bridge:" + ingress.sessionId());
+        }
+    }
+
+    /** Pending statement↔duration joins awaiting their sibling (diagnostic). */
+    public int pendingStatements() {
+        return statementCorrelator.pendingCount();
+    }
+
+    /** Duration siblings dropped for lack of a pending statement (diagnostic). */
+    public long unmatchedDurations() {
+        return statementCorrelator.unmatchedDurations();
     }
 
     /**
@@ -283,6 +327,8 @@ public class AuditCollectorService {
                 "persisted", persisted.get(),
                 "dropped", dropped.get() + store.droppedCount(),
                 "sessions", sessions.size(),
+                "pendingStatements", statementCorrelator.pendingCount(),
+                "unmatchedDurations", statementCorrelator.unmatchedDurations(),
                 "latest", store.latestObservedAt().map(Instant::toString).orElse("none"));
     }
 

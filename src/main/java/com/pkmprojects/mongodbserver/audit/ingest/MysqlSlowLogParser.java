@@ -100,6 +100,12 @@ public final class MysqlSlowLogParser {
                 rowsExamined = parseLong(m.group(4));
             }
         }
+        // Manager control-plane surface (own JDBC pool as root, admin tooling):
+        // never tenant activity. Tenant accounts are provisioned per-database
+        // (omni_*/legacy names); see the PG parser for the full rationale.
+        if (user != null && (user.equals("root") || user.equals("mysql.sys"))) {
+            return new Parsed(Optional.empty(), false);
+        }
         String statement = sql.toString().trim();
         if (statement.isEmpty() || statement.startsWith("# administrator command:")) {
             return new Parsed(Optional.empty(), false);

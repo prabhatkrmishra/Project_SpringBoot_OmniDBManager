@@ -83,6 +83,61 @@ class AuditIngestParserTest {
     }
 
     @Test
+    void postgresLifecycleMessagesStayDropped() {
+        // Intentionally NOT tracked: connection/auth/disconnect lines are
+        // session lifecycle, not tenant queries. No session/* class exists;
+        // these must never become empty-shape query events.
+        String[] lifecycle = {
+            "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"pid\":132,\"error_severity\":\"LOG\",\"message\":\"connection received: host=127.0.0.1 port=57540\"}",
+            "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"u\",\"dbname\":\"d\",\"error_severity\":\"LOG\",\"message\":\"connection authenticated: user=\\\"u\\\" method=scram-sha-256\"}",
+            "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"u\",\"dbname\":\"d\",\"error_severity\":\"LOG\",\"message\":\"connection authorized: user=u database=d application_name=psql\"}",
+            "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"u\",\"dbname\":\"d\",\"error_severity\":\"LOG\",\"message\":\"disconnection: session time: 0:00:00.003 user=u database=d host=127.0.0.1 port=57540\"}"
+        };
+        for (String line : lifecycle) {
+            var parsed = PostgresJsonlogParser.parseLine(line, false, null, null, null);
+            assertThat(parsed.event()).isEmpty();
+            assertThat(parsed.malformed()).isFalse();
+        }
+    }
+
+    @Test
+    void postgresControlPlaneUsersAreDroppedUnlessTenantMarker() {
+        // Manager JDBC pool (driver default app name) and Adminer SSO (empty
+        // app name) both authenticate as the superuser: manager surface.
+        for (String app : new String[]{"PostgreSQL JDBC Driver", "", "adminer"}) {
+            String line = "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"root\","
+                    + "\"dbname\":\"postgres\",\"error_severity\":\"LOG\","
+                    + "\"application_name\":\"" + app + "\","
+                    + "\"message\":\"statement: SELECT * FROM provisioned_databases;\"}";
+            var parsed = PostgresJsonlogParser.parseLine(line, false, null, null, null);
+            assertThat(parsed.event()).isEmpty();
+        }
+        // Same superuser name via a bridge-issued tenant string (pinned
+        // application_name=omnidb) is tenant traffic: kept, authoritative.
+        String tenant = "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"root\","
+                + "\"dbname\":\"tenantdb\",\"error_severity\":\"LOG\","
+                + "\"application_name\":\"omnidb\","
+                + "\"message\":\"statement: SELECT * FROM orders;\"}";
+        var kept = PostgresJsonlogParser.parseLine(tenant, false, "203.0.113.7", "root", "tenantdb");
+        assertThat(kept.event()).isPresent();
+        assertThat(kept.event().get().getAttribution()).isEqualTo(QueryAttribution.AUTHORITATIVE);
+    }
+
+    @Test
+    void mysqlAndMongoRootUsersAreDropped() {
+        String block = "# Time: 2026-09-14T21:10:00.664691Z\n"
+                + "# User@Host: root[root] @ localhost []  Id:    13\n"
+                + "# Query_time: 0.010115  Lock_time: 0.000006 Rows_sent: 0  Rows_examined: 0\n"
+                + "SET timestamp=1789420200;\n"
+                + "SELECT * FROM provisioned_databases;";
+        assertThat(MysqlSlowLogParser.parseBlock(block, "mongodb_admin").event()).isEmpty();
+        org.bson.Document doc = new org.bson.Document("op", "query").append("ns", "tenant.coll")
+                .append("command", new org.bson.Document("find", "coll"))
+                .append("ts", new java.util.Date()).append("client", "9.9.9.9").append("user", "root@admin");
+        assertThat(MongoProfilerParser.parse(doc).event()).isEmpty();
+    }
+
+    @Test
     void postgresMalformedLineIsFlagged() {
         assertThat(PostgresJsonlogParser.parseLine("not json", false, null, null, null).malformed()).isTrue();
         assertThat(PostgresJsonlogParser.parseLine(null, false, null, null, null).malformed()).isTrue();

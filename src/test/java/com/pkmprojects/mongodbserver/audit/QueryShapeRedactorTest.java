@@ -101,6 +101,46 @@ class QueryShapeRedactorTest {
     }
 
     @Test
+    void multiRowValuesCanonicalizeToTupleCountInvariantShape() {
+        String one = QueryShapeRedactor.normalize("INSERT INTO t(a,b) VALUES ('x', 1)");
+        String two = QueryShapeRedactor.normalize("INSERT INTO t(a,b) VALUES ('x', 1), ('y', 2)");
+        String three = QueryShapeRedactor.normalize(
+                "INSERT INTO t(a,b) VALUES ('x', 1), ('y', 2), ('z', 3)");
+        StringBuilder many = new StringBuilder("INSERT INTO t(a,b) VALUES ");
+        for (int i = 0; i < 12; i++) many.append("('v', ").append(i).append("), ");
+        many.append("('v', 99)");
+        String twelve = QueryShapeRedactor.normalize(many.toString());
+        assertThat(one).isEqualTo("INSERT INTO t(a,b) VALUES ('?', ?)");
+        assertThat(two).isEqualTo("INSERT INTO t(a,b) VALUES ('?', ?)");
+        assertThat(three).isEqualTo(two);
+        assertThat(twelve).isEqualTo(two);
+        assertThat(QueryShapeRedactor.shapeHash(two))
+                .isEqualTo(QueryShapeRedactor.shapeHash(three))
+                .isEqualTo(QueryShapeRedactor.shapeHash(twelve));
+    }
+
+    @Test
+    void valuesCanonicalizationHandlesEdgeCases() {
+        assertThat(QueryShapeRedactor.normalize("INSERT INTO t(a,b,c) VALUES ('s', 1, NULL), (DATE '2024-01-02', 2.5, null)"))
+                .isEqualTo("INSERT INTO t(a,b,c) VALUES ('?', ?, NULL)");
+        assertThat(QueryShapeRedactor.normalize("INSERT INTO t(a) VALUES ('it''s'), ('x')"))
+                .isEqualTo("INSERT INTO t(a) VALUES ('?')");
+        assertThat(QueryShapeRedactor.normalize("insert into t values (1),(2)"))
+                .isEqualTo("insert into t values (?)");
+        assertThat(QueryShapeRedactor.normalize("INSERT INTO t(a) VALUES (1")).isNotBlank();
+        assertThat(QueryShapeRedactor.normalize("INSERT INTO t(a) VALUES")).isNotBlank();
+        assertThat(QueryShapeRedactor.normalize("SELECT * FROM (VALUES (1), (2)) AS v(x)"))
+                .isEqualTo("SELECT * FROM (VALUES (?), (?)) AS v(x)");
+        StringBuilder big = new StringBuilder("INSERT INTO t(a) VALUES ");
+        for (int i = 0; i < 5000; i++) big.append("('x'), ");
+        big.append("('x')");
+        String out = QueryShapeRedactor.normalize(big.toString());
+        assertThat(out).isEqualTo("INSERT INTO t(a) VALUES ('?')");
+        assertThat(QueryShapeRedactor.normalize(
+                "INSERT INTO t(a,b) VALUES ('hunter2', 1), ('x', 2)")).doesNotContain("hunter2");
+    }
+
+    @Test
     void blankInputYieldsPlaceholder() {
         assertThat(QueryShapeRedactor.normalize(null)).isEqualTo("?");
         assertThat(QueryShapeRedactor.normalize("   ")).isEqualTo("?");
