@@ -62,6 +62,27 @@ class AuditIngestParserTest {
     }
 
     @Test
+    void postgresBareDurationLinesAreDropped() {
+        String line = "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"u\","
+                + "\"dbname\":\"d\",\"error_severity\":\"LOG\","
+                + "\"message\":\"duration: 1.946 ms\"}";
+        var parsed = PostgresJsonlogParser.parseLine(line, false, null, null, null);
+        assertThat(parsed.event()).isEmpty();
+        assertThat(parsed.malformed()).isFalse();
+    }
+
+    @Test
+    void postgresPoolerInternalUsersAreDropped() {
+        for (String internal : new String[]{"pgbouncer_auth", "pgbouncer_stats"}) {
+            String line = "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"" + internal + "\","
+                    + "\"dbname\":\"taskpilot_ai_test\",\"error_severity\":\"LOG\","
+                    + "\"message\":\"statement: SELECT * FROM pgbouncer.user_lookup('x');\"}";
+            var parsed = PostgresJsonlogParser.parseLine(line, true, "203.0.113.9", "tenant", "taskpilot_ai_test");
+            assertThat(parsed.event()).isEmpty();
+        }
+    }
+
+    @Test
     void postgresMalformedLineIsFlagged() {
         assertThat(PostgresJsonlogParser.parseLine("not json", false, null, null, null).malformed()).isTrue();
         assertThat(PostgresJsonlogParser.parseLine(null, false, null, null, null).malformed()).isTrue();
