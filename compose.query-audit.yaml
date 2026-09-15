@@ -1,0 +1,45 @@
+# Query-audit collector — opt-in VPS-local telemetry tails.
+#
+# The collector is the manager JVM itself (AuditTailRunner inside
+# omnidb-manager), NOT a new binary or tenant-path proxy. This override file
+# mounts database-native telemetry into the manager container read-only and
+# sets safe QUERY_AUDIT_* defaults (all sources still OFF unless .env opts in).
+#
+# Usage:
+#   docker compose -f compose.yaml -f compose.query-audit.yaml --profile query-audit up -d
+#
+# Production enabling additionally requires, per engine:
+#   postgres: log_destination=jsonlog + logging_collector=on + log_statement
+#   mysql:    slow-query-log=1 + long-query-time=0 (Community slow log)
+#   mongo:    per-tenant setProfilingLevel (Community profiler)
+# See deploy/query-audit-collector/README.md for the full runbook.
+#
+# Rollback: drop this file from the compose command and/or set
+# QUERY_AUDIT_ENABLED=false. Tenant traffic never depended on it.
+#
+# NOTE: the manager service is defined by the deploy layout (systemd/tmux
+# running the release JAR on the VPS, not a compose service in this repo),
+# so this file documents the volume/env contract rather than mounting into
+# a compose-managed app container. When the manager runs under compose, add:
+#   volumes:
+#     - postgres-data:/var/lib/postgresql:ro            # PG jsonlog dir
+#     - mysql-data:/var/lib/mysql:ro                    # MySQL slow log
+#     - /var/lib/docker/containers:/var/lib/docker/containers:ro  # bridge logs
+services:
+  query-audit-contract:
+    profiles:
+      - query-audit
+    image: busybox:1.36
+    container_name: omnidb-query-audit-contract
+    restart: "no"
+    command: ["sh", "-c", "echo query-audit volume contract only; exit 0"]
+    environment:
+      QUERY_AUDIT_ENABLED: ${QUERY_AUDIT_ENABLED:-false}
+      QUERY_AUDIT_POSTGRES: ${QUERY_AUDIT_POSTGRES:-false}
+      QUERY_AUDIT_MYSQL: ${QUERY_AUDIT_MYSQL:-false}
+      QUERY_AUDIT_MONGO: ${QUERY_AUDIT_MONGO:-false}
+      QUERY_AUDIT_RETENTION_DAYS: ${QUERY_AUDIT_RETENTION_DAYS:-30}
+      QUERY_AUDIT_MAX_SHAPE: ${QUERY_AUDIT_MAX_SHAPE:-2000}
+      QUERY_AUDIT_PG_JSONLOG: ${QUERY_AUDIT_PG_JSONLOG:-/var/lib/postgresql/log/postgresql.json}
+      QUERY_AUDIT_MYSQL_SLOWLOG: ${QUERY_AUDIT_MYSQL_SLOWLOG:-/var/lib/mysql/slow.log}
+      QUERY_AUDIT_BRIDGE_LOG: ${QUERY_AUDIT_BRIDGE_LOG:-/var/log/omnidb/bridge.log}

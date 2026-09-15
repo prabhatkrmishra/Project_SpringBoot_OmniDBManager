@@ -52,6 +52,25 @@ docker compose -f compose.mysql.yaml up -d
 
 > Pooling is per-database at provision time (**Route via PgBouncer** checkbox, stored as `pooled`). No toggle after — pooled strings use `PGBOUNCER_ISSUED_PORT` (default `6432`), direct use `POSTGRES_ISSUED_PORT` (default `5432`). When `POSTGRES_ISSUED_HOST` blank, both resolve to `127.0.0.1:9813` / `127.0.0.1:6432` for local dev.
 
+## 4a. Query-Activity Auditing (opt-in, normalized/redacted only)
+
+| Variable | Default | Required | Where Used | Description |
+|---|---|---|---|---|
+| `QUERY_AUDIT_ENABLED` | `false` | No | `application.yml:app.query-audit.enabled` | Master switch for ingestion. `false` = collector idles, UI shows empty state. |
+| `QUERY_AUDIT_POSTGRES` | `false` | No | `application.yml:app.query-audit.postgres-enabled` | Tail PostgreSQL `jsonlog` (requires `log_destination=jsonlog` + statement logging on the server). Pooled statements are labeled `INFERRED`. |
+| `QUERY_AUDIT_MYSQL` | `false` | No | `application.yml:app.query-audit.mysql-enabled` | Tail MySQL slow log (`long_query_time=0`, rotated). `User@Host` identity is authoritative. |
+| `QUERY_AUDIT_MONGO` | `false` | No | `application.yml:app.query-audit.mongo-enabled` | Tail per-tenant profiler (`system.profile`). `user`/`client` authoritative; system DBs excluded. |
+| `QUERY_AUDIT_RETENTION_DAYS` | `30` | No | TTL on `query_audit.observedAt` | 1–365 days. Bounded storage; drop the collection to purge immediately. |
+| `QUERY_AUDIT_MAX_SHAPE` | `2000` | No | normalized-shape cap | 256–8000 chars. Literal values are never stored regardless of this cap. |
+
+Fail-open: Mongo outages never block tenant traffic — drops surface at `/api/admin/query-activity/status`. See `deploy/query-audit-collector/README.md` for the full runbook.
+
+| `QUERY_AUDIT_PG_JSONLOG` | `/var/lib/postgresql/log/postgresql.json` | No | `application.yml:app.query-audit.pg-jsonlog` | PG jsonlog tail path (rotation: rename+new-file, truncate, replace all handled; resume via inode+offset). |
+| `QUERY_AUDIT_MYSQL_SLOWLOG` | `/var/lib/mysql/slow.log` | No | `application.yml:app.query-audit.mysql-slowlog` | MySQL slow-log tail path (multi-line blocks, partial-block buffering, rotation handled). |
+| `QUERY_AUDIT_BRIDGE_LOG` | `/var/log/omnidb/bridge.log` | No | `application.yml:app.query-audit.bridge-log` | Bridge container-log tail path (session-start/end JSON, envelope or raw). |
+
+Disk/rotation contract: source logs rotate via their native drivers (PG logging_collector, MySQL slow-log rotation, Docker json-file max-size); the collector never deletes source logs. Mongo `query_audit` is TTL-bounded (`QUERY_AUDIT_RETENTION_DAYS`, 1–365, default 30). At ~50 bytes normalized shape + ~200 bytes envelope per event, 10 QPS ≈ 216KB/day — negligible; 100 sustained QPS ≈ 2.2MB/day. Guarantee: at-least-once + content dedupe (same-ms profiler replays possible, absorbed downstream).
+
 ## 4. MySQL Engine
 
 | Variable | Default | Required | Where Used | Description |

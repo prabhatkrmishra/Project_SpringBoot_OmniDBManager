@@ -50,6 +50,9 @@
                 <a class="sidebar-link" th:classappend="${page == 'monitor'} ? 'active'" th:href="@{/monitor}">
                     <i class="bi bi-graph-up-arrow"></i> Monitor
                 </a>
+                <a class="sidebar-link" th:classappend="${page == 'query-activity'} ? 'active'" th:href="@{/query-activity}" th:if="${canWrite}">
+                    <i class="bi bi-activity"></i> Query activity
+                </a>
 
                 <div class="sidebar-section-label mt-3">Provision</div>
                 <a class="sidebar-link" th:classappend="${page == 'provision'} ? 'active'" th:href="@{/provision}">

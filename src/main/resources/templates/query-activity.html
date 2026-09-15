@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{fragments/nav :: head('Query Activity')}"></head>
+<body>
+    <div class="layout">
+        <aside th:replace="~{fragments/nav :: nav('query-activity')}"></aside>
+
+        <div class="main">
+            <main th:replace="~{fragments/nav :: flash}"></main>
+
+            <main class="container-xxl py-4">
+                <div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3">
+                    <div>
+                        <h1 class="mb-1">Query activity</h1>
+                        <p class="mb-0">
+                            <span th:text="${totalCount}">0</span> recorded statement(s) —
+                            page <span th:text="${page}">1</span> of <span th:text="${totalPages}">1</span>
+                        </p>
+                        <div class="alert alert-warning small mb-2" th:if="${tailStatus != null and tailStatus['lastError'] != null}">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            Collector tail notice: <span th:text="${tailStatus['lastError']}">error</span>
+                            (telemetry may be incomplete — tenant traffic is unaffected).
+                        </div>
+                        <p class="mb-0 text-body-secondary small">
+                            Normalized shapes only — literal values are never stored.
+                            <span class="badge badge-soft-success">Authoritative</span> identity comes from the
+                            database-native source; <span class="badge badge-soft-warning">Inferred</span> marks
+                            pooled PostgreSQL statements where the backend log cannot prove the original client.
+                        </p>
+                    </div>
+                    <a class="btn btn-sm btn-outline-secondary" th:href="@{/}">
+                        <i class="bi bi-arrow-left"></i> Dashboard
+                    </a>
+                </div>
+
+                <section class="card shadow-sm mb-4">
+                    <div class="card-header bg-transparent">
+                        <h2 class="h6 mb-0">
+                            <i class="bi bi-funnel text-primary me-1"></i> Filter
+                        </h2>
+                    </div>
+                    <div class="card-body">
+                        <form class="row g-2 align-items-end" method="get" th:action="@{/query-activity}">
+                            <div class="col-sm-6 col-md-2">
+                                <label class="form-label" for="filterEngine">Engine</label>
+                                <select class="form-select form-select-sm" id="filterEngine" name="engine">
+                                    <option value="">All engines</option>
+                                    <option value="POSTGRES" th:selected="${engineFilter == 'POSTGRES'}">PostgreSQL</option>
+                                    <option value="MYSQL" th:selected="${engineFilter == 'MYSQL'}">MySQL</option>
+                                    <option value="MONGO" th:selected="${engineFilter == 'MONGO'}">MongoDB</option>
+                                </select>
+                            </div>
+                            <div class="col-sm-6 col-md-2">
+                                <label class="form-label" for="filterDb">Database</label>
+                                <input class="form-control form-control-sm" id="filterDb" name="database" th:value="${databaseFilter}">
+                            </div>
+                            <div class="col-sm-6 col-md-2">
+                                <label class="form-label" for="filterUser">User</label>
+                                <input class="form-control form-control-sm" id="filterUser" name="user" th:value="${userFilter}">
+                            </div>
+                            <div class="col-sm-6 col-md-2">
+                                <label class="form-label" for="filterIp">Source IP</label>
+                                <input class="form-control form-control-sm" id="filterIp" name="sourceIp" th:value="${sourceIp}">
+                            </div>
+                            <div class="col-sm-6 col-md-2">
+                                <label class="form-label" for="filterOp">Operation</label>
+                                <select class="form-select form-select-sm" id="filterOp" name="operationClass">
+                                    <option value="">All operations</option>
+                                    <option value="read" th:selected="${operationClass == 'read'}">read</option>
+                                    <option value="write" th:selected="${operationClass == 'write'}">write</option>
+                                    <option value="ddl" th:selected="${operationClass == 'ddl'}">ddl</option>
+                                    <option value="txn" th:selected="${operationClass == 'txn'}">txn</option>
+                                    <option value="other" th:selected="${operationClass == 'other'}">other</option>
+                                </select>
+                            </div>
+                            <div class="col-sm-6 col-md-2">
+                                <label class="form-label" for="filterAttr">Attribution</label>
+                                <select class="form-select form-select-sm" id="filterAttr" name="attribution">
+                                    <option value="">All</option>
+                                    <option value="AUTHORITATIVE" th:selected="${attribution == 'AUTHORITATIVE'}">Authoritative</option>
+                                    <option value="INFERRED" th:selected="${attribution == 'INFERRED'}">Inferred</option>
+                                </select>
+                            </div>
+                            <div class="col-12 d-flex gap-2">
+                                <button class="btn btn-sm btn-primary" type="submit">
+                                    <i class="bi bi-funnel"></i> Apply
+                                </button>
+                                <a class="btn btn-sm btn-outline-secondary" th:href="@{/query-activity}">
+                                    <i class="bi bi-x-lg"></i> Clear
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </section>
+
+                <div class="card">
+                    <div class="card-body p-0">
+                        <div class="empty-state" th:if="${#lists.isEmpty(events)}">
+                            <span class="empty-state-icon"><i class="bi bi-activity"></i></span>
+                            <p class="empty-state-title">No matching statements</p>
+                            <p class="empty-state-text">Query auditing observes database-native telemetry. Enable auditing and run tenant traffic to populate this view.</p>
+                        </div>
+                        <div class="table-responsive" th:if="${!#lists.isEmpty(events)}">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>When</th>
+                                        <th>Engine</th>
+                                        <th>Database</th>
+                                        <th>User</th>
+                                        <th>Source IP</th>
+                                        <th>Operation</th>
+                                        <th>Normalized shape</th>
+                                        <th>Duration</th>
+                                        <th>Attribution</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="event : ${events}">
+                                        <td class="text-body-secondary text-nowrap" th:text="${event.observedAt}">-</td>
+                                        <td><span class="badge badge-soft-secondary" th:text="${event.engine} ?: '—'">POSTGRES</span></td>
+                                        <td th:text="${event.database} ?: '—'">db</td>
+                                        <td th:text="${event.provisionedUser} ?: '—'">user</td>
+                                        <td th:text="${event.sourceIp} ?: '—'">ip</td>
+                                        <td>
+                                            <span class="badge badge-soft-info" th:text="${event.operationClass} + '/' + ${event.commandType}">read/select</span>
+                                        </td>
+                                        <td><code class="small" th:text="${event.normalizedShape}">SELECT</code></td>
+                                        <td class="text-body-secondary" th:text="${event.durationMs} != null ? ${event.durationMs} + ' ms' : '—'">—</td>
+                                        <td>
+                                            <span th:class="${event.attribution?.name() == 'AUTHORITATIVE'} ? 'badge badge-soft-success' : 'badge badge-soft-warning'"
+                                                  th:text="${event.attribution} ?: '—'">AUTHORITATIVE</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card-footer bg-transparent d-flex justify-content-between align-items-center"
+                         th:if="${!#lists.isEmpty(events)}">
+                        <a class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/query-activity(page=${page - 1}, engine=${engineFilter}, database=${databaseFilter}, user=${userFilter}, sourceIp=${sourceIp}, operationClass=${operationClass}, attribution=${attribution})}"
+                           th:if="${hasPrev}">
+                            <i class="bi bi-chevron-left"></i> Previous
+                        </a>
+                        <span class="text-body-secondary small" th:text="'Page ' + ${page} + ' of ' + ${totalPages}">Page 1 of 1</span>
+                        <a class="btn btn-sm btn-outline-secondary"
+                           th:href="@{/query-activity(page=${page + 1}, engine=${engineFilter}, database=${databaseFilter}, user=${userFilter}, sourceIp=${sourceIp}, operationClass=${operationClass}, attribution=${attribution})}"
+                           th:if="${hasNext}">
+                            Next <i class="bi bi-chevron-right"></i>
+                        </a>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+</body>
+</html>
