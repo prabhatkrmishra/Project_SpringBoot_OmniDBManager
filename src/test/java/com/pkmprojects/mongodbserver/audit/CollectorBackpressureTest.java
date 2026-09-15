@@ -78,7 +78,7 @@ class CollectorBackpressureTest {
     void outageDropsAreCountedAndRecoveryResumes() throws Exception {
         FlappingStore store = new FlappingStore();
         AuditCollectorService c = new AuditCollectorService(store,
-                new QueryAuditProperties(true, 30, 2000, true, false, false));
+                QueryAuditProperties.forTests(true, 30, 2000, true, false, false));
         // Flood during outage: 6000 offers into a 5000 queue.
         for (int i = 0; i < 6000; i++) {
             final int n = i;
@@ -109,7 +109,7 @@ class CollectorBackpressureTest {
     void queueNeverExceedsBound() {
         InMemoryQueryAuditStore store = new InMemoryQueryAuditStore();
         AuditCollectorService c = new AuditCollectorService(store,
-                new QueryAuditProperties(true, 30, 2000, true, false, false));
+                QueryAuditProperties.forTests(true, 30, 2000, true, false, false));
         for (int i = 0; i < 12000; i++) {
             c.ingestPostgresLine(
                     "{\"error_severity\":\"LOG\",\"message\":\"statement: SELECT " + i + ";\"}", false);

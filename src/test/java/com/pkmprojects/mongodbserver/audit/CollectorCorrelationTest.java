@@ -18,7 +18,7 @@ class CollectorCorrelationTest {
 
     private AuditCollectorService collector(InMemoryQueryAuditStore store) {
         AuditCollectorService c = new AuditCollectorService(store,
-                new QueryAuditProperties(true, 30, 2000, true, false, false));
+                QueryAuditProperties.forTests(true, 30, 2000, true, false, false));
         return c;
     }
 
