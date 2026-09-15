@@ -77,8 +77,11 @@ public final class PostgresJsonlogParser {
         }
         Matcher dm = DURATION.matcher(message);
         if (dm.find() && !isError) {
-            return statementEvent(line, null, parseMillis(dm.group(1)), null,
-                    pooled, ingressIp, ingressUser, ingressDb);
+            // Bare duration sibling with no statement text: timing-only noise
+            // (the statement line itself carries the event). Persisting it
+            // would create empty "other/other ?" rows with no operator value,
+            // so it is dropped here, not stored.
+            return new Parsed(Optional.empty(), false);
         }
         if (isError) {
             String sql = statement != null ? statement : null;
@@ -91,6 +94,11 @@ public final class PostgresJsonlogParser {
     private static Parsed statementEvent(String line, String sql, Double durationMs, String errorCode,
                                          boolean pooled, String ingressIp, String ingressUser, String ingressDb) {
         String user = field(line, "user");
+        // The pooler's internal auth_query role is infrastructure noise, never
+        // tenant activity — drop before building an event.
+        if (user != null && (user.equals("pgbouncer_auth") || user.equals("pgbouncer_stats"))) {
+            return new Parsed(Optional.empty(), false);
+        }
         String db = field(line, "dbname");
         String remoteHost = field(line, "remote_host");
         String remotePort = field(line, "remote_port");
