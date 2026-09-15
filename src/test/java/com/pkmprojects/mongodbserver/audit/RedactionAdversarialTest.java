@@ -53,7 +53,7 @@ class RedactionAdversarialTest {
     @Test
     void mysqlPasswordStatementsRedacted() {
         String block = "# Time: 2026-09-14T21:10:00Z\n"
-                + "# User@Host: root[root] @ localhost []  Id: 1\n"
+                + "# User@Host: appuser[appuser] @ localhost []  Id: 1\n"
                 + "# Query_time: 0.001  Lock_time: 0.000 Rows_sent: 0  Rows_examined: 0\n"
                 + "SET timestamp=1;\n"
                 + "CREATE USER 'a'@'%' IDENTIFIED BY 'hunter2'; -- tok_live_abc123";

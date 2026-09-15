@@ -11,6 +11,7 @@ import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,8 +41,24 @@ public final class PostgresJsonlogParser {
     private PostgresJsonlogParser() {
     }
 
-    /** Result of parsing one jsonlog line: zero or one event. */
-    public record Parsed(Optional<QueryAuditEvent> event, boolean malformed) {
+    /**
+     * Result of parsing one jsonlog line: zero or one event, plus an optional
+     * duration sibling to join against a pending statement. The parser stays
+     * pure and stateless — correlation state lives in the collector.
+     */
+    public record Parsed(Optional<QueryAuditEvent> event, Optional<DurationSibling> duration,
+            boolean malformed) {
+        public Parsed(Optional<QueryAuditEvent> event, boolean malformed) {
+            this(event, Optional.empty(), malformed);
+        }
+    }
+
+    /**
+     * A bare {@code duration:} sibling line: no statement of its own, only a
+     * timing to join against a pending statement. Carries the backend
+     * identity key ({@code pid}, {@code session_id}) and the duration.
+     */
+    public record DurationSibling(String pid, String sessionId, long durationMs) {
     }
 
     /**
@@ -77,11 +94,17 @@ public final class PostgresJsonlogParser {
         }
         Matcher dm = DURATION.matcher(message);
         if (dm.find() && !isError) {
-            // Bare duration sibling with no statement text: timing-only noise
-            // (the statement line itself carries the event). Persisting it
-            // would create empty "other/other ?" rows with no operator value,
-            // so it is dropped here, not stored.
-            return new Parsed(Optional.empty(), false);
+            // Bare duration sibling with no statement text: never an event of
+            // its own. The correlator joins it to the pending statement with
+            // the same backend identity, or drops it when unmatched.
+            Double ms = parseMillis(dm.group(1));
+            if (ms == null) {
+                return new Parsed(Optional.empty(), false);
+            }
+            return new Parsed(Optional.empty(),
+                    Optional.of(new DurationSibling(
+                            field(line, "pid"), field(line, "session_id"), Math.round(ms))),
+                    false);
         }
         if (isError) {
             String sql = statement != null ? statement : null;
@@ -91,12 +114,37 @@ public final class PostgresJsonlogParser {
         return new Parsed(Optional.empty(), false);
     }
 
+    /**
+     * Control-plane identities whose statements are manager surface, never
+     * tenant activity: the PostgreSQL superuser used by the manager's own
+     * JDBC pool ({@code POSTGRES_ROOT_USER}, default {@code root}) and by
+     * Adminer SSO, plus the pooler's internal auth roles. Tenant roles are
+     * provisioned as {@code omni_*}/legacy custom names, so this set cannot
+     * collide with real tenant traffic — except a tenant explicitly
+     * provisioned under a superuser name connecting WITHOUT the issued
+     * {@code application_name=omnidb} marker (documented, pathological).
+     */
+    private static final Set<String> CONTROL_PLANE_USERS =
+            Set.of("root", "postgres", "pgbouncer_auth", "pgbouncer_stats");
+
+    /**
+     * Whether a jsonlog line is manager control-plane surface rather than
+     * tenant activity: a control-plane user connecting without the
+     * tenant-issued {@code application_name=omnidb} marker. Bridge-issued
+     * tenant strings always pin that marker, so this never drops real tenant
+     * traffic (including a tenant hypothetically named like a superuser).
+     */
+    static boolean isControlPlaneSurface(String user, String applicationName) {
+        return user != null && CONTROL_PLANE_USERS.contains(user) && !"omnidb".equals(applicationName);
+    }
+
     private static Parsed statementEvent(String line, String sql, Double durationMs, String errorCode,
                                          boolean pooled, String ingressIp, String ingressUser, String ingressDb) {
         String user = field(line, "user");
-        // The pooler's internal auth_query role is infrastructure noise, never
-        // tenant activity — drop before building an event.
-        if (user != null && (user.equals("pgbouncer_auth") || user.equals("pgbouncer_stats"))) {
+        // Manager JDBC pool, Adminer SSO sessions, and the pooler's internal
+        // auth roles are infrastructure surface, never tenant activity —
+        // drop before building an event.
+        if (isControlPlaneSurface(user, field(line, "application_name"))) {
             return new Parsed(Optional.empty(), false);
         }
         String db = field(line, "dbname");

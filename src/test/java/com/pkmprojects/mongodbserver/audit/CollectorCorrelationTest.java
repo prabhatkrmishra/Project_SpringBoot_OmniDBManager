@@ -42,14 +42,21 @@ class CollectorCorrelationTest {
         c.ingestBridgeSession(session("s-direct", "shop_user", "shop", "direct", "none"));
         c.ingestPostgresLineWithSession(
                 "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"shop_user\","
-                        + "\"dbname\":\"shop\",\"pid\":132,\"remote_host\":\"127.0.0.1\","
+                        + "\"dbname\":\"shop\",\"pid\":132,\"session_id\":\"6aa86257.84\","
+                        + "\"remote_host\":\"127.0.0.1\","
                         + "\"error_severity\":\"LOG\",\"message\":\"statement: SELECT * FROM t WHERE id = 1;\"}",
+                c::bridgeSession);
+        c.ingestPostgresLineWithSession(
+                "{\"timestamp\":\"2026-09-14 21:08:39.531 UTC\",\"user\":\"shop_user\","
+                        + "\"dbname\":\"shop\",\"pid\":132,\"session_id\":\"6aa86257.84\","
+                        + "\"error_severity\":\"LOG\",\"message\":\"duration: 2.5 ms\"}",
                 c::bridgeSession);
         awaitCount(store, 1);
         var e = store.findFiltered(QueryAuditFilter.empty(), 0, 1).get(0);
         assertThat(e.getAttribution()).isEqualTo(QueryAttribution.AUTHORITATIVE);
         assertThat(e.getAuditConfidence()).isEqualTo(AuditConfidence.HIGH);
         assertThat(e.getSourceIp()).isEqualTo("203.0.113.7");
+        assertThat(e.getDurationMs()).isEqualTo(3L);
         c.shutdown();
     }
 
@@ -60,14 +67,21 @@ class CollectorCorrelationTest {
         c.ingestBridgeSession(session("s-pooled", "shop_user", "shop", "pooled", "standard"));
         c.ingestPostgresLineWithSession(
                 "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"shop_user\","
-                        + "\"dbname\":\"shop\",\"pid\":55,\"remote_host\":\"127.0.0.1\","
+                        + "\"dbname\":\"shop\",\"pid\":55,\"session_id\":\"6aa86257.85\","
+                        + "\"remote_host\":\"127.0.0.1\","
                         + "\"error_severity\":\"LOG\",\"message\":\"statement: SELECT * FROM t WHERE id = 2;\"}",
+                c::bridgeSession);
+        c.ingestPostgresLineWithSession(
+                "{\"timestamp\":\"2026-09-14 21:08:39.531 UTC\",\"user\":\"shop_user\","
+                        + "\"dbname\":\"shop\",\"pid\":55,\"session_id\":\"6aa86257.85\","
+                        + "\"error_severity\":\"LOG\",\"message\":\"duration: 4.2 ms\"}",
                 c::bridgeSession);
         awaitCount(store, 1);
         var e = store.findFiltered(QueryAuditFilter.empty(), 0, 1).get(0);
         assertThat(e.getAttribution()).isEqualTo(QueryAttribution.INFERRED);
         // Ingress context preserved but never presented as backend authority.
         assertThat(e.getSourceIp()).isEqualTo("203.0.113.7");
+        assertThat(e.getDurationMs()).isEqualTo(4L);
         c.shutdown();
     }
 
@@ -89,8 +103,14 @@ class CollectorCorrelationTest {
         // No bridge session: backend address must not become authoritative.
         c.ingestPostgresLineWithSession(
                 "{\"timestamp\":\"2026-09-14 21:08:39.530 UTC\",\"user\":\"ghost\","
-                        + "\"dbname\":\"ghostdb\",\"pid\":9,\"remote_host\":\"127.0.0.1\","
+                        + "\"dbname\":\"ghostdb\",\"pid\":9,\"session_id\":\"6aa86257.99\","
+                        + "\"remote_host\":\"127.0.0.1\","
                         + "\"error_severity\":\"LOG\",\"message\":\"statement: SELECT 1;\"}",
+                c::bridgeSession);
+        c.ingestPostgresLineWithSession(
+                "{\"timestamp\":\"2026-09-14 21:08:39.531 UTC\",\"user\":\"ghost\","
+                        + "\"dbname\":\"ghostdb\",\"pid\":9,\"session_id\":\"6aa86257.99\","
+                        + "\"error_severity\":\"LOG\",\"message\":\"duration: 1.0 ms\"}",
                 c::bridgeSession);
         awaitCount(store, 1);
         var e = store.findFiltered(QueryAuditFilter.empty(), 0, 1).get(0);

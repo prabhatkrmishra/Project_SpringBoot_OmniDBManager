@@ -49,6 +49,13 @@ public final class MongoProfilerParser {
         if (db == null || db.isBlank() || SYSTEM_DBS.contains(db)) {
             return new Parsed(Optional.empty(), true);
         }
+        // Manager control-plane surface (own driver as root, admin tooling):
+        // never tenant activity. Tenant users are provisioned per-database;
+        // see the PG parser for the full rationale.
+        String rawUser = userOf(doc.getString("user"));
+        if (rawUser != null && (rawUser.equals("root") || rawUser.equals("admin"))) {
+            return new Parsed(Optional.empty(), true);
+        }
         String op = doc.getString("op");
         Object cmdObj = doc.get("command");
         String commandType = opToCommand(op, cmdObj);
