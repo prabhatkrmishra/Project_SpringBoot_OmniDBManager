@@ -463,7 +463,21 @@ func handleConn(raw net.Conn, cfg config, store *certStore, caPool *x509.CertPoo
 		return
 	}
 	log.Printf("proxy: route mode=%s profile=%s backend=%s", mode, profileLabel, backendAddr)
+	// Session-context audit event: identity fields only (user/database from
+	// the StartupMessage, client IP/port from the accepted socket). The relay
+	// itself stays byte-blind; no SQL is ever inspected.
+	sessionID := nextSessionID()
+	var auditUser, auditDB string
+	for _, kv := range params {
+		if kv[0] == "user" {
+			auditUser = kv[1]
+		} else if kv[0] == "database" {
+			auditDB = kv[1]
+		}
+	}
+	started := emitSessionStart(sessionID, raw, auditUser, auditDB, mode, profileLabel, backendLabel)
 	relay(tlsConn, backend, backendLabel)
+	emitSessionEnd(sessionID, started)
 }
 
 // dialBackend opens TLS (verify-full) to the backend, replays the rewritten

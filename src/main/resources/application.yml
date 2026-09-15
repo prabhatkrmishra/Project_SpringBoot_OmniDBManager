@@ -160,6 +160,19 @@ app:
     enabled: ${DATABASE_PROXY_ENABLED:false}
     port: ${DATABASE_PROXY_PORT:15432}
     host: ${DATABASE_PROXY_HOST:}
+  # Query-activity auditing (database-native telemetry observed externally;
+  # the manager never sits in the tenant SQL path). Disabled by default; enable
+  # per engine after configuring the matching telemetry source (see operator docs).
+  query-audit:
+    enabled: ${QUERY_AUDIT_ENABLED:false}
+    retention-days: ${QUERY_AUDIT_RETENTION_DAYS:30}
+    max-normalized-length: ${QUERY_AUDIT_MAX_SHAPE:2000}
+    postgres-enabled: ${QUERY_AUDIT_POSTGRES:false}
+    mysql-enabled: ${QUERY_AUDIT_MYSQL:false}
+    mongo-enabled: ${QUERY_AUDIT_MONGO:false}
+    pg-jsonlog: ${QUERY_AUDIT_PG_JSONLOG:/var/lib/postgresql/log/postgresql.json}
+    mysql-slowlog: ${QUERY_AUDIT_MYSQL_SLOWLOG:/var/lib/mysql/slow.log}
+    bridge-log: ${QUERY_AUDIT_BRIDGE_LOG:/var/log/omnidb/bridge.log}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
   # Brute-force protection on the login form (attempts per IP+username per window)

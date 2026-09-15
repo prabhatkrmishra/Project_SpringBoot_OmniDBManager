@@ -56,6 +56,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/mongo/databases/**", "/postgres/databases/**", "/mysql/databases/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/mongo/**", "/postgres/**", "/mysql/**").authenticated()
                         .requestMatchers("/webhooks", "/webhooks/**").hasRole("ADMIN")
+                        .requestMatchers("/query-activity", "/api/admin/query-activity/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 // The proxied UIs have their own CSRF protection; Spring's token would otherwise reject their POSTs.
                 .csrf(csrf -> csrf.ignoringRequestMatchers("/mongo-express/**", "/adminer/**", "/phpmyadmin/**"))
