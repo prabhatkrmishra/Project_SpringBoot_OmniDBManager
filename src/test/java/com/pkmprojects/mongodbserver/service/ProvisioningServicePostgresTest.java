@@ -523,6 +523,10 @@ class ProvisioningServicePostgresTest {
         // worst-case interleave (both probes before either create); without
         // the role lock both provisions would createUser("app") and the
         // second would ALTER the first tenant's password.
+        //
+        // Either thread may win the role lock first, so assertions are
+        // order-independent: exactly one provision keeps "app" (with its own
+        // password intact) and the other mints a distinct omni_ role.
         java.util.Set<String> liveRoles = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
         java.util.concurrent.CyclicBarrier probeBarrier = new java.util.concurrent.CyclicBarrier(2);
         when(postgresRepo.roleExists(any())).thenAnswer(inv -> {
@@ -552,13 +556,28 @@ class ProvisioningServicePostgresTest {
                     new CreateDatabaseForm("dbbeta", DatabaseEngineType.POSTGRES, "app", "secret222")));
             DatabaseInfo a = fa.get(60, java.util.concurrent.TimeUnit.SECONDS);
             DatabaseInfo b = fb.get(60, java.util.concurrent.TimeUnit.SECONDS);
-            assertThat(a.connectionString()).contains("app:secret111@");
-            assertThat(b.connectionString()).doesNotContain("app:secret222@");
-            assertThat(b.connectionString()).contains(":secret222@");
+            // Winner keeps "app" with its own password; loser mints omni_*.
+            // Which future won is scheduling-dependent — collect both outcomes.
+            java.util.Map<String, String> byDb = java.util.Map.of(
+                    a.dbName(), a.connectionString(), b.dbName(), b.connectionString());
+            String alphaConn = byDb.get("dbalpha");
+            String betaConn = byDb.get("dbbeta");
+            boolean alphaWon = alphaConn.contains("app:secret111@");
+            boolean betaWon = betaConn.contains("app:secret222@");
+            // Exactly one winner: the role "app" is created exactly once, so
+            // exactly one connection string carries app:<its-own-password>@.
+            assertThat(alphaWon ^ betaWon).isTrue();
+            String loserConn = alphaWon ? betaConn : alphaConn;
+            String loserPass = alphaWon ? "secret222" : "secret111";
+            assertThat(loserConn).doesNotContain("app:" + loserPass + "@");
+            assertThat(loserConn).contains(":" + loserPass + "@");
+            assertThat(loserConn).containsPattern("omni_[a-z0-9_]+:" + loserPass + "@");
             ArgumentCaptor<String> users = ArgumentCaptor.forClass(String.class);
             verify(postgresRepo, times(2)).createUser(any(), users.capture(), any());
-            assertThat(users.getAllValues().get(0)).isEqualTo("app");
-            assertThat(users.getAllValues().get(1)).startsWith("omni_").isNotEqualTo("app");
+            assertThat(users.getAllValues()).hasSize(2).contains("app");
+            String minted = users.getAllValues().stream()
+                    .filter(u -> !u.equals("app")).findFirst().orElseThrow();
+            assertThat(minted).startsWith("omni_").isNotEqualTo("app");
         } finally {
             pool.shutdownNow();
         }
