@@ -176,25 +176,44 @@ func extractMode(options string) (string, error) {
 	return mode, err
 }
 
-// rewriteStartup removes only the routing "-c omnidb.mode=<v>" token pair
-// from options, preserving every other byte of the options value exactly
-// (whitespace, quoting, order) and every other param byte-identically. If
-// options becomes empty, the key is dropped. Returns the new full packet.
-// The previous Fields+Join re-encoding collapsed repeated
-// whitespace (e.g. '-c myopt="a  b"' became '"a b"'); the routing span is
-// now excised from the original string instead.
-func rewriteStartup(full []byte, params [][2]string) ([]byte, error) {
+// bridgeAppPrefix is the server-generated downstream application_name prefix.
+// The SID suffix is opaque (no IP/user/database/secret); the bridge always
+// overwrites any client-supplied application_name so correlation identity
+// can never be spoofed.
+const bridgeAppPrefix = "omnidb:"
+
+// rewriteStartup strips routing "-c omnidb.mode=<v>" /
+// "-c omnidb.pool_profile=<v>" token pairs from options (dropping the key
+// when empty) and forces downstream application_name to
+// "omnidb:<sid>", overwriting any client-supplied value and adding the key
+// when absent. Every other param and every non-routing options byte is
+// preserved byte-identically. Returns the new full packet. The bridge stays
+// SQL-blind: only StartupMessage identity/routing fields are touched.
+func rewriteStartup(full []byte, params [][2]string, sid string) ([]byte, error) {
+	if !isValidSid(sid) {
+		return nil, fmt.Errorf("bad bridge sid")
+	}
+	downstreamApp := bridgeAppPrefix + sid
 	var rebuilt [][2]string
+	sawApp := false
 	for _, kv := range params {
-		if kv[0] != "options" {
+		switch kv[0] {
+		case "options":
+			stripped, ok := stripRoutingToken(kv[1])
+			if !ok {
+				continue // drop empty options key
+			}
+			rebuilt = append(rebuilt, [2]string{"options", stripped})
+		case "application_name":
+			// Overwrite: client correlation identity is never trusted.
+			rebuilt = append(rebuilt, [2]string{"application_name", downstreamApp})
+			sawApp = true
+		default:
 			rebuilt = append(rebuilt, kv)
-			continue
 		}
-		stripped, ok := stripRoutingToken(kv[1])
-		if !ok {
-			continue // drop empty options key
-		}
-		rebuilt = append(rebuilt, [2]string{"options", stripped})
+	}
+	if !sawApp {
+		rebuilt = append(rebuilt, [2]string{"application_name", downstreamApp})
 	}
 	buf := new(bytes.Buffer)
 	// placeholder len + proto
@@ -444,7 +463,11 @@ func handleConn(raw net.Conn, cfg config, store *certStore, caPool *x509.CertPoo
 			return
 		}
 	}
-	rewritten, err := rewriteStartup(append(lenBuf, sbody...), params)
+	// Server-generated correlation SID: opaque, bounded, safe chars, no
+	// secrets. Generated before backend dial so it can be carried
+	// downstream as application_name=omnidb:<sid>.
+	sid := nextShortSid()
+	rewritten, err := rewriteStartup(append(lenBuf, sbody...), params, sid)
 	if err != nil {
 		sendError(tlsConn, "bad startup packet")
 		tlsConn.Close()
@@ -475,9 +498,9 @@ func handleConn(raw net.Conn, cfg config, store *certStore, caPool *x509.CertPoo
 			auditDB = kv[1]
 		}
 	}
-	started := emitSessionStart(sessionID, raw, auditUser, auditDB, mode, profileLabel, backendLabel)
+	started := emitSessionStart(sessionID, sid, raw, auditUser, auditDB, mode, profileLabel, backendLabel)
 	relay(tlsConn, backend, backendLabel)
-	emitSessionEnd(sessionID, started)
+	emitSessionEnd(sessionID, sid, started)
 }
 
 // dialBackend opens TLS (verify-full) to the backend, replays the rewritten

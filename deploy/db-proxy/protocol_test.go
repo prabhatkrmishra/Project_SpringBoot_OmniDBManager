@@ -87,7 +87,7 @@ func TestRewriteStripsOnlyRoutingToken(t *testing.T) {
 		{"application_name", "omnidb"},
 	})
 	params := parseAll(t, pkt)
-	out, err := rewriteStartup(pkt, params)
+	out, err := rewriteStartup(pkt, params, "abc123def456")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,12 +111,71 @@ func TestRewriteDropsEmptyOptions(t *testing.T) {
 		{"options", "-c omnidb.mode=direct"},
 	})
 	params := parseAll(t, pkt)
-	out, err := rewriteStartup(pkt, params)
+	out, err := rewriteStartup(pkt, params, "abc123def456")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(out), "options") {
 		t.Fatal("empty options key should be dropped")
+	}
+}
+
+// Downstream application_name is always server-generated omnidb:<sid>.
+// Client-supplied values (including spoofed SIDs) are overwritten, never
+// trusted; missing keys are added. Routing tokens still stripped.
+func TestRewriteForcesDownstreamAppName(t *testing.T) {
+	cases := [][][2]string{
+		{
+			{"user", "u"},
+			{"options", "-c omnidb.mode=pooled"},
+			{"application_name", "attacker-chosen"},
+		},
+		{
+			{"user", "u"},
+			{"options", "-c omnidb.mode=direct"},
+			{"application_name", "omnidb:ffffffffffff"},
+		},
+		{
+			{"user", "u"},
+			{"options", "-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency"},
+		},
+	}
+	for i, p := range cases {
+		pkt := buildStartup(t, p)
+		params := parseAll(t, pkt)
+		out, err := rewriteStartup(pkt, params, "abc123def456")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := parseAll(t, out)
+		found := ""
+		for _, kv := range got {
+			if kv[0] == "application_name" {
+				found = kv[1]
+			}
+			if kv[0] == "options" {
+				if strings.Contains(kv[1], "omnidb.mode") || strings.Contains(kv[1], "omnidb.pool_profile") {
+					t.Fatalf("case %d: routing leaked: %q", i, kv[1])
+				}
+			}
+		}
+		if found != "omnidb:abc123def456" {
+			t.Fatalf("case %d: application_name = %q, want omnidb:abc123def456", i, found)
+		}
+	}
+}
+
+// Invalid SIDs fail closed: no packet is produced.
+func TestRewriteRejectsBadSid(t *testing.T) {
+	pkt := buildStartup(t, [][2]string{
+		{"user", "u"},
+		{"options", "-c omnidb.mode=direct"},
+	})
+	params := parseAll(t, pkt)
+	for _, bad := range []string{"", "short", "ABC123DEF456", "has space", "omnidb:x"} {
+		if _, err := rewriteStartup(pkt, params, bad); err == nil {
+			t.Fatalf("expected error for sid %q", bad)
+		}
 	}
 }
 
@@ -241,7 +300,7 @@ func TestRewriteStripsBothTokensNoLeak(t *testing.T) {
 		{"options", "-c omnidb.mode=pooled -c omnidb.pool_profile=high_concurrency -c search_path=foo"},
 	})
 	params := parseAll(t, pkt)
-	out, err := rewriteStartup(pkt, params)
+	out, err := rewriteStartup(pkt, params, "abc123def456")
 	if err != nil {
 		t.Fatal(err)
 	}

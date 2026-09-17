@@ -16,8 +16,14 @@ import java.util.regex.Pattern;
  * {@code {"log":"...","stream":"stderr","time":"..."} envelopes}; both the
  * envelope form and raw JSON lines are accepted. Only identity fields are
  * extracted (session id, client IP/port, user, database, mode, profile,
- * route, timestamps). Anything else on the line is ignored; malformed lines
- * are skipped, never thrown.</p>
+ * route, short correlation SID, timestamps). Anything else on the line is
+ * ignored; malformed lines are skipped, never thrown.</p>
+ *
+ * <p>New bridge lines carry {@code "sid":"<12-hex>"} alongside the long
+ * {@code "session_id"}. Old lines without {@code sid} parse with a null
+ * bridge SID (legacy uncorrelated session — never used for IP assignment).
+ * The SID value is validated ([a-z0-9]{8,32}); malformed SIDs become null
+ * rather than propagating.</p>
  */
 public final class BridgeSessionLogTailer {
 
@@ -69,7 +75,8 @@ public final class BridgeSessionLogTailer {
                     emptyToNull(str(payload, "route")),
                     null,
                     parseInstant(str(payload, "at")),
-                    null);
+                    null,
+                    validSidOrNull(str(payload, "sid")));
             return new Parsed(Optional.of(session), false, sessionId);
         } catch (IllegalArgumentException e) {
             return new Parsed(Optional.empty(), false, sessionId);
@@ -83,6 +90,25 @@ public final class BridgeSessionLogTailer {
         if (p.isEnd() && p.sessionId() != null) {
             ends.accept(p.sessionId());
         }
+    }
+
+    /** Validates a bridge SID ([a-z0-9]{8,32}); malformed → null (fail closed). */
+    static String validSidOrNull(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String s = raw.trim();
+        if (s.length() < 8 || s.length() > 32) {
+            return null;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                continue;
+            }
+            return null;
+        }
+        return s;
     }
 
     private static String str(String json, String name) {

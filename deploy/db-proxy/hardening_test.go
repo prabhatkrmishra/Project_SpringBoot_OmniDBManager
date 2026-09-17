@@ -17,7 +17,7 @@ func TestRewritePreservesQuotedWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := rewriteStartup(pkt, params)
+	out, err := rewriteStartup(pkt, params, "abc123def456")
 	if err != nil {
 		t.Fatal(err)
 	}

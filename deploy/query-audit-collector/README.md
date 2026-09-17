@@ -9,18 +9,31 @@ parses SQL.
 ## Event flows
 
 - PostgreSQL direct: client → bridge → PostgreSQL. Tails: PG `jsonlog` +
-  bridge `bridge-session-start`. Attribution: AUTHORITATIVE/HIGH (ingress IP,
-  user, database from the bridge; statement/timing from PG).
+  bridge `bridge-session-start`. Correlation: EXACT via bridge SID
+  (`application_name=omnidb:<sid>`, server-generated per connection).
+  Attribution: AUTHORITATIVE/HIGH (exact ingress IP).
 - PostgreSQL pooled standard/HC: client → bridge → PgBouncer(-HC) →
-  PostgreSQL. Same tails. Attribution: always INFERRED/MEDIUM per statement —
-  the backend log shows the pooler, and the bridge ingress context is preserved
-  without false authority.
+  PostgreSQL. Same tails. Correlation: EXACT via the same SID — both
+  poolers run `track_extra_parameters = application_name` so each
+  transaction checkout re-applies the owning client's value on the reused
+  server connection (pinned image edoburu/pgbouncer v1.24.1-p1; re-verify
+  on upgrade). Attribution: always INFERRED/MEDIUM per statement, but the
+  IP itself is the exact originating ingress IP.
+- Uncorrelated PG lines (missing/malformed/unknown SID, e.g. pre-SID
+  clients, bridge restart windows): `sourceIp=null`, INFERRED/MEDIUM —
+  never pooler/bridge/remote_host IP, never latest-session guess, never
+  hostname, never AUTHORITATIVE.
 - MySQL: client → MySQL. Tail: slow log (`long_query_time=0`, rotated).
-  Attribution: AUTHORITATIVE/HIGH (`User@Host`, schema; empty IP bracket for
-  local sockets keeps host token).
+  Attribution: AUTHORITATIVE/HIGH when the `User@Host` IP bracket holds an
+  IP literal; hostname-only/local-socket lines become `sourceIp=null`,
+  INFERRED (hostnames are never persisted as IP, never resolved).
+  `root`/`mysql.sys` with a genuine tenant schema stays auditable (only
+  system schemas or admin commands are control-plane surface).
 - MongoDB: client → MongoDB. Tail: per-tenant `system.profile` (Community
-  profiler, capped collection). Attribution: AUTHORITATIVE/HIGH (`user`,
-  `client`, namespace). `admin/local/config` never polled.
+  profiler, capped collection). Attribution: AUTHORITATIVE/HIGH when
+  `client` parses to an IP literal (host:port split, IPv4/IPv6);
+  otherwise null/INFERRED. `admin/local/config` never polled; a tenant
+  user named `root`/`admin` inside a tenant database stays auditable.
 
 ## Enabling (all opt-in, disabled by default)
 

@@ -200,6 +200,12 @@ services:
         max_db_connections = $${MAX_DB_CONNECTIONS}
         server_reset_query = DISCARD ALL
         ignore_startup_parameters = extra_float_digits
+        # Exact audit correlation: the bridge carries per-connection identity
+        # downstream as application_name=omnidb:<sid>. Track it per client so
+        # each transaction checkout re-applies the owning client's value on
+        # the reused server connection (pinned image edoburu/pgbouncer
+        # v1.24.1-p1; verify on upgrade — pool_mode stays transaction).
+        track_extra_parameters = application_name
         admin_users = pgbouncer_admin
         stats_users = pgbouncer_stats
         INI
@@ -282,9 +288,13 @@ services:
       PROXY_CERT_FILE: /certs/server.crt
       PROXY_KEY_FILE: /certs/server.key
       PROXY_BACKEND_CA: /certs/ca.crt
-      PROXY_DIRECT_SAN: "postgres"
-      PROXY_POOLED_SAN: "pgbouncer"
-      PROXY_POOLED_HC_SAN: "pgbouncer-hc"
+      # Overridable per leg (compose has no nested expansion, so each leg
+      # carries its own plain default). When every backend reuses one public
+      # cert (e.g. db.missionhelmai.com on all three), set all three to that
+      # DNS name — see DEPLOY.md §11 step 7.
+      PROXY_DIRECT_SAN: ${PROXY_DIRECT_SAN:-postgres}
+      PROXY_POOLED_SAN: ${PROXY_POOLED_SAN:-pgbouncer}
+      PROXY_POOLED_HC_SAN: ${PROXY_POOLED_HC_SAN:-pgbouncer-hc}
       PROXY_MAX_CONNS: ${DATABASE_PROXY_MAX_CONNS:-2000}
     volumes:
       - ./certs:/certs:ro
@@ -405,6 +415,10 @@ services:
         max_db_connections = $${MAX_DB_CONNECTIONS}
         server_reset_query = DISCARD ALL
         ignore_startup_parameters = extra_float_digits
+        # Exact audit correlation (HC): same omnidb:<sid> per-transaction
+        # re-application as the standard pooler (see above). Pinned image
+        # edoburu/pgbouncer v1.24.1-p1; verify on upgrade.
+        track_extra_parameters = application_name
         admin_users = pgbouncer_admin
         stats_users = pgbouncer_stats
         INI

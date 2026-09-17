@@ -124,17 +124,40 @@ class AuditIngestParserTest {
     }
 
     @Test
-    void mysqlAndMongoRootUsersAreDropped() {
+    void mysqlRootControlPlaneDroppedOnlyForSystemSchemas() {
+        // root against a system schema (or no tenant schema) is manager
+        // surface: dropped.
         String block = "# Time: 2026-09-14T21:10:00.664691Z\n"
-                + "# User@Host: root[root] @ localhost []  Id:    13\n"
+                + "# User@Host: root[root] @ 10.0.0.8 [10.0.0.8]  Id:    13\n"
                 + "# Query_time: 0.010115  Lock_time: 0.000006 Rows_sent: 0  Rows_examined: 0\n"
                 + "SET timestamp=1789420200;\n"
                 + "SELECT * FROM provisioned_databases;";
-        assertThat(MysqlSlowLogParser.parseBlock(block, "mongodb_admin").event()).isEmpty();
+        assertThat(MysqlSlowLogParser.parseBlock(block, "mysql").event()).isEmpty();
+        assertThat(MysqlSlowLogParser.parseBlock(block, null).event()).isEmpty();
+        // Same username with a genuine tenant schema is tenant traffic:
+        // kept with the authoritative native IP.
+        var kept = MysqlSlowLogParser.parseBlock(block, "tenantdb");
+        assertThat(kept.event()).isPresent();
+        assertThat(kept.event().get().getSourceIp()).isEqualTo("10.0.0.8");
+        assertThat(kept.event().get().getAttribution()).isEqualTo(QueryAttribution.AUTHORITATIVE);
+    }
+
+    @Test
+    void mongoRootInTenantDbRemainsAuditable() {
+        // System databases stay excluded regardless of user.
+        org.bson.Document sys = new org.bson.Document("op", "query").append("ns", "admin.system.users")
+                .append("command", new org.bson.Document("find", "system.users"))
+                .append("ts", new java.util.Date()).append("client", "9.9.9.9").append("user", "root@admin");
+        assertThat(MongoProfilerParser.parse(sys).event()).isEmpty();
+        // Tenant database with a root/admin username is genuine tenant
+        // traffic when demonstrably tenant-originated: kept, authoritative.
         org.bson.Document doc = new org.bson.Document("op", "query").append("ns", "tenant.coll")
                 .append("command", new org.bson.Document("find", "coll"))
                 .append("ts", new java.util.Date()).append("client", "9.9.9.9").append("user", "root@admin");
-        assertThat(MongoProfilerParser.parse(doc).event()).isEmpty();
+        var kept = MongoProfilerParser.parse(doc);
+        assertThat(kept.event()).isPresent();
+        assertThat(kept.event().get().getSourceIp()).isEqualTo("9.9.9.9");
+        assertThat(kept.event().get().getAttribution()).isEqualTo(QueryAttribution.AUTHORITATIVE);
     }
 
     @Test
@@ -146,7 +169,7 @@ class AuditIngestParserTest {
     @Test
     void mysqlSlowLogBlockParsesUserSchemaAndStats() {
         String block = "# Time: 2026-09-14T21:10:00.664691Z\n"
-                + "# User@Host: spikeuser[spikeuser] @ localhost []  Id:    13\n"
+                + "# User@Host: spikeuser[spikeuser] @ app-host [203.0.113.21]  Id:    13\n"
                 + "# Query_time: 0.010115  Lock_time: 0.000006 Rows_sent: 0  Rows_examined: 0\n"
                 + "SET timestamp=1789420200;\n"
                 + "INSERT INTO items(name) VALUES ('secret-value-123');";
@@ -158,8 +181,24 @@ class AuditIngestParserTest {
         assertThat(e.getNormalizedShape()).doesNotContain("secret-value-123");
         assertThat(e.getDurationMs()).isEqualTo(10L);
         assertThat(e.getAttribution()).isEqualTo(QueryAttribution.AUTHORITATIVE);
+        assertThat(e.getSourceIp()).isEqualTo("203.0.113.21");
         assertThat(e.getCommandType()).isEqualTo("insert");
         assertThat(e.getOperationClass()).isEqualTo("write");
+    }
+
+    @Test
+    void mysqlHostnameWithoutIpIsNullAndInferred() {
+        // Local-socket/hostname-only identity carries no authoritative IP:
+        // hostnames are never persisted as sourceIp and never resolved.
+        String block = "# Time: 2026-09-14T21:10:00.664691Z\n"
+                + "# User@Host: spikeuser[spikeuser] @ localhost []  Id:    13\n"
+                + "# Query_time: 0.010115  Lock_time: 0.000006 Rows_sent: 0  Rows_examined: 0\n"
+                + "SET timestamp=1789420200;\n"
+                + "SELECT * FROM items;";
+        var parsed = MysqlSlowLogParser.parseBlock(block, "spikedb");
+        assertThat(parsed.event()).isPresent();
+        assertThat(parsed.event().get().getSourceIp()).isNull();
+        assertThat(parsed.event().get().getAttribution()).isEqualTo(QueryAttribution.INFERRED);
     }
 
     @Test

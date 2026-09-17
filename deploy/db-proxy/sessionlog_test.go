@@ -62,20 +62,24 @@ func TestSessionEmissionFieldContract(t *testing.T) {
 	if id == "" {
 		t.Fatal("empty session id")
 	}
+	sid := nextShortSid()
+	if !isValidSid(sid) {
+		t.Fatalf("short sid malformed: %q", sid)
+	}
 	// Emission format is pinned: single JSON object per line with the exact
 	// allowed field set. Verify the format string, not log output.
-	format := `{"audit":"bridge-session-start","session_id":%q,"at":%q,"client_ip":%q,"client_port":%d,"user":%q,"database":%q,"mode":%q,"profile":%q,"route":%q}`
+	format := `{"audit":"bridge-session-start","session_id":%q,"sid":%q,"at":%q,"client_ip":%q,"client_port":%d,"user":%q,"database":%q,"mode":%q,"profile":%q,"route":%q}`
 	for _, forbidden := range []string{"password", "scram", "SCRAM", "options", "statement", "query", "cookie", "token", "secret", "auth"} {
 		if strings.Contains(strings.ToLower(format), forbidden) {
 			t.Fatalf("session-start format must not carry %q", forbidden)
 		}
 	}
-	for _, required := range []string{"session_id", "client_ip", "client_port", "user", "database", "mode", "profile", "route"} {
+	for _, required := range []string{"session_id", `"sid"`, "client_ip", "client_port", "user", "database", "mode", "profile", "route"} {
 		if !strings.Contains(format, required) {
 			t.Fatalf("session-start format missing %q", required)
 		}
 	}
-	endFormat := `{"audit":"bridge-session-end","session_id":%q,"at":%q,"duration_ms":%d}`
+	endFormat := `{"audit":"bridge-session-end","session_id":%q,"sid":%q,"at":%q,"duration_ms":%d}`
 	if strings.Contains(endFormat, "client_ip") || strings.Contains(endFormat, "user") {
 		t.Fatal("session-end must not repeat identity fields")
 	}
@@ -95,5 +99,35 @@ func TestSessionIDsConcurrent(t *testing.T) {
 			t.Fatalf("duplicate session id %q", id)
 		}
 		seen[id] = struct{}{}
+	}
+}
+
+// Short SIDs are fixed-length opaque hex, valid per isValidSid, unique, and
+// carry no IP/user/database/secret material.
+func TestShortSidFormatAndUniqueness(t *testing.T) {
+	const n = 500
+	seen := map[string]struct{}{}
+	for i := 0; i < n; i++ {
+		s := nextShortSid()
+		if len(s) != 12 {
+			t.Fatalf("sid length must be 12, got %q", s)
+		}
+		if !isValidSid(s) {
+			t.Fatalf("sid invalid: %q", s)
+		}
+		for _, bad := range []string{" ", ".", ":", "@", "/"} {
+			if strings.Contains(s, bad) {
+				t.Fatalf("sid carries unsafe char %q in %q", bad, s)
+			}
+		}
+		if _, dup := seen[s]; dup {
+			t.Fatalf("duplicate sid %q", s)
+		}
+		seen[s] = struct{}{}
+	}
+	for _, bad := range []string{"", "short", "ABC123DEF456", "abc 123", "omnidb:abc123", "abc123!", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"} {
+		if isValidSid(bad) {
+			t.Fatalf("isValidSid accepted %q", bad)
+		}
 	}
 }

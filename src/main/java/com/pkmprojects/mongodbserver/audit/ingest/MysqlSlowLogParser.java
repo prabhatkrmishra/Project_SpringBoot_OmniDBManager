@@ -17,11 +17,14 @@ import java.util.regex.Pattern;
 /**
  * Parses MySQL 8.4 slow-log per-statement blocks into canonical audit events.
  *
- * <p>Proven spike shape: blocks of {@code # Time / # User@Host: user[user] @
+  * <p>Proven spike shape: blocks of {@code # Time / # User@Host: user[user] @
  * host [ip] Id: N / # Query_time / SET timestamp= / <statement>}. The
- * {@code User@Host} identity is database-native and authoritative; the client
- * IP bracket is empty for local-socket sessions, in which case the host token
- * is kept and attribution stays authoritative only for user+schema.</p>
+ * {@code User@Host} identity is database-native and authoritative per
+ * connection (no pooling in the MySQL topology): concurrent clients with
+ * the same username keep distinct {@code [ip]} values, so A/B cannot
+ * inherit each other's IP. The IP bracket is empty for local-socket
+ * sessions; hostnames are never persisted as {@code sourceIp} and never
+ * DNS-resolved — uncorrelated IPs become null/INFERRED.</p>
  */
 public final class MysqlSlowLogParser {
 
@@ -30,6 +33,14 @@ public final class MysqlSlowLogParser {
     private static final Pattern QUERY_TIME = Pattern.compile(
             "# Query_time:\\s*([0-9.]+)\\s+Lock_time:\\s*([0-9.]+)\\s+Rows_sent:\\s*(\\d+)\\s+Rows_examined:\\s*(\\d+)");
     private static final Pattern SET_TS = Pattern.compile("SET timestamp=(\\d+);");
+
+    /**
+     * System schemas where manager/tooling {@code root} activity is
+     * control-plane surface. A {@code root} user with a non-system tenant
+     * schemaHint is genuine tenant traffic and MUST remain auditable.
+     */
+    private static final java.util.Set<String> SYSTEM_SCHEMAS = java.util.Set.of(
+            "mysql", "sys", "information_schema", "performance_schema");
 
     private MysqlSlowLogParser() {
     }
@@ -41,7 +52,7 @@ public final class MysqlSlowLogParser {
      * Parses one slow-log block (the lines from {@code # Time:} through the
      * statement text). Unknown schema falls back to the connection's current
      * schema hint when provided.
-     */
+      */
     public static Parsed parseBlock(String block, String schemaHint) {
         if (block == null || block.isBlank()) {
             return new Parsed(Optional.empty(), true);
@@ -100,15 +111,21 @@ public final class MysqlSlowLogParser {
                 rowsExamined = parseLong(m.group(4));
             }
         }
-        // Manager control-plane surface (own JDBC pool as root, admin tooling):
-        // never tenant activity. Tenant accounts are provisioned per-database
-        // (omni_*/legacy names); see the PG parser for the full rationale.
-        if (user != null && (user.equals("root") || user.equals("mysql.sys"))) {
-            return new Parsed(Optional.empty(), false);
-        }
         String statement = sql.toString().trim();
         if (statement.isEmpty() || statement.startsWith("# administrator command:")) {
             return new Parsed(Optional.empty(), false);
+        }
+        // Identity-safe control-plane exclusion: username alone MUST NOT
+        // drop tenant traffic. A root/mysql.sys user is infrastructure
+        // surface ONLY when it is not demonstrably tenant-originated —
+        // i.e. bound to a system schema (or no tenant schema at all).
+        // A tenant provisioned as root with a genuine tenant schemaHint
+        // remains fully auditable.
+        if (user != null && (user.equals("root") || user.equals("mysql.sys"))) {
+            String schemaKey = schemaHint == null ? null : schemaHint.trim().toLowerCase();
+            if (schemaKey == null || schemaKey.isBlank() || SYSTEM_SCHEMAS.contains(schemaKey)) {
+                return new Parsed(Optional.empty(), false);
+            }
         }
         QueryAuditEvent e = new QueryAuditEvent();
         e.setEventId(UUID.randomUUID().toString());
@@ -119,10 +136,19 @@ public final class MysqlSlowLogParser {
             e.setManagedDatabaseId(DatabaseEngineType.MYSQL.name() + ":" + schemaHint);
         }
         e.setProvisionedUser(user);
-        e.setSourceIp(ip != null ? ip : host);
+        // Strict IP rule: authoritative IP literal only; hostnames,
+        // loopback, and blanks become null (never hostname-as-IP, never
+        // DNS, never 127.0.0.1 as tenant IP).
+        String safeIp = SourceIpRules.sanitizeTenantIp(ip != null ? ip : host);
+        e.setSourceIp(safeIp);
         e.setSourcePort(null);
-        e.setAttribution(QueryAttribution.AUTHORITATIVE);
-        e.setAuditConfidence(AuditConfidence.HIGH);
+        if (safeIp != null) {
+            e.setAttribution(QueryAttribution.AUTHORITATIVE);
+            e.setAuditConfidence(AuditConfidence.HIGH);
+        } else {
+            e.setAttribution(QueryAttribution.INFERRED);
+            e.setAuditConfidence(AuditConfidence.MEDIUM);
+        }
         String normalized = QueryShapeRedactor.normalize(statement);
         e.setNormalizedShape(cap(normalized));
         e.setShapeHash(QueryShapeRedactor.shapeHash(e.getNormalizedShape()));

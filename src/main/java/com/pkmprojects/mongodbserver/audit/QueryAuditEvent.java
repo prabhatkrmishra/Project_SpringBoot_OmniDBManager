@@ -66,6 +66,16 @@ public class QueryAuditEvent {
 
     private Long sourceSequence;
 
+    /**
+     * OmniDB bridge connection identity (short SID carried downstream as
+     * {@code application_name=omnidb:<sid>} and joined against the bridge
+     * session log). Distinct from {@link #sessionId}, which remains the
+     * engine/backend session identity (PG {@code session_id}), and from
+     * {@link #connectionId}, which remains the backend connection identity
+     * (PG {@code pid}). Nullable: null means uncorrelated — never guess.
+     */
+    private String bridgeSessionId;
+
     public QueryAuditEvent() {
     }
 
@@ -117,6 +127,8 @@ public class QueryAuditEvent {
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
     public String getConnectionId() { return connectionId; }
     public void setConnectionId(String connectionId) { this.connectionId = connectionId; }
+    public String getBridgeSessionId() { return bridgeSessionId; }
+    public void setBridgeSessionId(String bridgeSessionId) { this.bridgeSessionId = bridgeSessionId; }
     public Long getSourceSequence() { return sourceSequence; }
     public void setSourceSequence(Long sourceSequence) { this.sourceSequence = sourceSequence; }
 }

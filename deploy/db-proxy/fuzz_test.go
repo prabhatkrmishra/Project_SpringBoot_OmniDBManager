@@ -52,7 +52,7 @@ func FuzzRewriteNoLeak(f *testing.F) {
 		if err != nil {
 			t.Skip()
 		}
-		out, err := rewriteStartup(pkt, params)
+		out, err := rewriteStartup(pkt, params, "abc123def456")
 		if err != nil {
 			t.Skip()
 		}

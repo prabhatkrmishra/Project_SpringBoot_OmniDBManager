@@ -131,13 +131,12 @@ public class AuditTailRunner {
 
     private void pollPostgres() {
         try {
-            // Pooled-ness is per-session (bridge route), not per-file. The
-            // jsonlog alone cannot prove the leg; default to direct parsing
-            // and let bridge-session correlation upgrade/downgrade below.
-            // When no bridge context exists the parser marks INFERRED only
-            // for pooled legs; direct legs without ingress stay MEDIUM.
-            int n = postgresTailer.poll(line ->
-                    collector.ingestPostgresLineWithSession(line, this::bridgeSessionFor));
+            // EXACT SID correlation: the bridge SID in application_name
+            // (omnidb:<sid>) resolves to the single originating session.
+            // Uncorrelated lines become sourceIp=null/INFERRED — never
+            // remote_host, never latest-session. Pooled-ness comes from the
+            // resolved session's route, not from the file.
+            int n = postgresTailer.poll(collector::ingestPostgresLine);
             pgLines.addAndGet(n);
         } catch (Exception e) {
             pollErrors.incrementAndGet();
@@ -190,7 +189,12 @@ public class AuditTailRunner {
         }
     }
 
-    /** Bridge session lookup for PG correlation (may return null). */
+    /**
+     * Legacy bridge lookup retained for backwards-compatible callers only.
+     * The live PG path uses exact SID resolution inside the collector and
+     * never calls this for IP assignment.
+     */
+    @Deprecated
     private com.pkmprojects.mongodbserver.audit.ingest.BridgeSessionEvent bridgeSessionFor(String user, String db) {
         return collector.bridgeSession(user, db);
     }

@@ -49,13 +49,17 @@ public final class MongoProfilerParser {
         if (db == null || db.isBlank() || SYSTEM_DBS.contains(db)) {
             return new Parsed(Optional.empty(), true);
         }
-        // Manager control-plane surface (own driver as root, admin tooling):
-        // never tenant activity. Tenant users are provisioned per-database;
-        // see the PG parser for the full rationale.
-        String rawUser = userOf(doc.getString("user"));
-        if (rawUser != null && (rawUser.equals("root") || rawUser.equals("admin"))) {
+        // The collector's own profiler reads (finds on system.profile) are
+        // infrastructure surface regardless of user — excluded by namespace
+        // characteristics, never by username alone.
+        if (ns.endsWith(".system.profile")) {
             return new Parsed(Optional.empty(), true);
         }
+        // Identity-safe control-plane rule: username alone MUST NOT drop
+        // tenant traffic. System databases (admin/local/config) are already
+        // excluded above, which removes manager/admin tooling surface. A
+        // genuine tenant provisioned as root/admin inside a tenant
+        // database remains fully auditable.
         String op = doc.getString("op");
         Object cmdObj = doc.get("command");
         String commandType = opToCommand(op, cmdObj);
@@ -67,8 +71,13 @@ public final class MongoProfilerParser {
         e.setDatabase(db);
         e.setManagedDatabaseId(DatabaseEngineType.MONGO.name() + ":" + db);
         e.setProvisionedUser(userOf(doc.getString("user")));
-        e.setSourceIp(doc.getString("client"));
-        e.setSourcePort(null);
+        // Strict client rule: split client host:port, accept IP literals
+        // only (IPv4/IPv6); hostnames/loopback/blanks become null with
+        // INFERRED (never hostname-as-IP, never DNS, never 127.0.0.1).
+        String[] hostPort = splitHostPort(doc.getString("client"));
+        String safeIp = SourceIpRules.sanitizeTenantIp(hostPort[0]);
+        e.setSourceIp(safeIp);
+        e.setSourcePort(parsePort(hostPort[1]));
         e.setOperationClass(QueryShapeRedactor.operationClass(commandType));
         e.setCommandType(commandType);
         e.setNormalizedShape(cap(shape));
@@ -79,8 +88,13 @@ public final class MongoProfilerParser {
         e.setRowsAffected(affectedOf(doc));
         e.setSuccess(null);
         e.setObservationSource(ObservationSource.MONGO_PROFILER);
-        e.setAttribution(QueryAttribution.AUTHORITATIVE);
-        e.setAuditConfidence(AuditConfidence.HIGH);
+        if (safeIp != null) {
+            e.setAttribution(QueryAttribution.AUTHORITATIVE);
+            e.setAuditConfidence(AuditConfidence.HIGH);
+        } else {
+            e.setAttribution(QueryAttribution.INFERRED);
+            e.setAuditConfidence(AuditConfidence.MEDIUM);
+        }
         e.setSessionId(doc.get("queryShapeHash") instanceof String s ? s : null);
         Object opid = doc.get("opid");
         e.setConnectionId(opid == null ? null : String.valueOf(opid));
@@ -201,6 +215,60 @@ public final class MongoProfilerParser {
             return d.toInstant();
         }
         return Instant.now();
+    }
+
+    /**
+     * Splits a profiler {@code client} value into [host, portOrNull].
+     * Handles {@code ip}, {@code ip:port}, {@code [ip]}, {@code [ip]:port},
+     * and IPv6 literals (never splits bare IPv6 on interior colons). Never
+     * resolves; hostnames pass through for SourceIpRules to reject.
+     */
+    static String[] splitHostPort(String client) {
+        if (client == null || client.isBlank()) {
+            return new String[]{null, null};
+        }
+        String v = client.trim();
+        if (v.startsWith("[")) {
+            int close = v.indexOf(']');
+            if (close <= 1) {
+                return new String[]{v, null};
+            }
+            String host = v.substring(1, close).trim();
+            String rest = v.substring(close + 1).trim();
+            String port = null;
+            if (rest.startsWith(":") && rest.length() > 1) {
+                port = rest.substring(1).trim();
+            }
+            return new String[]{host.isEmpty() ? null : host, port};
+        }
+        int colons = 0;
+        for (int i = 0; i < v.length(); i++) {
+            if (v.charAt(i) == ':') {
+                colons++;
+            }
+        }
+        if (colons >= 2) {
+            return new String[]{v, null};
+        }
+        int colon = v.lastIndexOf(':');
+        if (colon >= 0) {
+            String host = v.substring(0, colon).trim();
+            String port = v.substring(colon + 1).trim();
+            return new String[]{host.isEmpty() ? null : host, port.isEmpty() ? null : port};
+        }
+        return new String[]{v, null};
+    }
+
+    static Integer parsePort(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int p = Integer.parseInt(raw.trim());
+            return p > 0 && p <= 65535 ? p : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private static Long longOf(Object v) {

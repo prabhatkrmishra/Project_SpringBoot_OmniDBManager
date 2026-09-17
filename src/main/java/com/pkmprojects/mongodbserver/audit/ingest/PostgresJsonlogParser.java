@@ -56,9 +56,59 @@ public final class PostgresJsonlogParser {
     /**
      * A bare {@code duration:} sibling line: no statement of its own, only a
      * timing to join against a pending statement. Carries the backend
-     * identity key ({@code pid}, {@code session_id}) and the duration.
+     * identity key ({@code pid}, {@code session_id}), the observed bridge
+     * SID (informational — IP comes from the pending statement, never from
+     * a re-lookup at duration time), and the duration.
      */
-    public record DurationSibling(String pid, String sessionId, long durationMs) {
+    public record DurationSibling(String pid, String sessionId, long durationMs, String bridgeSid) {
+        public DurationSibling(String pid, String sessionId, long durationMs) {
+            this(pid, sessionId, durationMs, null);
+        }
+    }
+
+    /** Downstream tenant marker prefix set by the bridge ({@code omnidb:<sid>}). */
+    public static final String BRIDGE_APP_PREFIX = "omnidb:";
+
+    /**
+     * Extracts the bridge correlation SID from a PG {@code application_name}
+     * value. Returns the SID for {@code omnidb:<sid>} with a well-formed
+     * {@code [a-z0-9]{8,32}} suffix, otherwise null. Bare {@code omnidb}
+     * (pre-SID clients), spoofed/oversized values, and nulls yield null —
+     * callers must treat null as uncorrelated (sourceIp=null), never fall
+     * back to remote_host or latest-session.
+     */
+    public static String extractBridgeSid(String applicationName) {
+        if (applicationName == null) {
+            return null;
+        }
+        String v = applicationName.trim();
+        if (!v.startsWith(BRIDGE_APP_PREFIX)) {
+            return null;
+        }
+        String sid = v.substring(BRIDGE_APP_PREFIX.length());
+        if (sid.length() < 8 || sid.length() > 32) {
+            return null;
+        }
+        for (int i = 0; i < sid.length(); i++) {
+            char c = sid.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+                continue;
+            }
+            return null;
+        }
+        return sid;
+    }
+
+    /**
+     * True for tenant-issued application names: bare {@code omnidb}
+     * (pre-SID clients) or {@code omnidb:<valid-sid>}. Anything else
+     * (including manager JDBC/Adminer defaults) is not tenant-marked.
+     */
+    public static boolean isTenantAppName(String applicationName) {
+        if ("omnidb".equals(applicationName)) {
+            return true;
+        }
+        return extractBridgeSid(applicationName) != null;
     }
 
     /**
@@ -66,14 +116,31 @@ public final class PostgresJsonlogParser {
      * classpath intentionally avoids a direct Jackson dependency; fields are
      * flat strings/numbers so a small extractor is sufficient).
      *
-     * @param jsonLine     one raw jsonlog line
-     * @param pooled       true when the downstream is a PgBouncer leg
-     * @param ingressIp    bridge ingress client IP (authoritative at ingress)
+      * @param jsonLine     one raw jsonlog line
+     * @param pooled       true when the resolved bridge leg is pooled
+     *                     (INFERRED); false for direct (AUTHORITATIVE when IP present)
+     * @param ingressIp    bridge ingress client IP for the EXACT resolved
+     *                     SID, or null when uncorrelated. Never a pooler/
+     *                     bridge/remote_host address.
      * @param ingressUser  bridge ingress username, may be null
      * @param ingressDb    bridge ingress database, may be null
-     */
+      */
     public static Parsed parseLine(String jsonLine, boolean pooled,
                                    String ingressIp, String ingressUser, String ingressDb) {
+        return parseLine(jsonLine, pooled, ingressIp, ingressUser, ingressDb, null);
+    }
+
+    /**
+     * SID-aware parse. {@code bridgeSid} is the EXACT resolved bridge SID
+     * for this line (from the collector's SID lookup), or null when the
+     * line's SID is missing/unknown. IP is assigned from
+     * {@code ingressIp} only (sanitized); when null/invalid the event gets
+     * {@code sourceIp=null, INFERRED/MEDIUM} — never remote_host, never
+     * latest-session, never hostname.
+     */
+    public static Parsed parseLine(String jsonLine, boolean pooled,
+                                   String ingressIp, String ingressUser, String ingressDb,
+                                   String bridgeSid) {
         if (jsonLine == null || jsonLine.isBlank()) {
             return new Parsed(Optional.empty(), true);
         }
@@ -90,7 +157,7 @@ public final class PostgresJsonlogParser {
         boolean isError = "ERROR".equalsIgnoreCase(severity) || "FATAL".equalsIgnoreCase(severity);
         if (message.startsWith("statement: ") && !isError) {
             return statementEvent(line, message.substring("statement: ".length()), null, null,
-                    pooled, ingressIp, ingressUser, ingressDb);
+                    pooled, ingressIp, ingressUser, ingressDb, bridgeSid);
         }
         Matcher dm = DURATION.matcher(message);
         if (dm.find() && !isError) {
@@ -103,13 +170,14 @@ public final class PostgresJsonlogParser {
             }
             return new Parsed(Optional.empty(),
                     Optional.of(new DurationSibling(
-                            field(line, "pid"), field(line, "session_id"), Math.round(ms))),
+                            field(line, "pid"), field(line, "session_id"), Math.round(ms),
+                            extractBridgeSid(field(line, "application_name")))),
                     false);
         }
         if (isError) {
             String sql = statement != null ? statement : null;
             return statementEvent(line, sql, null, field(line, "state_code"),
-                    pooled, ingressIp, ingressUser, ingressDb);
+                    pooled, ingressIp, ingressUser, ingressDb, bridgeSid);
         }
         return new Parsed(Optional.empty(), false);
     }
@@ -118,38 +186,43 @@ public final class PostgresJsonlogParser {
      * Control-plane identities whose statements are manager surface, never
      * tenant activity: the PostgreSQL superuser used by the manager's own
      * JDBC pool ({@code POSTGRES_ROOT_USER}, default {@code root}) and by
-     * Adminer SSO, plus the pooler's internal auth roles. Tenant roles are
-     * provisioned as {@code omni_*}/legacy custom names, so this set cannot
-     * collide with real tenant traffic — except a tenant explicitly
-     * provisioned under a superuser name connecting WITHOUT the issued
-     * {@code application_name=omnidb} marker (documented, pathological).
-     */
+     * Adminer SSO, plus the pooler's internal auth roles. A control-plane
+     * username is dropped ONLY when the line lacks the tenant-issued
+     * application marker (bare {@code omnidb} or {@code omnidb:<sid>}), so
+     * a genuine tenant provisioned as {@code root/postgres} over a bridged
+     * tenant string remains auditable.
+      */
     private static final Set<String> CONTROL_PLANE_USERS =
             Set.of("root", "postgres", "pgbouncer_auth", "pgbouncer_stats");
 
     /**
      * Whether a jsonlog line is manager control-plane surface rather than
      * tenant activity: a control-plane user connecting without the
-     * tenant-issued {@code application_name=omnidb} marker. Bridge-issued
-     * tenant strings always pin that marker, so this never drops real tenant
-     * traffic (including a tenant hypothetically named like a superuser).
-     */
+     * tenant-issued application marker. Bridge-issued tenant strings always
+     * pin {@code omnidb} or {@code omnidb:<sid>} downstream, so this never
+     * drops real tenant traffic (including a tenant named like a superuser).
+      */
     static boolean isControlPlaneSurface(String user, String applicationName) {
-        return user != null && CONTROL_PLANE_USERS.contains(user) && !"omnidb".equals(applicationName);
+        return user != null && CONTROL_PLANE_USERS.contains(user) && !isTenantAppName(applicationName);
     }
 
     private static Parsed statementEvent(String line, String sql, Double durationMs, String errorCode,
-                                         boolean pooled, String ingressIp, String ingressUser, String ingressDb) {
+                                         boolean pooled, String ingressIp, String ingressUser, String ingressDb,
+                                         String bridgeSid) {
         String user = field(line, "user");
         // Manager JDBC pool, Adminer SSO sessions, and the pooler's internal
         // auth roles are infrastructure surface, never tenant activity —
         // drop before building an event.
-        if (isControlPlaneSurface(user, field(line, "application_name"))) {
+        String applicationName = field(line, "application_name");
+        if (isControlPlaneSurface(user, applicationName)) {
             return new Parsed(Optional.empty(), false);
         }
+        // Observed SID from the log line (may be null for pre-SID clients
+        // or non-bridged traffic). The collector resolves the EXACT bridge
+        // session from this value; the parser never guesses from user/db.
+        String observedSid = extractBridgeSid(applicationName);
+        String effectiveSid = bridgeSid != null ? bridgeSid : observedSid;
         String db = field(line, "dbname");
-        String remoteHost = field(line, "remote_host");
-        String remotePort = field(line, "remote_port");
         String sessionId = field(line, "session_id");
         String pid = field(line, "pid");
         String ts = field(line, "timestamp");
@@ -162,16 +235,18 @@ public final class PostgresJsonlogParser {
             e.setManagedDatabaseId(DatabaseEngineType.POSTGRES.name() + ":" + e.getDatabase());
         }
         e.setProvisionedUser(user != null ? user : ingressUser);
-        if (pooled) {
-            e.setSourceIp(ingressIp);
-            e.setSourcePort(null);
+        // Exact-IP rule: sanitized bridge-ingress IP only. Null when
+        // uncorrelated/invalid — never remote_host (pooler/bridge egress),
+        // never latest-session, never hostname, never loopback.
+        String safeIp = SourceIpRules.sanitizeTenantIp(ingressIp);
+        e.setSourceIp(safeIp);
+        e.setSourcePort(null);
+        if (safeIp != null && !pooled) {
+            e.setAttribution(QueryAttribution.AUTHORITATIVE);
+            e.setAuditConfidence(AuditConfidence.HIGH);
+        } else {
             e.setAttribution(QueryAttribution.INFERRED);
             e.setAuditConfidence(AuditConfidence.MEDIUM);
-        } else {
-            e.setSourceIp(ingressIp != null ? ingressIp : ("[local]".equals(remoteHost) ? "local" : remoteHost));
-            e.setSourcePort(parsePort(remotePort));
-            e.setAttribution(ingressIp != null ? QueryAttribution.AUTHORITATIVE : QueryAttribution.INFERRED);
-            e.setAuditConfidence(ingressIp != null ? AuditConfidence.HIGH : AuditConfidence.MEDIUM);
         }
         String normalized = sql == null ? "?" : QueryShapeRedactor.normalize(sql);
         e.setNormalizedShape(cap(normalized));
@@ -190,6 +265,7 @@ public final class PostgresJsonlogParser {
         e.setObservationSource(ObservationSource.POSTGRES_JSONLOG);
         e.setSessionId(sessionId);
         e.setConnectionId(pid);
+        e.setBridgeSessionId(effectiveSid);
         return new Parsed(Optional.of(e), false);
     }
 

@@ -121,7 +121,7 @@
                                         <td><span class="badge badge-soft-secondary" th:text="${event.engine} ?: '—'">POSTGRES</span></td>
                                         <td th:text="${event.database} ?: '—'">db</td>
                                         <td th:text="${event.provisionedUser} ?: '—'">user</td>
-                                        <td th:text="${event.sourceIp} ?: '—'">ip</td>
+                                        <td th:text="${event.sourceIp} ?: 'IP unavailable / uncorrelated'">ip</td>
                                         <td>
                                             <span class="badge badge-soft-info" th:text="${event.operationClass} + '/' + ${event.commandType}">read/select</span>
                                         </td>

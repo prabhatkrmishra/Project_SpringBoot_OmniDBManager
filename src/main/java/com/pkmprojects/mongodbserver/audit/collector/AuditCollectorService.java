@@ -56,6 +56,14 @@ public class AuditCollectorService {
     private final Set<String> seen = ConcurrentHashMap.newKeySet();
     private final Deque<String> seenOrder = new ArrayDeque<>();
     private final Map<String, BridgeSessionEvent> sessions = new ConcurrentHashMap<>();
+    /**
+     * Exact SID index: short bridge SID ({@code application_name=omnidb:<sid>})
+     * to bridge session. This is the ONLY map used for PostgreSQL IP
+     * assignment. The legacy {@link #sessions} map (by long session id)
+     * remains for lifecycle bookkeeping; the legacy
+     * {@code (user,database) -> most-recent} lookup is never used for IP.
+     */
+    private final Map<String, BridgeSessionEvent> sessionsBySid = new ConcurrentHashMap<>();
     private final PostgresStatementCorrelator statementCorrelator = new PostgresStatementCorrelator();
     private final ScheduledExecutorService drainer;
 
@@ -70,16 +78,70 @@ public class AuditCollectorService {
         this.drainer.scheduleWithFixedDelay(this::drain, 1, 1, TimeUnit.SECONDS);
     }
 
+    /**
+     * Ingests one PostgreSQL jsonlog line with EXACT SID correlation.
+     * The bridge SID is read from the line's {@code application_name}
+     * ({@code omnidb:<sid>}) and resolved against the bridge session log.
+     * Uncorrelated lines get {@code sourceIp=null, INFERRED} — never
+     * remote_host, never latest-session. Never throws.
+     */
+    public void ingestPostgresLine(String jsonLine) {
+        if (!auditEnabled() || !properties.postgresEnabled()) {
+            return;
+        }
+        try {
+            String app = PostgresJsonlogParser.field(jsonLine == null ? "" : jsonLine, "application_name");
+            String sid = PostgresJsonlogParser.extractBridgeSid(app);
+            BridgeSessionEvent ingress = sid != null ? sessionsBySid.get(sid) : null;
+            boolean pooled = ingress != null && ingress.pooled();
+            var parsed = PostgresJsonlogParser.parseLine(jsonLine, pooled,
+                    ingress != null ? ingress.clientIp() : null,
+                    ingress != null ? ingress.username() : null,
+                    ingress != null ? ingress.database() : null,
+                    sid);
+            if (parsed.duration().isPresent()) {
+                var sib = parsed.duration().get();
+                QueryAuditEvent enriched = statementCorrelator.match(
+                        sib.pid(), sib.sessionId(), sib.durationMs());
+                if (enriched != null) {
+                    offer(enriched);
+                }
+            }
+            if (parsed.event().isPresent()) {
+                QueryAuditEvent event = parsed.event().get();
+                if (event.getBridgeSessionId() == null && sid != null) {
+                    event.setBridgeSessionId(sid);
+                }
+                String pid = event.getConnectionId();
+                String sessionId = event.getSessionId();
+                if (pid != null && sessionId != null && event.getErrorCode() == null) {
+                    for (QueryAuditEvent flushed : statementCorrelator.retain(pid, sessionId, event)) {
+                        offer(flushed);
+                    }
+                } else {
+                    offer(event);
+                }
+            }
+            for (QueryAuditEvent expired : statementCorrelator.flushExpired()) {
+                offer(expired);
+            }
+        } catch (Exception e) {
+            log.debug("postgres audit line skipped: {}", e.getMessage());
+        }
+    }
+
     /** Ingests one PostgreSQL jsonlog line. Never throws. */
     public void ingestPostgresLine(String jsonLine, boolean pooled) {
         ingestPostgresLineWithSession(jsonLine, (u, d) -> null, pooled);
     }
 
     /**
-     * Ingests one PostgreSQL jsonlog line with bridge-session correlation.
-     * The resolver maps (user, database) to the most recent live bridge
-     * session; pooled legs always stay INFERRED. Never throws.
-     */
+     * Legacy resolver-based ingest kept for backwards-compatible callers.
+     * The resolver is consulted ONLY to determine the pooled flag when no
+     * SID is present; it is NEVER used for IP assignment. IP comes from
+     * the EXACT SID lookup ({@link #sessionsBySid}) or is null.
+     * New code must call {@link #ingestPostgresLine(String)}. Never throws.
+      */
     public void ingestPostgresLineWithSession(String jsonLine,
             java.util.function.BiFunction<String, String, BridgeSessionEvent> sessionFor) {
         ingestPostgresLineWithSession(jsonLine, sessionFor, false);
@@ -91,37 +153,58 @@ public class AuditCollectorService {
             return;
         }
         try {
-            // Pre-extract identity for the session lookup (no raw text kept).
-            String user = PostgresJsonlogParser.field(jsonLine == null ? "" : jsonLine, "user");
-            String db = PostgresJsonlogParser.field(jsonLine == null ? "" : jsonLine, "dbname");
-            BridgeSessionEvent ingress = null;
-            try {
-                ingress = sessionFor == null ? null : sessionFor.apply(user, db);
-            } catch (Exception ignored) {
+            // EXACT SID lookup first (no raw text kept beyond flat fields).
+            String app = PostgresJsonlogParser.field(jsonLine == null ? "" : jsonLine, "application_name");
+            String sid = PostgresJsonlogParser.extractBridgeSid(app);
+            BridgeSessionEvent ingress = sid != null ? sessionsBySid.get(sid) : null;
+            boolean pooled;
+            if (ingress != null) {
+                pooled = ingress.pooled();
+            } else if (sid != null) {
+                // SID present but unknown (expired/restarted bridge): fail
+                // closed to null IP, INFERRED — never latest-session.
+                pooled = true;
+            } else {
+                // Pre-SID / non-bridged line: consult the legacy resolver
+                // ONLY for the pooled flag, never for IP.
+                String user = PostgresJsonlogParser.field(jsonLine == null ? "" : jsonLine, "user");
+                String db = PostgresJsonlogParser.field(jsonLine == null ? "" : jsonLine, "dbname");
+                BridgeSessionEvent legacy = null;
+                try {
+                    legacy = sessionFor == null ? null : sessionFor.apply(user, db);
+                } catch (Exception ignored) {
+                    legacy = null;
+                }
+                pooled = pooledDefault || (legacy != null && legacy.pooled());
+                // IP stays null: no exact SID means no deterministic IP.
                 ingress = null;
             }
-            boolean pooled = pooledDefault || (ingress != null && ingress.pooled());
             var parsed = PostgresJsonlogParser.parseLine(jsonLine, pooled,
                     ingress != null ? ingress.clientIp() : null,
                     ingress != null ? ingress.username() : null,
-                    ingress != null ? ingress.database() : null);
+                    ingress != null ? ingress.database() : null,
+                    sid);
             if (parsed.duration().isPresent()) {
                 // Duration sibling: join to the pending statement with the
                 // same backend identity, or drop when unmatched. Never an
-                // event of its own.
+                // event of its own. No re-lookup: the pending statement
+                // already carries its exact IP/bridge SID (atomicity).
                 var sib = parsed.duration().get();
                 QueryAuditEvent enriched = statementCorrelator.match(
                         sib.pid(), sib.sessionId(), sib.durationMs());
                 if (enriched != null) {
-                    stampBridgeSession(enriched, ingress);
                     offer(enriched);
                 }
             }
             if (parsed.event().isPresent()) {
                 // Statement (or error) line: retain pending its duration
                 // sibling; flush any duplicate/TTL-expired entries first.
+                // IP/bridge SID are captured NOW and travel with the pending
+                // event — the later duration never triggers a new lookup.
                 QueryAuditEvent event = parsed.event().get();
-                stampBridgeSession(event, ingress);
+                if (event.getBridgeSessionId() == null && sid != null) {
+                    event.setBridgeSessionId(sid);
+                }
                 String pid = event.getConnectionId();
                 String sessionId = event.getSessionId();
                 if (pid != null && sessionId != null && event.getErrorCode() == null) {
@@ -143,13 +226,6 @@ public class AuditCollectorService {
         }
     }
 
-    /** Stamps the correlated bridge session id when the event lacks one. */
-    private static void stampBridgeSession(QueryAuditEvent event, BridgeSessionEvent ingress) {
-        if (ingress != null && event.getSessionId() == null) {
-            event.setSessionId("bridge:" + ingress.sessionId());
-        }
-    }
-
     /** Pending statement↔duration joins awaiting their sibling (diagnostic). */
     public int pendingStatements() {
         return statementCorrelator.pendingCount();
@@ -161,11 +237,13 @@ public class AuditCollectorService {
     }
 
     /**
-     * Most-recent live bridge session for (user, database), or null.
-     * Used by the tail runner to correlate PG backend events with ingress
-     * identity. Pooled sessions are returned too — the parser downgrades
-     * them to INFERRED, preserving ingress context without false authority.
-     */
+     * Legacy most-recent lookup for (user, database), or null.
+     * Retained for backwards-compatible callers/tests only. MUST NOT be
+     * used for PostgreSQL IP assignment — exact SID lookup
+     * ({@link #bridgeSessionBySid}) is the only IP path. This method
+     * exists so pre-SID tests/callers compile; new code must not call it
+     * for attribution.
+      */
     public BridgeSessionEvent bridgeSession(String user, String database) {
         if (user == null || database == null) {
             return null;
@@ -182,10 +260,30 @@ public class AuditCollectorService {
         return best;
     }
 
-    /** Removes a closed bridge session (bounded map hygiene). */
+    /**
+     * Exact bridge session for a short SID, or null. The ONLY lookup used
+     * for PostgreSQL IP assignment.
+     */
+    public BridgeSessionEvent bridgeSessionBySid(String sid) {
+        if (sid == null || sid.isBlank()) {
+            return null;
+        }
+        return sessionsBySid.get(sid);
+    }
+
+    /** Removes a closed bridge session (bounded map hygiene, both indexes). */
     public void forgetBridgeSession(String sessionId) {
         if (sessionId != null) {
-            sessions.remove(sessionId);
+            BridgeSessionEvent removed = sessions.remove(sessionId);
+            if (removed != null && removed.bridgeSessionId() != null) {
+                sessionsBySid.remove(removed.bridgeSessionId(), removed);
+            } else if (removed == null) {
+                // Defensive: end arrived for an unknown long id (e.g. after
+                // collector restart lost the map) — sweep any SID entry
+                // whose long id matches, without scanning user/db.
+                sessionsBySid.entrySet().removeIf(e ->
+                        sessionId.equals(e.getValue().sessionId()));
+            }
         }
     }
 
@@ -226,7 +324,10 @@ public class AuditCollectorService {
         }
         try {
             sessions.put(session.sessionId(), session);
-            if (sessions.size() > 10000) {
+            if (session.bridgeSessionId() != null) {
+                sessionsBySid.put(session.bridgeSessionId(), session);
+            }
+            if (sessions.size() > 10000 || sessionsBySid.size() > 10000) {
                 // Evict a small oldest sample instead of clearing (which
                 // would drop live correlation context under connection churn).
                 int evicted = 0;
@@ -235,10 +336,14 @@ public class AuditCollectorService {
                     BridgeSessionEvent cur = sessions.get(id);
                     if (cur != null && cur.closedAt() != null) {
                         sessions.remove(id);
+                        if (cur.bridgeSessionId() != null) {
+                            sessionsBySid.remove(cur.bridgeSessionId(), cur);
+                        }
                     }
                 }
-                if (sessions.size() > 10000) {
+                if (sessions.size() > 10000 || sessionsBySid.size() > 10000) {
                     sessions.clear();
+                    sessionsBySid.clear();
                 }
             }
         } catch (Exception e) {
