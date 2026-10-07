@@ -64,6 +64,9 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
      */
     private final String authorization;
 
+    /** Whether to inject the configured basic-auth credential on proxied requests. */
+    private final boolean injectAuth;
+
     /**
      * Shared HTTP client used for every proxied request.
      */
@@ -72,18 +75,31 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
     /**
      * Builds the proxy filter from the configured mongo-express connection settings.
      *
-     * @param baseUrl  base URL of the mongo-express container
-     * @param username mongo-express basic-auth username
-     * @param password mongo-express basic-auth password
+     * <p>The injected credential defaults to {@code admin}/{@code admin} and is
+     * sent to mongo-express on every proxied request, so any authenticated admin
+     * of this app is, transitively, whoever that account can reach. Set
+     * {@code MONGO_EXPRESS_INJECT_AUTH=false} to stop injecting it. Note this is
+     * not the same as Adminer's flag: mongo-express is configured with basic auth
+     * upstream, so turning injection off makes it reject every proxied request
+     * unless it has been reconfigured without one. The admin session's own
+     * Authorization header is still stripped either way.
+     *
+     * @param baseUrl    base URL of the mongo-express container
+     * @param username   mongo-express basic-auth username
+     * @param password   mongo-express basic-auth password
+     * @param injectAuth whether to send the configured credential upstream
      */
+    @org.springframework.beans.factory.annotation.Autowired
     public MongoExpressProxyFilter(@Value("${app.mongo-express.base-url}") String baseUrl,
                                     @Value("${app.mongo-express.username}") String username,
                                     @Value("${app.mongo-express.password}") String password,
-                                    @org.springframework.beans.factory.annotation.Autowired(required = false) HttpClient httpClient) {
+                                    @org.springframework.beans.factory.annotation.Autowired(required = false) HttpClient httpClient,
+                                    @Value("${app.mongo-express.inject-auth:true}") boolean injectAuth) {
         this.targetBase = URI.create(baseUrl);
         String token = Base64.getEncoder().encodeToString(
                 (username + ":" + password).getBytes(StandardCharsets.UTF_8));
         this.authorization = "Basic " + token;
+        this.injectAuth = injectAuth;
         this.http = httpClient != null ? httpClient : HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .version(HttpClient.Version.HTTP_1_1)
@@ -94,6 +110,11 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
     /**
      * Skips the proxy unless the request path is under {@value #PROXY_PREFIX}.
      */
+    /** Test/diagnostic accessor: is the configured credential injected upstream? */
+    public boolean isInjectAuth() {
+        return injectAuth;
+    }
+
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         return !request.getRequestURI().startsWith(PROXY_PREFIX);
@@ -118,8 +139,10 @@ public class MongoExpressProxyFilter extends OncePerRequestFilter {
         HttpRequest.Builder builder;
         try {
             builder = HttpRequest.newBuilder(URI.create(target))
-                    .header("Authorization", authorization)
                     .timeout(Duration.ofSeconds(60));
+            if (injectAuth) {
+                builder.header("Authorization", authorization);
+            }
         } catch (IllegalArgumentException e) {
             // The raw request path/query contains characters that cannot form a
             // valid target URI (space, bad %-sequence, ...). That is a bad

@@ -99,6 +99,12 @@ app:
     base-url: http://127.0.0.1:9814/mongo-express
     username: admin
     password: admin
+    # The credential above is sent upstream on every proxied request, so any
+    # authenticated admin reaches whatever that account can reach. Default true
+    # keeps current behaviour; set false to stop injecting it. mongo-express is
+    # configured with basic auth, so false makes it reject proxied requests
+    # unless it is reconfigured without one.
+    inject-auth: ${MONGO_EXPRESS_INJECT_AUTH:true}
   postgres:
     enabled: ${POSTGRES_ENABLED:false}
     uri: ${OVERRIDE_POSTGRES_URI:jdbc:postgresql://127.0.0.1:9813/postgres?sslmode=disable&connectTimeout=5&socketTimeout=10}
