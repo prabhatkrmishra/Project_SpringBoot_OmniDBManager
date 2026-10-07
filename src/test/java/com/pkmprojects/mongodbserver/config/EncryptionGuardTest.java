@@ -27,6 +27,9 @@ class EncryptionGuardTest {
     @Mock
     private EncryptionService encryptionService;
 
+    private static final String BASE64_KEY =
+            java.util.Base64.getEncoder().encodeToString(new byte[32]);
+
     private EncryptionGuard guard(boolean enforce) {
         return new EncryptionGuard(encryptionService, new EncryptionProperties(null, enforce), environment);
     }
@@ -82,5 +85,72 @@ class EncryptionGuardTest {
         when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(false);
         assertThatCode(() -> guard(false).run(null)).doesNotThrowAnyException();
         verify(environment).acceptsProfiles(Profiles.of("atlas"));
+    }
+
+    // ── through the real Spring binder, not a hand-built bean ──────────
+    //
+    // These are the tests that would have caught the original bug. A second
+    // constructor on the record made the binder fall back to JavaBean
+    // instantiation and fail with "No default constructor found", which took the
+    // whole application down. Constructing EncryptionProperties directly, as the
+    // other tests here do, never touches that path.
+
+    @org.springframework.context.annotation.Configuration(proxyBeanMethods = false)
+    @org.springframework.boot.context.properties.EnableConfigurationProperties(EncryptionProperties.class)
+    static class EncryptionWiring {
+        @org.springframework.context.annotation.Bean
+        EncryptionService encryptionService(EncryptionProperties p) {
+            return new EncryptionService(p);
+        }
+
+        @org.springframework.context.annotation.Bean
+        EncryptionGuard encryptionGuard(EncryptionService s, EncryptionProperties p, Environment e) {
+            return new EncryptionGuard(s, p, e);
+        }
+    }
+
+    @Test
+    void propertiesBindThroughTheRealBinder() {
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withUserConfiguration(EncryptionWiring.class)
+                .withPropertyValues("app.encryption.key=" + BASE64_KEY,
+                        "app.encryption.enforce=true")
+                .run(ctx -> {
+                    org.assertj.core.api.Assertions.assertThat(ctx).hasNotFailed();
+                    org.assertj.core.api.Assertions
+                            .assertThat(ctx.getBean(EncryptionProperties.class).enforce())
+                            .isTrue();
+                    org.assertj.core.api.Assertions
+                            .assertThat(ctx.getBean(EncryptionService.class).isEnabled())
+                            .isTrue();
+                });
+    }
+
+    @Test
+    void boundPropertiesDriveTheGuard() {
+        // Bound with no key, so encryption is off and the guard must refuse.
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withUserConfiguration(EncryptionWiring.class)
+                .withPropertyValues("app.encryption.key=", "app.encryption.enforce=true")
+                .run(ctx -> {
+                    org.assertj.core.api.Assertions.assertThat(ctx).hasNotFailed();
+                    var guard = ctx.getBean(EncryptionGuard.class);
+                    org.assertj.core.api.Assertions.assertThatThrownBy(() -> guard.run(null))
+                            .isInstanceOf(IllegalStateException.class)
+                            .hasMessageContaining("APP_ENCRYPTION_KEY");
+                });
+    }
+
+    @Test
+    void boundKeyLetsTheGuardStartQuietly() {
+        new org.springframework.boot.test.context.runner.ApplicationContextRunner()
+                .withUserConfiguration(EncryptionWiring.class)
+                .withPropertyValues("app.encryption.key=" + BASE64_KEY)
+                .run(ctx -> {
+                    org.assertj.core.api.Assertions.assertThat(ctx).hasNotFailed();
+                    var guard = ctx.getBean(EncryptionGuard.class);
+                    org.assertj.core.api.Assertions.assertThatCode(() -> guard.run(null))
+                            .doesNotThrowAnyException();
+                });
     }
 }

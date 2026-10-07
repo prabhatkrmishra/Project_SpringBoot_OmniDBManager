@@ -16,7 +16,7 @@ class EncryptionServiceTest {
 
     @Test
     void disabledWhenNoKey() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(null));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(null, true));
         assertThat(svc.isEnabled()).isFalse();
         assertThat(svc.encrypt("hello")).isEqualTo("hello");
         assertThat(svc.decrypt("hello")).isEqualTo("hello");
@@ -24,7 +24,7 @@ class EncryptionServiceTest {
 
     @Test
     void disabledWhenBlankKey() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties("   "));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties("   ", true));
         assertThat(svc.isEnabled()).isFalse();
     }
 
@@ -36,7 +36,7 @@ class EncryptionServiceTest {
 
     @Test
     void encryptDecryptRoundTripWithBase64Key() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         assertThat(svc.isEnabled()).isTrue();
         String encrypted = svc.encrypt("mysecret123");
         assertThat(encrypted).startsWith("ENC:v1:");
@@ -46,7 +46,7 @@ class EncryptionServiceTest {
 
     @Test
     void encryptDecryptRoundTripWithHexKey() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(HEX_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(HEX_KEY, true));
         assertThat(svc.isEnabled()).isTrue();
         String encrypted = svc.encrypt("hello world");
         assertThat(svc.decrypt(encrypted)).isEqualTo("hello world");
@@ -54,7 +54,7 @@ class EncryptionServiceTest {
 
     @Test
     void hexKeyCaseInsensitive() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(HEX_KEY_UPPER));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(HEX_KEY_UPPER, true));
         assertThat(svc.isEnabled()).isTrue();
         String encrypted = svc.encrypt("test");
         assertThat(svc.decrypt(encrypted)).isEqualTo("test");
@@ -62,7 +62,7 @@ class EncryptionServiceTest {
 
     @Test
     void encryptProducesDifferentCiphertextEachTimeDueToRandomIv() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         String c1 = svc.encrypt("same");
         String c2 = svc.encrypt("same");
         assertThat(c1).isNotEqualTo(c2);
@@ -72,23 +72,23 @@ class EncryptionServiceTest {
 
     @Test
     void encryptDecryptHandlesNull() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         assertThat(svc.encrypt(null)).isNull();
         assertThat(svc.decrypt(null)).isNull();
     }
 
     @Test
     void decryptPlaintextPassthroughWhenEnabled() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         assertThat(svc.decrypt("plaintext")).isEqualTo("plaintext");
         assertThat(svc.decrypt("not-encrypted")).isEqualTo("not-encrypted");
     }
 
     @Test
     void decryptEncryptedWithoutKeyThrows() {
-        EncryptionService enabled = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService enabled = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         String encrypted = enabled.encrypt("secret");
-        EncryptionService disabled = new EncryptionService(new EncryptionProperties(null));
+        EncryptionService disabled = new EncryptionService(new EncryptionProperties(null, true));
         assertThatThrownBy(() -> disabled.decrypt(encrypted))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("APP_ENCRYPTION_KEY not configured");
@@ -96,14 +96,14 @@ class EncryptionServiceTest {
 
     @Test
     void encryptDecryptHandlesEmptyString() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         String encrypted = svc.encrypt("");
         assertThat(svc.decrypt(encrypted)).isEqualTo("");
     }
 
     @Test
     void encryptDecryptHandlesSpecialCharsAndUnicode() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         String original = "p@ss#word/ café \u2603";
         String encrypted = svc.encrypt(original);
         assertThat(svc.decrypt(encrypted)).isEqualTo(original);
@@ -111,7 +111,7 @@ class EncryptionServiceTest {
 
     @Test
     void rejectsInvalidBase64Key() {
-        assertThatThrownBy(() -> new EncryptionService(new EncryptionProperties("not-valid-base64!!!")))
+        assertThatThrownBy(() -> new EncryptionService(new EncryptionProperties("not-valid-base64!!!", true)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("APP_ENCRYPTION_KEY");
     }
@@ -119,14 +119,14 @@ class EncryptionServiceTest {
     @Test
     void rejectsWrongLengthBase64Key() {
         String shortKey = Base64.getEncoder().encodeToString(new byte[16]);
-        assertThatThrownBy(() -> new EncryptionService(new EncryptionProperties(shortKey)))
+        assertThatThrownBy(() -> new EncryptionService(new EncryptionProperties(shortKey, true)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("32 bytes");
     }
 
     @Test
     void rejectsTooShortEncryptedPayload() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         String tooShort = "ENC:v1:" + Base64.getEncoder().encodeToString(new byte[5]);
         assertThatThrownBy(() -> svc.decrypt(tooShort))
                 .isInstanceOf(IllegalStateException.class);
@@ -134,7 +134,7 @@ class EncryptionServiceTest {
 
     @Test
     void rejectsTamperedCiphertext() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties(BASE64_KEY, true));
         String encrypted = svc.encrypt("hello");
         // Flip last char to corrupt tag
         String tampered = encrypted.substring(0, encrypted.length() - 1)
@@ -145,7 +145,7 @@ class EncryptionServiceTest {
 
     @Test
     void trimsWhitespaceFromKey() {
-        EncryptionService svc = new EncryptionService(new EncryptionProperties("  " + BASE64_KEY + "  "));
+        EncryptionService svc = new EncryptionService(new EncryptionProperties("  " + BASE64_KEY + "  ", true));
         assertThat(svc.isEnabled()).isTrue();
         assertThat(svc.decrypt(svc.encrypt("test"))).isEqualTo("test");
     }

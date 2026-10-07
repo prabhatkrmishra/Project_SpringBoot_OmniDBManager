@@ -200,7 +200,7 @@ class ProvisioningServicePostgresTest {
     @Test
     void provisionPostgresWithEncryptionStoresEncryptedPassword() {
         EncryptionService enc = new EncryptionService(new com.pkmprojects.mongodbserver.config.EncryptionProperties(
-                java.util.Base64.getEncoder().encodeToString(new byte[32])));
+                java.util.Base64.getEncoder().encodeToString(new byte[32]), true));
         ProvisioningService encService = new ProvisioningService(mongoRepo, managedRepo, auditRepo, new DatabaseNameValidator(),
                 passwordGen, Clock.fixed(NOW, ZoneOffset.UTC), env, publisher,
                 new DatabaseLockRegistry(), new MongoDatabaseEngine(mongoRepo, env), postgresEngine, postgresRepo, enc);
