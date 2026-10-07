@@ -54,23 +54,38 @@ public class MysqlDatabaseRepository {
         // after it to parse as SQL. Quote-doubling alone is correct only once
         // backslash cannot appear. '#' is deliberately NOT banned: with no way to
         // close the literal early it is inert, and PasswordGenerator emits it.
-        if (containsDisallowedSqlCharacter(password)) {
+        if (!isSafeForMysqlPasswordLiteral(password)) {
             throw new IllegalArgumentException("Password contains disallowed SQL metacharacters");
         }
+        // Only transformation applied after the check. Quote-doubling inserts
+        // single quotes and can never reintroduce a backslash, so it cannot
+        // invalidate the predicate above. Anything added here must preserve that.
         return password.replace("'", "''");
     }
 
     /**
-     * Characters that must never appear in a password embedded in a single-quoted
-     * MySQL literal. Mirrored by {@code DatabaseNameValidator.validateMysqlPassword}
-     * so the pre-flight check and this last line of defence cannot drift.
+     * Whether {@code password} can be embedded in a single-quoted MySQL literal
+     * without changing how the server parses it.
+     *
+     * <p>Backslash is the load-bearing rule: MySQL defaults to
+     * {@code NO_BACKSLASH_ESCAPES=OFF}, so a backslash inside {@code '...'} is an
+     * escape character and can terminate the literal early. Everything else here is
+     * defence in depth against statement and comment constructs.
+     *
+     * <p>{@code #} is deliberately permitted. With no way to close the literal
+     * early it is inert, and {@code PasswordGenerator} emits it. Narrowing this
+     * set without a parser-level reason would reject legitimate generated
+     * passwords for no security gain.
+     *
+     * <p>Shared with {@code DatabaseNameValidator.validateMysqlPassword} so the
+     * pre-flight 400 and this last line of defence cannot drift.
      */
-    public static boolean containsDisallowedSqlCharacter(String password) {
-        return password.indexOf('\\') >= 0
-                || password.contains(";")
-                || password.contains("--")
-                || password.contains("/*")
-                || password.contains("*/");
+    public static boolean isSafeForMysqlPasswordLiteral(String password) {
+        return password.indexOf('\\') < 0
+                && !password.contains(";")
+                && !password.contains("--")
+                && !password.contains("/*")
+                && !password.contains("*/");
     }
 
     public List<String> listDatabaseNames() {

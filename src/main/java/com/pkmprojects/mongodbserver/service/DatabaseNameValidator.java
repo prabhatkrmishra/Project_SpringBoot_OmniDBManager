@@ -174,7 +174,7 @@ public class DatabaseNameValidator {
         if (password == null || password.isBlank()) {
             return;
         }
-        if (MysqlDatabaseRepository.containsDisallowedSqlCharacter(password)) {
+        if (!MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral(password)) {
             throw new NameNotAllowedException(
                     "MySQL password must not contain a backslash, ';', '--', '/*' or '*/'");
         }

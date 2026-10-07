@@ -134,9 +134,8 @@ class DatabaseNameValidatorMysqlTest {
         };
         for (String sample : samples) {
             boolean validatorRejects = !accepts(() -> validator.validateMysqlPassword(sample));
-            boolean repositoryRejects =
-                    com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository
-                            .containsDisallowedSqlCharacter(sample);
+            boolean repositoryRejects = !com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository
+                            .isSafeForMysqlPasswordLiteral(sample);
             org.junit.jupiter.api.Assertions.assertEquals(repositoryRejects, validatorRejects,
                     () -> "layers disagree about: " + sample);
         }

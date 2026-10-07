@@ -212,19 +212,19 @@ class MysqlDatabaseRepositoryUnitTest {
         // Neither can terminate the literal: '#' is inert while the literal is
         // intact, and a single quote is doubled. Both are legal, and
         // PasswordGenerator emits '#'.
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("pa#ss123")).isFalse();
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("it'sasecret")).isFalse();
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("abcABC23456789!@#$%")).isFalse();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("pa#ss123")).isTrue();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("it'sasecret")).isTrue();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("abcABC23456789!@#$%")).isTrue();
     }
 
     @Test
     void disallowedPredicateCatchesEveryBannedCharacter() {
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a\\b")).isTrue();
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a;b")).isTrue();
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a--b")).isTrue();
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a/*b")).isTrue();
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a*/b")).isTrue();
-        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a#b")).isFalse();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("a\\b")).isFalse();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("a;b")).isFalse();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("a--b")).isFalse();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("a/*b")).isFalse();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("a*/b")).isFalse();
+        assertThat(MysqlDatabaseRepository.isSafeForMysqlPasswordLiteral("a#b")).isTrue();
     }
 
     @Test
