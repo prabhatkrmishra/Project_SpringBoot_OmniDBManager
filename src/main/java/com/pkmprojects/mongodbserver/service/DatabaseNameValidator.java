@@ -2,6 +2,7 @@ package com.pkmprojects.mongodbserver.service;
 
 import com.pkmprojects.mongodbserver.error.NameNotAllowedException;
 import com.pkmprojects.mongodbserver.model.DatabaseEngineType;
+import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
@@ -160,17 +161,22 @@ public class DatabaseNameValidator {
     }
 
     /**
-     * MySQL passwords face the identical server-side literal
-     * restriction ({@code MysqlDatabaseRepository.escapePassword}), so the
-     * same early-400 rule applies.
+     * MySQL passwords are embedded in single-quoted
+     * {@code CREATE/ALTER USER ... IDENTIFIED BY} literals server-side, and MySQL
+     * treats a backslash as an escape character inside them by default. The
+     * repository rejects the same characters at SQL-construction time; delegating
+     * to its predicate means the pre-flight check and that last line of defence
+     * cannot drift apart. Surfaces the rule here as HTTP 400 before any lifecycle
+     * step runs, rather than a raw 500 from the repository.
      */
     public void validateMysqlPassword(String password) {
         validatePassword(password);
         if (password == null || password.isBlank()) {
             return;
         }
-        if (password.contains(";") || password.contains("--") || password.contains("/*") || password.contains("*/")) {
-            throw new NameNotAllowedException("MySQL password must not contain ';', '--', '/*' or '*/'");
+        if (MysqlDatabaseRepository.containsDisallowedSqlCharacter(password)) {
+            throw new NameNotAllowedException(
+                    "MySQL password must not contain a backslash, ';', '--', '/*' or '*/'");
         }
     }
 

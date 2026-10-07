@@ -144,4 +144,82 @@ class MysqlDatabaseRepositoryUnitTest {
         // collision, so a monitoring outage never blocks provisioning.
         assertThat(repo.userExists("bob")).isFalse();
     }
+
+    // ── backslash: the character that defeated quote-doubling ─────────
+    //
+    // MySQL defaults to NO_BACKSLASH_ESCAPES=OFF, so a backslash inside a quoted
+    // literal is an escape character. A backslash placed before a doubled quote
+    // swallows the first quote and the second one terminates the literal, turning
+    // everything after it into SQL. These assert the rejection happens *before* any
+    // SQL reaches the driver, not that the emitted string merely looks escaped.
+
+    private static MysqlDatabaseRepository repoWith(org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        return new MysqlDatabaseRepository(jdbc,
+                "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+    }
+
+    @Test
+    void createUserRejectsPasswordContainingBackslash() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = repoWith(jdbc);
+        assertThatThrownBy(() -> repo.createUser("mydb", "bob", "pass\\word"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disallowed SQL metacharacters");
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never())
+                .execute(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void createUserRejectsThePrivilegeEscalationPayload() {
+        // Unguarded, this reached the driver as:
+        //   ALTER USER 'bob'@'%' IDENTIFIED BY 'x\'' ' WITH SUPER#'
+        // where the backslash eats the first quote of the doubled pair, the next
+        // quote closes the literal, and the trailing # comments out the
+        // template's own closing quote -- so the server executes WITH SUPER.
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = repoWith(jdbc);
+        assertThatThrownBy(() -> repo.createUser("mydb", "bob", "x\\'' WITH SUPER#"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("disallowed SQL metacharacters");
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never())
+                .execute(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void updateUserPasswordRejectsBackslash() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = repoWith(jdbc);
+        assertThatThrownBy(() -> repo.updateUserPassword("mydb", "bob", "pass\\word"))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never())
+                .execute(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void stillAcceptsHashAndSingleQuote() {
+        // Neither can terminate the literal: '#' is inert while the literal is
+        // intact, and a single quote is doubled. Both are legal, and
+        // PasswordGenerator emits '#'.
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("pa#ss123")).isFalse();
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("it'sasecret")).isFalse();
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("abcABC23456789!@#$%")).isFalse();
+    }
+
+    @Test
+    void disallowedPredicateCatchesEveryBannedCharacter() {
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a\\b")).isTrue();
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a;b")).isTrue();
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a--b")).isTrue();
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a/*b")).isTrue();
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a*/b")).isTrue();
+        assertThat(MysqlDatabaseRepository.containsDisallowedSqlCharacter("a#b")).isFalse();
+    }
+
+    @Test
+    void createUserStillDoublesSingleQuote() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = repoWith(jdbc);
+        repo.createUser("mydb", "bob", "it'sasecret");
+        verify(jdbc).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.contains("'it''sasecret'")));
+    }
 }

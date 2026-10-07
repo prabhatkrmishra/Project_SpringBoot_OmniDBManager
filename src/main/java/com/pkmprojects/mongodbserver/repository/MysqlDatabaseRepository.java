@@ -40,12 +40,33 @@ public class MysqlDatabaseRepository {
         if (password == null) {
             throw new IllegalArgumentException("Password must not be null");
         }
-        // Defense-in-depth: reject passwords containing SQL metacharacters that could
-        // enable injection if the driver ever allows multi-statement execution.
-        if (password.contains(";") || password.contains("--") || password.contains("/*") || password.contains("*/")) {
+        // Defense-in-depth: reject passwords containing characters that could change
+        // how the server parses the literal we are about to emit.
+        //
+        // Backslash is banned for a different reason than the others: MySQL defaults
+        // to NO_BACKSLASH_ESCAPES=OFF, so a backslash is an escape character inside
+        // '...'. A backslash immediately before a doubled quote swallows the first
+        // quote, leaving the second to terminate the literal early and everything
+        // after it to parse as SQL. Quote-doubling alone is correct only once
+        // backslash cannot appear. '#' is deliberately NOT banned: with no way to
+        // close the literal early it is inert, and PasswordGenerator emits it.
+        if (containsDisallowedSqlCharacter(password)) {
             throw new IllegalArgumentException("Password contains disallowed SQL metacharacters");
         }
         return password.replace("'", "''");
+    }
+
+    /**
+     * Characters that must never appear in a password embedded in a single-quoted
+     * MySQL literal. Mirrored by {@code DatabaseNameValidator.validateMysqlPassword}
+     * so the pre-flight check and this last line of defence cannot drift.
+     */
+    public static boolean containsDisallowedSqlCharacter(String password) {
+        return password.indexOf('\\') >= 0
+                || password.contains(";")
+                || password.contains("--")
+                || password.contains("/*")
+                || password.contains("*/");
     }
 
     public List<String> listDatabaseNames() {
