@@ -32,7 +32,7 @@ public class PostgresConnectionsApiController {
     }
 
     @GetMapping("/{dbName}/connections")
-    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> connections(@PathVariable String dbName) {
         var md = provisioningService.findManagedDatabase(DatabaseEngineType.POSTGRES, dbName);
         if (md.isEmpty()) return ResponseEntity.notFound().build();

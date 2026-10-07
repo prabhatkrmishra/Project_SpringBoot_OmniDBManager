@@ -33,7 +33,7 @@ public class MysqlConnectionsApiController {
     }
 
     @GetMapping("/{dbName}/connections")
-    @PreAuthorize("hasAnyRole('ADMIN','USER')")
+    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<?> connections(@PathVariable String dbName) {
         var md = provisioningService.findManagedDatabase(DatabaseEngineType.MYSQL, dbName);
         if (md.isEmpty()) return ResponseEntity.notFound().build();
