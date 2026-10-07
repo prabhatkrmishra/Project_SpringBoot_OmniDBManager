@@ -52,16 +52,24 @@ final class PostgresStatementCorrelator {
     /**
      * Retains a parsed statement event pending its duration sibling.
      *
-     * @return a previously pending event for the same key that must be
-     *         flushed unenriched first (duplicate statement), or null
-     */
-    /**
-     * Retains a parsed statement event pending its duration sibling.
-     *
      * @return events to flush unenriched first: a duplicate statement for the
      *         same key (never silently discarded) plus any TTL-expired
      *         entries swept on this ingest
      */
+    /**
+     * TTL sweep for ingest paths that never call {@link #retain} -- duration-only
+     * and error lines go straight to {@code offer}, so without this they would
+     * leave expired entries pending indefinitely whenever the log then went quiet.
+     *
+     * <p>Delegates to {@link #evictExpired} rather than carrying a second copy of
+     * the same loop. The two used to be near-identical methods that both ran per
+     * statement line, walking the same map twice; there is now one implementation,
+     * and it short-circuits when the map is empty.
+     */
+    java.util.List<QueryAuditEvent> flushExpired() {
+        return evictExpired(System.nanoTime());
+    }
+
     java.util.List<QueryAuditEvent> retain(String pid, String sessionId, QueryAuditEvent statementEvent) {
         CorrelationKey key = new CorrelationKey(pid, sessionId);
         java.util.List<QueryAuditEvent> flush = evictExpired(System.nanoTime());
@@ -93,24 +101,6 @@ final class PostgresStatementCorrelator {
         p.event.setDurationMs(durationMs);
         enrichedEvents.incrementAndGet();
         return p.event;
-    }
-
-    /**
-     * Flushes statements older than the TTL, unenriched. Called on ingest
-     * and drain activity; returns events to offer through the normal path.
-     */
-    java.util.List<QueryAuditEvent> flushExpired() {
-        long now = System.nanoTime();
-        java.util.List<QueryAuditEvent> out = new java.util.ArrayList<>();
-        for (Map.Entry<CorrelationKey, Pending> e : pending.entrySet()) {
-            if (now - e.getValue().createdNanos > PENDING_TTL_NANOS) {
-                if (pending.remove(e.getKey(), e.getValue())) {
-                    expiredFlushes.incrementAndGet();
-                    out.add(e.getValue().event);
-                }
-            }
-        }
-        return out;
     }
 
     int pendingCount() {

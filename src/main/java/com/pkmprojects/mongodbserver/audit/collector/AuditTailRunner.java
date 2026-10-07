@@ -179,15 +179,20 @@ public class AuditTailRunner {
     }
 
     private void pollMongo() {
-        try {
-            for (String db : mongoTenantDatabases()) {
+        // Per-database isolation. With one try around the whole loop, a single
+        // tenant database that throws -- bad credentials, a corrupt profiler
+        // document -- starves every tenant behind it in list order on every tick,
+        // which contradicts both the class contract and how pollPostgres and
+        // pollMysql already isolate per source.
+        for (String db : mongoTenantDatabases()) {
+            try {
                 List<org.bson.Document> docs = profilerPoller.pollDatabase(db, collector::ingestMongoProfile);
                 moDocs.addAndGet(docs.size());
+            } catch (Exception e) {
+                pollErrors.incrementAndGet();
+                lastError.set("mongo:" + e.getClass().getSimpleName() + ":" + db);
+                log.debug("mongo profiler poll failed for database '{}': {}", db, e.getMessage());
             }
-        } catch (Exception e) {
-            pollErrors.incrementAndGet();
-            lastError.set("mongo:" + e.getClass().getSimpleName());
-            log.debug("mongo profiler poll failed: {}", e.getMessage());
         }
     }
 

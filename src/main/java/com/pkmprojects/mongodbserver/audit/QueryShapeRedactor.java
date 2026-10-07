@@ -44,7 +44,6 @@ public final class QueryShapeRedactor {
     private static final Pattern JDBC_PARAM = Pattern.compile("\\?");
     private static final Pattern PG_PARAM = Pattern.compile("\\$\\d+");
     private static final Pattern WS = Pattern.compile("\\s+");
-    private static final Pattern URL_CREDENTIALS = Pattern.compile("([a-zA-Z][a-zA-Z0-9+.-]*://)([^\\s/@\"']+)@");
     private static final Pattern CONN_KV_SECRET = Pattern.compile("(?i)\\b(password|passwd|pwd|secret|token|api_key|apikey|auth)\\b\\s*=\\s*[^\\s,;\"']+");
 
     private static final Set<String> COMMAND_VERBS = Set.of(
@@ -417,7 +416,7 @@ public final class QueryShapeRedactor {
     }
 
     /**
-     * Linear credential scrub for URLs of the form {@code scheme://cred@host}.
+     * Credential scrub for URLs of the form {@code scheme://cred@host}.
      * Emits {@code scheme://***@host} quoteless so the later quote-stripper
      * preserves the marker as proof the secret is gone.
      */
@@ -439,7 +438,13 @@ public final class QueryShapeRedactor {
                     at = j;
                     break;
                 }
-                if (Character.isWhitespace(c) || c == '"' || c == '\'' || c == ',' || c == ';' || c == ')') {
+                // '/' and '\\' are terminators too: without them the scan runs to
+                // end-of-string on every scheme occurrence, making the whole scrub
+                // quadratic on input like "a://b://c://..." with no closing '@'.
+                // No credential segment contains a path separator, so this does not
+                // truncate a real one.
+                if (Character.isWhitespace(c) || c == '"' || c == '\'' || c == ','
+                        || c == ';' || c == ')' || c == '/' || c == '\\') {
                     break;
                 }
                 j++;
