@@ -29,6 +29,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ReconciliationServiceTest {
 
+    private static MysqlDatabaseRepository.AccountDescriptor d(String n, boolean superuser) {
+        return new MysqlDatabaseRepository.AccountDescriptor(n, superuser);
+    }
+
     @Mock private ManagedDatabaseStore store;
     @Mock private PostgresDatabaseRepository pgRepo;
     @Mock private MysqlDatabaseRepository myRepo;
@@ -49,7 +53,7 @@ class ReconciliationServiceTest {
         when(pgRepo.listDatabaseNames()).thenReturn(List.of());
         when(pgRepo.listRoleDescriptors()).thenReturn(List.of());
         when(myRepo.listDatabaseNames()).thenReturn(List.of());
-        when(myRepo.listAccountNames()).thenReturn(List.of());
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of());
         when(mongoRepo.listDatabaseNames()).thenReturn(List.of());
     }
 
@@ -77,7 +81,7 @@ class ReconciliationServiceTest {
         when(pgRepo.databaseOwner("a")).thenReturn(Optional.of("ua"));
         when(pgRepo.isAuthLookupInstalled("a")).thenReturn(true);
         when(myRepo.listDatabaseNames()).thenReturn(List.of("m"));
-        when(myRepo.listAccountNames()).thenReturn(List.of("um"));
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of(d("um", false)));
         when(mongoRepo.listDatabaseNames()).thenReturn(List.of("g", "admin", "local"));
 
         ReconciliationService.ReconciliationReport r = service().reconcile();
@@ -125,7 +129,7 @@ class ReconciliationServiceTest {
         when(pgRepo.databaseOwner("nopooler")).thenReturn(Optional.of("up"));
         when(pgRepo.isAuthLookupInstalled("nopooler")).thenReturn(false);
         when(myRepo.listDatabaseNames()).thenReturn(List.of());
-        when(myRepo.listAccountNames()).thenReturn(List.of());
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of());
         when(mongoRepo.listDatabaseNames()).thenReturn(List.of());
 
         ReconciliationService.EngineReport pg = engineOf(service().reconcile(), "POSTGRES");
@@ -152,7 +156,7 @@ class ReconciliationServiceTest {
         // Owner lookup races a concurrent DROP: reported, whole scan survives.
         when(pgRepo.databaseOwner("a")).thenReturn(Optional.empty());
         when(myRepo.listDatabaseNames()).thenReturn(List.of());
-        when(myRepo.listAccountNames()).thenReturn(List.of());
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of());
         when(mongoRepo.listDatabaseNames()).thenReturn(List.of());
 
         ReconciliationService.EngineReport pg = engineOf(service().reconcile(), "POSTGRES");
@@ -169,7 +173,7 @@ class ReconciliationServiceTest {
         when(store.findAllByEngineType(DatabaseEngineType.MONGO)).thenReturn(List.of());
         when(pgRepo.listDatabaseNames()).thenThrow(new RuntimeException("connection refused"));
         when(myRepo.listDatabaseNames()).thenReturn(List.of());
-        when(myRepo.listAccountNames()).thenReturn(List.of());
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of());
         when(mongoRepo.listDatabaseNames()).thenReturn(List.of());
 
         ReconciliationService.ReconciliationReport r = service().reconcile();
@@ -189,7 +193,7 @@ class ReconciliationServiceTest {
         when(store.findAllByEngineType(DatabaseEngineType.MONGO)).thenReturn(List.of());
         when(myRepo.listDatabaseNames()).thenReturn(List.of("m1", "m2", "stray"));
         // Server-global: one account serves both metadata rows; stray has grants.
-        when(myRepo.listAccountNames()).thenReturn(List.of("shared", "strayu"));
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of(d("shared", false), d("strayu", false)));
         when(myRepo.listGrants("strayu")).thenReturn(List.of("GRANT ALL ON `stray`.* TO 'strayu'@'%'"));
         when(pgRepo.listDatabaseNames()).thenReturn(List.of());
         when(pgRepo.listRoleDescriptors()).thenReturn(List.of());
@@ -216,7 +220,7 @@ class ReconciliationServiceTest {
         when(pgRepo.listDatabaseNames()).thenReturn(List.of());
         when(pgRepo.listRoleDescriptors()).thenReturn(List.of());
         when(myRepo.listDatabaseNames()).thenReturn(List.of());
-        when(myRepo.listAccountNames()).thenReturn(List.of());
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of());
 
         ReconciliationService.EngineReport mo = engineOf(service().reconcile(), "MONGO");
 
@@ -235,4 +239,29 @@ class ReconciliationServiceTest {
         assertThat(r.ok()).isTrue();
         assertThat(r.engines()).allMatch(e -> e.resources().isEmpty());
     }
+    @Test
+    void mysqlSuperuserWithoutMetadataIsServiceAccountNotOrphan() {
+        // The connecting account is excluded by name today, which only works
+        // because this app hardcodes its MySQL user to root. Point
+        // OVERRIDE_MYSQL_URI at an external server and whatever admin account is
+        // in use shows up as an ORPHAN_ROLE -- flagged for investigation, with a
+        // scary "do not drop" label, for something entirely expected.
+        when(store.findAllByEngineType(DatabaseEngineType.MYSQL)).thenReturn(List.of());
+        when(store.findAllByEngineType(DatabaseEngineType.POSTGRES)).thenReturn(List.of());
+        when(store.findAllByEngineType(DatabaseEngineType.MONGO)).thenReturn(List.of());
+        when(myRepo.listDatabaseNames()).thenReturn(List.of());
+        when(myRepo.listAccountDescriptors()).thenReturn(List.of(
+                d("dba_admin", true), d("stray_tenant", false)));
+        when(pgRepo.listDatabaseNames()).thenReturn(List.of());
+        when(pgRepo.listRoleDescriptors()).thenReturn(List.of());
+        when(mongoRepo.listDatabaseNames()).thenReturn(List.of());
+
+        ReconciliationService.EngineReport my = engineOf(service().reconcile(), "MYSQL");
+
+        assertThat(has(my, "dba_admin", "SERVICE_ACCOUNT")).isTrue();
+        assertThat(has(my, "dba_admin", "ORPHAN_ROLE")).isFalse();
+        // A genuinely unprivileged account is still an orphan.
+        assertThat(has(my, "stray_tenant", "ORPHAN_ROLE")).isTrue();
+    }
 }
+

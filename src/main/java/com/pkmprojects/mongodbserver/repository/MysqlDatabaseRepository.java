@@ -154,14 +154,36 @@ public class MysqlDatabaseRepository {
     }
 
     /**
-     * Read-only reconciliation: managed-shape accounts
-     * ({@code host='%'}), excluding the {@code root} service account.
-     * Read-only; password hashes are never selected.
+     * Read-only reconciliation: managed-shape accounts ({@code host='%'}), with
+     * each one's capability flags so the caller can tell a management account
+     * from a genuine orphan.
+     *
+     * <p>Previously excluded the literal name {@code root}. That is a guess:
+     * this app hardcodes its MySQL user to {@code root}, but an operator pointing
+     * {@code OVERRIDE_MYSQL_URI} at an external server connects as whatever they
+     * configured, and that account then shows up as an orphan with a scary label.
+     * Filtering by capability instead means the classification is correct for
+     * whatever account is in use -- the same approach the PostgreSQL side already
+     * takes with {@code rolsuper}.
+     *
+     * <p>Read-only; password hashes are never selected.
      */
+    public java.util.List<AccountDescriptor> listAccountDescriptors() {
+        return jdbcTemplate.query(
+                "SELECT user, Super_priv FROM mysql.user WHERE host = '%' ORDER BY user",
+                (rs, rowNum) -> new AccountDescriptor(
+                        rs.getString("user"),
+                        "Y".equalsIgnoreCase(rs.getString("Super_priv"))));
+    }
+
+    /** Account name plus privilege flags, for reconciliation. Never secrets. */
+    public record AccountDescriptor(String name, boolean superuser) {
+    }
+
+    /** Names only. Prefer {@link #listAccountDescriptors()} where capability matters. */
     public java.util.List<String> listAccountNames() {
         return jdbcTemplate.queryForList(
-                "SELECT user FROM mysql.user WHERE host = '%' AND user <> 'root' ORDER BY user",
-                String.class);
+                "SELECT user FROM mysql.user WHERE host = '%' ORDER BY user", String.class);
     }
 
     /**

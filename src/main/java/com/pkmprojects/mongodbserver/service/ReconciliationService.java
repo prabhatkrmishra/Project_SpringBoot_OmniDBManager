@@ -190,9 +190,12 @@ public class ReconciliationService {
         MysqlDatabaseRepository repo = mysqlRepository.get();
         Set<String> liveDbs;
         Set<String> liveUsers;
+        List<MysqlDatabaseRepository.AccountDescriptor> liveAccounts;
         try {
             liveDbs = new HashSet<>(repo.listDatabaseNames());
-            liveUsers = new HashSet<>(repo.listAccountNames());
+            liveAccounts = repo.listAccountDescriptors();
+            liveUsers = new HashSet<>(liveAccounts.stream()
+                    .map(MysqlDatabaseRepository.AccountDescriptor::name).toList());
         } catch (Exception e) {
             log.warn("Reconciliation MySQL catalog read failed", e);
             return new EngineReport("MYSQL", "UNAVAILABLE", List.of(), "mysql unreachable: " + safeMessage(e));
@@ -223,17 +226,24 @@ public class ReconciliationService {
                         "database exists in MySQL without matching metadata; do not delete without establishing ownership"));
             }
         }
-        for (String user : liveUsers) {
-            if (metaUsers.contains(user)) {
+        for (MysqlDatabaseRepository.AccountDescriptor account : liveAccounts) {
+            if (metaUsers.contains(account.name())) {
+                continue;
+            }
+            if (account.superuser()) {
+                // Same classification the PostgreSQL side applies to rolsuper: a
+                // management account without metadata is expected, not an orphan.
+                out.add(new ResourceEntry(account.name(), "SERVICE_ACCOUNT",
+                        "privileged account without metadata; expected for the configured MySQL admin user"));
                 continue;
             }
             String detail;
             try {
-                detail = "grants: " + String.join(" | ", repo.listGrants(user));
+                detail = "grants: " + String.join(" | ", repo.listGrants(account.name()));
             } catch (Exception e) {
                 detail = "grants unreadable";
             }
-            out.add(new ResourceEntry(user, "ORPHAN_ROLE",
+            out.add(new ResourceEntry(account.name(), "ORPHAN_ROLE",
                     "server-global account without matching metadata (" + detail + "); do not drop without establishing ownership"));
         }
         out.sort((a, b) -> a.name().compareTo(b.name()));
