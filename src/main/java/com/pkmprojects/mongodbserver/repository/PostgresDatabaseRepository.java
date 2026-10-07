@@ -427,15 +427,26 @@ public class PostgresDatabaseRepository {
         }
     }
 
-    /** Cluster-wide role probe for unique-role wiring (provision-time uniquify). */
-    public boolean roleExists(String userName) {
+    /**
+     * Cluster-wide role probe for provision-time uniquify.
+     *
+     * <p>Returns {@link ProbeResult#UNKNOWN} rather than {@code FREE} when the
+     * query fails. PG roles are server-global, and {@link #createUser} upgrades
+     * to {@code ALTER ROLE} when the role turns out to exist -- so a probe that
+     * reports "free" because it could not reach the server gets a different
+     * tenant's role silently re-pointed at a password only the new tenant knows.
+     */
+    public ProbeResult probeRole(String userName) {
         try {
             Integer n = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM pg_roles WHERE rolname = ?", Integer.class, userName);
-            return n != null && n > 0;
+            if (n == null) {
+                return ProbeResult.UNKNOWN;
+            }
+            return n > 0 ? ProbeResult.OCCUPIED : ProbeResult.FREE;
         } catch (Exception e) {
-            log.debug("roleExists({}) probe failed", userName, e);
-            return false;
+            log.warn("probeRole({}) could not complete — reporting UNKNOWN", userName, e);
+            return ProbeResult.UNKNOWN;
         }
     }
 

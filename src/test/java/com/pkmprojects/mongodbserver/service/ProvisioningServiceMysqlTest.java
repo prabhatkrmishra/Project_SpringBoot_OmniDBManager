@@ -9,6 +9,7 @@ import com.pkmprojects.mongodbserver.model.ManagedDatabase;
 import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
+import com.pkmprojects.mongodbserver.repository.ProbeResult;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +64,9 @@ class ProvisioningServiceMysqlTest {
         org.mockito.Mockito.lenient().when(env.getProperty("spring.mongodb.uri", "")).thenReturn("mongodb://root:root@localhost:27017/?authSource=admin");
         org.mockito.Mockito.lenient().when(env.getProperty("app.mongo.issued-host", "")).thenReturn("");
         org.mockito.Mockito.lenient().when(env.getProperty("app.mongo.tls", Boolean.class, false)).thenReturn(false);
+        // The probe is tri-state, so an unstubbed mock no longer implies "free"
+        // the way a boolean default of false used to. State it explicitly.
+        org.mockito.Mockito.lenient().when(mysqlRepo.probeUser(any())).thenReturn(ProbeResult.FREE);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         MongoDatabaseEngine mongoEngine = new MongoDatabaseEngine(mongoRepo, env);
@@ -80,14 +84,14 @@ class ProvisioningServiceMysqlTest {
 
     @Test
     void secondDatabaseWithSameRequestedUserGetsDistinctUser() {
-        when(mysqlRepo.userExists("app")).thenReturn(false);
+        when(mysqlRepo.probeUser("app")).thenReturn(ProbeResult.FREE);
         DatabaseInfo first = service.provision(
                 new CreateDatabaseForm("dbalpha", DatabaseEngineType.MYSQL, "app", "secret111"));
         assertThat(first.connectionString()).contains("app:secret111@");
 
-        when(mysqlRepo.userExists("app")).thenReturn(true);
-        when(mysqlRepo.userExists(argThat(s -> s instanceof String str && str.startsWith("omni_"))))
-                .thenReturn(false);
+        when(mysqlRepo.probeUser("app")).thenReturn(ProbeResult.OCCUPIED);
+        when(mysqlRepo.probeUser(argThat(s -> s instanceof String str && str.startsWith("omni_"))))
+                .thenReturn(ProbeResult.FREE);
         DatabaseInfo second = service.provision(
                 new CreateDatabaseForm("dbbeta", DatabaseEngineType.MYSQL, "app", "secret222"));
 
@@ -123,7 +127,7 @@ class ProvisioningServiceMysqlTest {
         // password intact) and the other mints a distinct omni_ user.
         java.util.Set<String> liveUsers = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
         java.util.concurrent.CyclicBarrier probeBarrier = new java.util.concurrent.CyclicBarrier(2);
-        when(mysqlRepo.userExists(any())).thenAnswer(inv -> {
+        when(mysqlRepo.probeUser(any())).thenAnswer(inv -> {
             String user = inv.getArgument(0);
             if (user.equals("app")) {
                 try {
@@ -134,7 +138,7 @@ class ProvisioningServiceMysqlTest {
                     probeBarrier.reset();
                 }
             }
-            return liveUsers.contains(user);
+            return liveUsers.contains(user) ? ProbeResult.OCCUPIED : ProbeResult.FREE;
         });
         doAnswer(inv -> {
             liveUsers.add(inv.getArgument(1));
@@ -189,7 +193,7 @@ class ProvisioningServiceMysqlTest {
 
     @Test
     void provisionFailsClosedWhenNoUniqueUserAvailable() {
-        when(mysqlRepo.userExists(any())).thenReturn(true);
+        when(mysqlRepo.probeUser(any())).thenReturn(ProbeResult.OCCUPIED);
         assertThatThrownBy(() -> service.provision(
                 new CreateDatabaseForm("dbgamma", DatabaseEngineType.MYSQL, "app", "secret333")))
                 .isInstanceOf(ProvisioningException.class)
@@ -201,7 +205,7 @@ class ProvisioningServiceMysqlTest {
     void mysqlValidationFailureFailsProvisionWithCleanup() {
         // Validator-wired MySQL provisions are proven end-to-end
         // like PG ones; a failed tenant login fails closed with cleanup.
-        when(mysqlRepo.userExists("app")).thenReturn(false);
+        when(mysqlRepo.probeUser("app")).thenReturn(ProbeResult.FREE);
         TenantLoginValidationService validator = org.mockito.Mockito.mock(TenantLoginValidationService.class);
         when(validator.validateMysql("dbalpha", "app", "secret111")).thenReturn(false);
         service.setTenantLoginValidationService(validator);
@@ -217,7 +221,7 @@ class ProvisioningServiceMysqlTest {
 
     @Test
     void mysqlValidationSuccessProvisions() {
-        when(mysqlRepo.userExists("app")).thenReturn(false);
+        when(mysqlRepo.probeUser("app")).thenReturn(ProbeResult.FREE);
         TenantLoginValidationService validator = org.mockito.Mockito.mock(TenantLoginValidationService.class);
         when(validator.validateMysql("dbalpha", "app", "secret111")).thenReturn(true);
         service.setTenantLoginValidationService(validator);
@@ -227,5 +231,18 @@ class ProvisioningServiceMysqlTest {
 
         verify(validator).validateMysql("dbalpha", "app", "secret111");
         assertThat(info.connectionString()).contains("app:secret111@");
+    }
+
+    @Test
+    void inconclusiveUserProbeAbortsRatherThanReusingAnotherTenantsAccount() {
+        when(mysqlRepo.probeUser(any())).thenReturn(ProbeResult.UNKNOWN);
+
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("dbdelta", DatabaseEngineType.MYSQL, "app", "secret444")))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("did not answer the probe");
+
+        verify(mysqlRepo, never()).createUser(any(), any(), any());
+        verify(mysqlRepo, never()).createDatabase(any());
     }
 }

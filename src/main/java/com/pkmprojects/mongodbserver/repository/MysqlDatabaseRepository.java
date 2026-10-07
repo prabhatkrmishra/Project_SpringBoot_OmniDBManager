@@ -1,5 +1,7 @@
 package com.pkmprojects.mongodbserver.repository;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,6 +20,8 @@ import java.util.Map;
 @Repository
 @ConditionalOnProperty(name = "app.mysql.enabled", havingValue = "true")
 public class MysqlDatabaseRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(MysqlDatabaseRepository.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final String mysqlUri;
@@ -112,20 +116,25 @@ public class MysqlDatabaseRepository {
 
     /**
      * Cluster-wide account probe for provision-time uniquify.
-     * MySQL accounts are {@code user@host} server-global; like PG roles, a
-     * name requested for a second database must not reuse the first tenant's
-     * account (shared password + accumulating cross-database grants).
-     * Probe failures fail OPEN toward the requested name (mirroring PG
-     * {@code roleExists}): provisioning itself remains authoritative, so a
-     * monitoring outage can never block provisioning.
+     * MySQL accounts are {@code user@host} server-global; like PG roles, a name
+     * requested for a second database must not reuse the first tenant's account
+     * (shared password plus accumulating cross-database grants).
+     *
+     * <p>Reports {@link ProbeResult#UNKNOWN} when the query fails, for the same
+     * reason as the PG equivalent: {@link #createUser} alters an account it
+     * finds already present, so a failed probe must not read as "free".
      */
-    public boolean userExists(String userName) {
+    public ProbeResult probeUser(String userName) {
         try {
             Integer n = jdbcTemplate.queryForObject(
                     "SELECT COUNT(*) FROM mysql.user WHERE user = ? AND host = '%'", Integer.class, userName);
-            return n != null && n > 0;
+            if (n == null) {
+                return ProbeResult.UNKNOWN;
+            }
+            return n > 0 ? ProbeResult.OCCUPIED : ProbeResult.FREE;
         } catch (Exception e) {
-            return false;
+            log.warn("probeUser({}) could not complete — reporting UNKNOWN", userName, e);
+            return ProbeResult.UNKNOWN;
         }
     }
 

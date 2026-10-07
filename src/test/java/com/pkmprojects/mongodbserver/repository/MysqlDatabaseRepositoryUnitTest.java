@@ -111,38 +111,50 @@ class MysqlDatabaseRepositoryUnitTest {
         org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.never()).execute((String) org.mockito.ArgumentMatchers.argThat((String sql) -> sql.startsWith("ALTER USER")));
     }
 
-    // ── userExists (provision-time uniquify) ────────────────────────────
+    // ── probeUser (provision-time uniquify) ────────────────────────────
 
     @Test
-    void userExistsReturnsTrueWhenAccountPresent() {
+    void probeUserReportsOccupiedWhenAccountPresent() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
         var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
         org.mockito.Mockito.when(jdbc.queryForObject(
                 org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
                 .thenReturn(1);
-        assertThat(repo.userExists("bob")).isTrue();
+        assertThat(repo.probeUser("bob")).isEqualTo(ProbeResult.OCCUPIED);
     }
 
     @Test
-    void userExistsReturnsFalseWhenAbsent() {
+    void probeUserReportsFreeWhenAbsent() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
         var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
         org.mockito.Mockito.when(jdbc.queryForObject(
                 org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
                 .thenReturn(0);
-        assertThat(repo.userExists("bob")).isFalse();
+        assertThat(repo.probeUser("bob")).isEqualTo(ProbeResult.FREE);
     }
 
     @Test
-    void userExistsFailsOpenOnProbeFailure() {
+    void probeUserFailsClosedOnProbeFailure() {
         var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
         var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
         org.mockito.Mockito.when(jdbc.queryForObject(
                 org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
                 .thenThrow(new RuntimeException("connection refused"));
-        // Mirrors PG roleExists: provisioning stays authoritative on a real
-        // collision, so a monitoring outage never blocks provisioning.
-        assertThat(repo.userExists("bob")).isFalse();
+        // Must NOT read as FREE. createUser alters an account it finds already
+        // present, so treating an unreachable database as "nobody has this name"
+        // silently re-points another tenant's credentials at a password only this
+        // tenant knows.
+        assertThat(repo.probeUser("bob")).isEqualTo(ProbeResult.UNKNOWN);
+    }
+
+    @Test
+    void probeUserFailsClosedOnNullCount() {
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        var repo = new MysqlDatabaseRepository(jdbc, "jdbc:mysql://127.0.0.1:9816/mysql?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC");
+        org.mockito.Mockito.when(jdbc.queryForObject(
+                org.mockito.Mockito.anyString(), org.mockito.Mockito.eq(Integer.class), org.mockito.Mockito.any()))
+                .thenReturn(null);
+        assertThat(repo.probeUser("bob")).isEqualTo(ProbeResult.UNKNOWN);
     }
 
     // ── backslash: the character that defeated quote-doubling ─────────

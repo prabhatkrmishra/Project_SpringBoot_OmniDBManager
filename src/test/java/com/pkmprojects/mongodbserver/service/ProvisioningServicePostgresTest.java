@@ -13,6 +13,7 @@ import com.pkmprojects.mongodbserver.repository.AuditLogRepository;
 import com.pkmprojects.mongodbserver.store.ManagedDatabaseStore;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
+import com.pkmprojects.mongodbserver.repository.ProbeResult;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,6 +62,9 @@ class ProvisioningServicePostgresTest {
         lenient().when(env.getProperty("spring.mongodb.uri", "")).thenReturn("mongodb://root:root@localhost:27017/?authSource=admin");
         lenient().when(env.getProperty("app.mongo.issued-host", "")).thenReturn("");
         lenient().when(env.getProperty("app.mongo.tls", Boolean.class, false)).thenReturn(false);
+        // The probe is tri-state, so an unstubbed mock no longer implies "free"
+        // the way a boolean default of false used to. State it explicitly.
+        lenient().when(postgresRepo.probeRole(any())).thenReturn(ProbeResult.FREE);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         MongoDatabaseEngine mongoEngine = new MongoDatabaseEngine(mongoRepo, env);
@@ -466,14 +470,14 @@ class ProvisioningServicePostgresTest {
         // DB-A provisions first with the free name; DB-B requests the same name
         // afterwards and MUST NOT reuse/ALTER DB-A's role (that would rotate
         // DB-A's password). Format: omni_<sanitisedDb>_<rand6>.
-        when(postgresRepo.roleExists("app")).thenReturn(false);
+        when(postgresRepo.probeRole("app")).thenReturn(ProbeResult.FREE);
         DatabaseInfo first = service.provision(
                 new CreateDatabaseForm("dbalpha", DatabaseEngineType.POSTGRES, "app", "secret111"));
         assertThat(first.connectionString()).contains("app:secret111@");
 
-        when(postgresRepo.roleExists("app")).thenReturn(true);
-        when(postgresRepo.roleExists(argThat(s -> s instanceof String str && str.startsWith("omni_"))))
-                .thenReturn(false);
+        when(postgresRepo.probeRole("app")).thenReturn(ProbeResult.OCCUPIED);
+        when(postgresRepo.probeRole(argThat(s -> s instanceof String str && str.startsWith("omni_"))))
+                .thenReturn(ProbeResult.FREE);
         DatabaseInfo second = service.provision(
                 new CreateDatabaseForm("dbbeta", DatabaseEngineType.POSTGRES, "app", "secret222"));
 
@@ -496,7 +500,7 @@ class ProvisioningServicePostgresTest {
 
     @Test
     void provisionFailsClosedWhenNoUniqueRoleAvailable() {
-        when(postgresRepo.roleExists(any())).thenReturn(true);
+        when(postgresRepo.probeRole(any())).thenReturn(ProbeResult.OCCUPIED);
         assertThatThrownBy(() -> service.provision(
                 new CreateDatabaseForm("dbgamma", DatabaseEngineType.POSTGRES, "app", "secret333")))
                 .isInstanceOf(ProvisioningException.class)
@@ -529,7 +533,7 @@ class ProvisioningServicePostgresTest {
         // password intact) and the other mints a distinct omni_ role.
         java.util.Set<String> liveRoles = java.util.Collections.synchronizedSet(new java.util.HashSet<>());
         java.util.concurrent.CyclicBarrier probeBarrier = new java.util.concurrent.CyclicBarrier(2);
-        when(postgresRepo.roleExists(any())).thenAnswer(inv -> {
+        when(postgresRepo.probeRole(any())).thenAnswer(inv -> {
             String role = inv.getArgument(0);
             if (role.equals("app")) {
                 try {
@@ -540,7 +544,7 @@ class ProvisioningServicePostgresTest {
                     probeBarrier.reset();
                 }
             }
-            return liveRoles.contains(role);
+            return liveRoles.contains(role) ? ProbeResult.OCCUPIED : ProbeResult.FREE;
         });
         doAnswer(inv -> {
             liveRoles.add(inv.getArgument(1));
@@ -648,5 +652,38 @@ class ProvisioningServicePostgresTest {
                 new com.pkmprojects.mongodbserver.dto.ResetPasswordForm("bad--password1")))
                 .isInstanceOf(com.pkmprojects.mongodbserver.error.NameNotAllowedException.class);
         verify(postgresRepo, never()).updateUserPassword(any(), any(), any());
+    }
+
+    @Test
+    void inconclusiveRoleProbeAbortsRatherThanReusingAnotherTenantsRole() {
+        // The probe never reached the server. Reporting that as "free" would let
+        // provisioning proceed with the requested name, and createUser would then
+        // find the role present and ALTER it -- rotating whichever tenant already
+        // owns it to a password only this new tenant knows.
+        when(postgresRepo.probeRole(any())).thenReturn(ProbeResult.UNKNOWN);
+
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("dbdelta", DatabaseEngineType.POSTGRES, "app", "secret444")))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("did not answer the probe");
+
+        verify(postgresRepo, never()).createUser(any(), any(), any());
+        verify(postgresRepo, never()).createDatabase(any(), any());
+    }
+
+    @Test
+    void inconclusiveProbeOnMintedCandidateAlsoAborts() {
+        // First probe says the requested role is taken; the generated candidate
+        // then cannot be verified. That must fail closed too, not be assumed free.
+        when(postgresRepo.probeRole("app")).thenReturn(ProbeResult.OCCUPIED);
+        when(postgresRepo.probeRole(argThat(s -> s instanceof String str && str.startsWith("omni_"))))
+                .thenReturn(ProbeResult.UNKNOWN);
+
+        assertThatThrownBy(() -> service.provision(
+                new CreateDatabaseForm("dbepsilon", DatabaseEngineType.POSTGRES, "app", "secret555")))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("unique role");
+
+        verify(postgresRepo, never()).createUser(any(), any(), any());
     }
 }

@@ -20,6 +20,7 @@ import com.pkmprojects.mongodbserver.store.ManagedDatabaseStore;
 import com.pkmprojects.mongodbserver.repository.MongoDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.MysqlDatabaseRepository;
 import com.pkmprojects.mongodbserver.repository.PostgresDatabaseRepository;
+import com.pkmprojects.mongodbserver.repository.ProbeResult;
 import com.pkmprojects.mongodbserver.security.PasswordGenerator;
 import org.bson.Document;
 import org.slf4j.Logger;
@@ -495,36 +496,39 @@ public class ProvisioningService {
     }
 
     /**
-     * Provision-time role uniquify. Returns the requested name when no live
-     * role collides; otherwise a generated {@code omni_<db>_<rand6>} name
-     * verified free via {@code pg_roles}. Probe failures fail OPEN toward the
-     * requested name (provisioning itself remains authoritative — CREATE ROLE
-     * still errors loudly on a real collision) so a monitoring outage can
-     * never block provisioning. Existing databases are never renamed.
+     * Provision-time role uniquify. Returns the requested name when the live
+     * server confirms it is free; otherwise a generated {@code omni_<db>_<rand6>}
+     * name confirmed free via {@code pg_roles}. Existing databases are never
+     * renamed.
+     *
+     * <p>An inconclusive probe aborts provisioning rather than proceeding. That
+     * is the whole point of {@link ProbeResult}: {@code createUser} alters a role
+     * it finds already present, so treating "could not ask" as "nobody has this
+     * name" quietly re-points another tenant's credentials at a password only
+     * this tenant knows. A transient outage now costs a retry instead of an
+     * isolation breach. Existing databases are never renamed.
      */
     String resolveUniquePostgresRole(String dbName, String requestedUser) {
         if (postgresRepository.isEmpty()) return requestedUser;
         PostgresDatabaseRepository repo = postgresRepository.get();
-        boolean taken;
-        try {
-            taken = repo.roleExists(requestedUser);
-        } catch (Exception e) {
-            log.warn("role probe failed for '{}' — provisioning with requested name", requestedUser, e);
-            return requestedUser;
+        ProbeResult requested = repo.probeRole(requestedUser);
+        if (requested == ProbeResult.FREE) return requestedUser;
+        if (requested != ProbeResult.OCCUPIED) {
+            log.warn("Role probe inconclusive for '{}' — refusing to provision rather than risk reusing another tenant's role",
+                    requestedUser);
+            throw new ProvisioningException("Could not verify whether role '" + requestedUser
+                    + "' is already in use — the database did not answer the probe");
         }
-        if (!taken) return requestedUser;
         PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
                 ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
         for (int i = 0; i < 5; i++) {
             String candidate = gen.generate(dbName);
-            boolean candidateTaken;
-            try {
-                candidateTaken = repo.roleExists(candidate);
-            } catch (Exception e) {
-                log.warn("role probe failed for candidate on '{}' — failing closed", dbName, e);
+            ProbeResult candidateResult = repo.probeRole(candidate);
+            if (candidateResult != ProbeResult.FREE && candidateResult != ProbeResult.OCCUPIED) {
+                log.warn("Role probe inconclusive for candidate role on '{}' — failing closed", dbName);
                 throw new ProvisioningException("Could not verify a unique role for database '" + dbName + "'");
             }
-            if (!candidateTaken) {
+            if (candidateResult == ProbeResult.FREE) {
                 log.info("Postgres role '{}' already exists (cluster-wide) — provisioning '{}' with unique role '{}'",
                         requestedUser, dbName, candidate);
                 return candidate;
@@ -538,31 +542,31 @@ public class ProvisioningService {
      * MySQL accounts ({@code user@'%'}) are server-global, so a name
      * requested for a second database must not reuse the first tenant's
      * account (shared password plus accumulating cross-database grants).
-     * Minted names are capped to MySQL's 32-char username limit.
+     * Minted names are capped to MySQL's 32-char username limit. As with the
+     * PG path, an inconclusive probe aborts rather than assuming the name is
+     * free.
      */
     String resolveUniqueMysqlUser(String dbName, String requestedUser) {
         if (mysqlRepository.isEmpty()) return requestedUser;
         MysqlDatabaseRepository repo = mysqlRepository.get();
-        boolean taken;
-        try {
-            taken = repo.userExists(requestedUser);
-        } catch (Exception e) {
-            log.warn("user probe failed for '{}' — provisioning with requested name", requestedUser, e);
-            return requestedUser;
+        ProbeResult requested = repo.probeUser(requestedUser);
+        if (requested == ProbeResult.FREE) return requestedUser;
+        if (requested != ProbeResult.OCCUPIED) {
+            log.warn("User probe inconclusive for '{}' — refusing to provision rather than risk reusing another tenant's account",
+                    requestedUser);
+            throw new ProvisioningException("Could not verify whether user '" + requestedUser
+                    + "' is already in use — the database did not answer the probe");
         }
-        if (!taken) return requestedUser;
         PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
                 ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
         for (int i = 0; i < 5; i++) {
             String candidate = gen.generate(dbName, 32);
-            boolean candidateTaken;
-            try {
-                candidateTaken = repo.userExists(candidate);
-            } catch (Exception e) {
-                log.warn("user probe failed for candidate on '{}' — failing closed", dbName, e);
+            ProbeResult candidateResult = repo.probeUser(candidate);
+            if (candidateResult != ProbeResult.FREE && candidateResult != ProbeResult.OCCUPIED) {
+                log.warn("User probe inconclusive for candidate user on '{}' — failing closed", dbName);
                 throw new ProvisioningException("Could not verify a unique user for database '" + dbName + "'");
             }
-            if (!candidateTaken) {
+            if (candidateResult == ProbeResult.FREE) {
                 log.info("MySQL user '{}' already exists (server-wide) — provisioning '{}' with unique user '{}'",
                         requestedUser, dbName, candidate);
                 return candidate;
