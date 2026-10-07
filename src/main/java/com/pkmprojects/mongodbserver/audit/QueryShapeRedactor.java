@@ -103,6 +103,31 @@ public final class QueryShapeRedactor {
     }
 
     /**
+     * Stable, non-reversible token for a tenant-chosen identifier -- a Mongo
+     * collection name or field name.
+     *
+     * <p>Mongo lets a tenant name a collection anything, and that name reaches
+     * the admin-only audit view verbatim. A charset restriction is not enough
+     * here, because every character in a leaked credential is alphanumeric:
+     * a filter on character classes stops a tenant breaking out of the string,
+     * but not writing arbitrary text into the trail.
+     *
+     * <p>Hashing keeps what grouping actually needs -- the same name always
+     * produces the same token, so "these 500 events hit one collection" still
+     * holds and {@code shapeHash} still groups equivalent shapes -- while
+     * leaving nothing to read. Command verbs stay verbatim: those come from the
+     * server's own {@code op} field, not from tenant input.
+     *
+     * @return {@code n_} plus the first 8 hex chars of SHA-256, or {@code ?}
+     */
+    public static String identifierToken(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "?";
+        }
+        return "n_" + shapeHash(raw).substring(0, 8);
+    }
+
+    /**
      * Renders a Mongo command document shape: operator/field names are kept,
      * every leaf value is replaced with {@code 1} (redacted), nesting is
      * capped at {@code maxDepth}, total output at {@link #MAX_NORMALIZED_LENGTH}.
@@ -161,8 +186,11 @@ public final class QueryShapeRedactor {
                     qa++;
                 }
                 if (qj < s.length() && qa < s.length() && s.charAt(qa) == ':') {
-                    // Preserved key — emit verbatim including quotes and colon.
-                    out.append(s, i, qa + 1);
+                    // Preserved key. Re-emit through the identifier filter rather
+                    // than appending the raw substring, which would carry a
+                    // tenant-chosen field name straight through.
+                    out.append('"').append(identifierToken(s.substring(i + 1, qj)))
+                       .append('"').append(": ");
                     i = qa;
                 } else {
                     out.append('1');
@@ -530,7 +558,7 @@ public final class QueryShapeRedactor {
                     after++;
                 }
                 if (q == '"' && after < s.length() && s.charAt(after) == ':') {
-                    out.append('"').append(inner).append('"');
+                    out.append('"').append(identifierToken(inner.toString())).append('"');
                 } else {
                     out.append('1');
                 }

@@ -133,9 +133,13 @@ public final class MongoProfilerParser {
         String collection = ns != null && ns.contains(".") ? ns.substring(ns.indexOf('.') + 1) : "?";
         if (cmdObj instanceof Document cmd) {
             String rendered = renderShape(cmd, 0, 4);
-            return "{" + opName(op, cmd) + ": '" + collection + "', " + rendered + "}";
+            // opName is derived from the server-recorded op / first command key and
+            // is what makes a shape readable; the collection name is tenant-chosen.
+            return "{" + opName(op, cmd) + ": '"
+                    + QueryShapeRedactor.identifierToken(collection) + "', " + rendered + "}";
         }
-        return (op == null ? "other" : op) + " '" + collection + "'";
+        return (op == null ? "other" : op) + " '"
+                + QueryShapeRedactor.identifierToken(collection) + "'";
     }
 
     private static String opName(String op, Document cmd) {
@@ -164,7 +168,7 @@ public final class MongoProfilerParser {
                     sb.append(", ");
                 }
                 first = false;
-                sb.append('"').append(k).append("\": ");
+                sb.append('"').append(QueryShapeRedactor.identifierToken(k)).append("\": ");
                 Object v = en.getValue();
                 if (v instanceof Document || v instanceof List || v instanceof Map) {
                     sb.append(renderShape(v, depth + 1, maxDepth));

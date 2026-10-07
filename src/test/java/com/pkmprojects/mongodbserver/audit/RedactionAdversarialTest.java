@@ -75,7 +75,12 @@ class RedactionAdversarialTest {
         var parsed = MongoProfilerParser.parse(doc);
         assertThat(parsed.event()).isPresent();
         assertClean(parsed.event().get().getNormalizedShape());
-        assertThat(parsed.event().get().getNormalizedShape()).contains("password");
+        // Was: contains("password"). The key is now a token -- the point of the
+        // assertion survives, you can still see a password-shaped field was
+        // targeted, without the tenant choosing what text lands in the trail.
+        assertThat(parsed.event().get().getNormalizedShape())
+                .doesNotContain("password")
+                .contains(com.pkmprojects.mongodbserver.audit.QueryShapeRedactor.identifierToken("password"));
     }
 
     @Test
