@@ -35,10 +35,12 @@ import org.springframework.stereotype.Component;
  * operator status endpoint.</p>
  *
  * <p>Lifecycle: starts on construction when auditing is enabled; stops on
- * {@link PreDestroy}. Resume state lives in {@link CollectorOffsetStore}.
- * Graceful shutdown drains nothing (the queue persists in the collector and
- * Mongo is fail-open); offsets are saved after every poll so restart replays
- * at most one poll interval (at-least-once + dedupe).</p>
+ * {@link PreDestroy}. Resume state lives in {@link CollectorOffsetStore}, which
+ * is in-memory only — so a restart has no saved offset and each tailer resumes
+ * at end-of-file. This class previously claimed offsets were persisted and that
+ * a restart replayed "at most one poll interval"; neither was true, and a
+ * restart instead replayed the entire log. Graceful shutdown drains nothing (the
+ * queue persists in the collector and Mongo is fail-open).</p>
  */
 @Component
 public class AuditTailRunner {

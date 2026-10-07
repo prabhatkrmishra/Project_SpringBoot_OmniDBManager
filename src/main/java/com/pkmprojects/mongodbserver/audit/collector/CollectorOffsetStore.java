@@ -7,14 +7,19 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Component;
 
 /**
- * Durable-ish resume positions for continuous telemetry sources.
+ * Resume positions for continuous telemetry sources, held in memory only.
  *
- * <p>File tails persist (inode, offset) pairs; the Mongo profiler tail
- * persists the last accepted profiler {@code ts} per database. State lives in
- * the operational Mongo database when available and degrades to in-memory
- * (restart-turbulent but never blocking) otherwise. Positions are advisory:
+ * <p>File tails keep (inode, offset) pairs; the Mongo profiler tail keeps the
+ * last accepted profiler {@code ts} per database. Nothing is written to Mongo —
+ * this class was documented as persisting to "the operational Mongo database
+ * when available", which no code here does.
+ *
+ * <p>Because the state is per-process, a restart has no offset to resume from
+ * and each tailer starts at end-of-file rather than replaying the whole log
+ * into the bounded drop-oldest queue. What was written while the manager was
+ * down is therefore not audited. Positions are advisory either way:
  * at-least-once delivery plus content/source dedupe is the contract, not
- * exactly-once.</p>
+ * exactly-once.
  */
 @Component
 public class CollectorOffsetStore {
@@ -35,12 +40,6 @@ public class CollectorOffsetStore {
             return;
         }
         files.put(sourceId, new FileOffset(inodeKey, Math.max(0, offset), Instant.now()));
-    }
-
-    public void clearFileOffset(String sourceId) {
-        if (sourceId != null) {
-            files.remove(sourceId);
-        }
     }
 
     public Optional<Instant> profilerTs(String database) {

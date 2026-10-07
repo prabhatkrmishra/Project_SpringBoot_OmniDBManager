@@ -32,8 +32,11 @@ class CollectorTailsTest {
         CollectorOffsetStore offsets = new CollectorOffsetStore();
         RotatingFileTailer tailer = new RotatingFileTailer("pg", f, offsets);
         List<String> out = new ArrayList<>();
-        assertThat(tailer.poll(out::add)).isEqualTo(1);
-        assertThat(out).containsExactly("{\"a\":1}");
+
+        // No saved offset for this source, so the tailer starts at end-of-file and
+        // the pre-existing line is deliberately not replayed.
+        assertThat(tailer.poll(out::add)).isZero();
+        assertThat(out).isEmpty();
 
         // Append + partial line buffering.
         Files.write(f, "{\"b\":2}\n{\"partial\":".getBytes(), StandardOpenOption.APPEND);
@@ -70,9 +73,13 @@ class CollectorTailsTest {
     @Test
     void overlongLinesAreCappedNotExplosive() throws Exception {
         Path f = tmp.resolve("big.log");
-        Files.writeString(f, "x".repeat(300 * 1024) + "\n");
+        Files.writeString(f, "");
         RotatingFileTailer tailer = new RotatingFileTailer("big", f, new CollectorOffsetStore());
         List<String> out = new ArrayList<>();
+        // Establish the end-of-file start before writing, otherwise the first
+        // poll would skip the line by design.
+        assertThat(tailer.poll(out::add)).isZero();
+        Files.writeString(f, "x".repeat(300 * 1024) + "\n");
         assertThat(tailer.poll(out::add)).isEqualTo(1);
         assertThat(out.get(0).length()).isLessThanOrEqualTo(RotatingFileTailer.MAX_LINE_LENGTH + 20);
     }
@@ -152,6 +159,49 @@ class CollectorTailsTest {
         BridgeSessionEvent s = new BridgeSessionEvent(java.time.Instant.now(), "s", "1.2.3.4", 123,
                 "u", "d", "direct", "none", "direct", null, java.time.Instant.now(), null);
         assertThat(s.toString()).doesNotContain("password", "SCRAM", "SELECT");
+    }
+
+    @Test
+    void freshTailerDoesNotReplayExistingHistory() throws Exception {
+        // The behaviour this whole change exists for. A restart leaves the offset
+        // store empty, and replaying the entire log would flood the bounded
+        // drop-oldest queue and re-persist history the audit trail already has.
+        Path f = tmp.resolve("replay.json");
+        Files.writeString(f, "{\"old\":1}\n{\"older\":2}\n");
+        RotatingFileTailer tailer = new RotatingFileTailer("replay", f, new CollectorOffsetStore());
+        List<String> out = new ArrayList<>();
+
+        assertThat(tailer.poll(out::add)).isZero();
+        assertThat(out).isEmpty();
+
+        // New lines after that point are still delivered.
+        Files.writeString(f, "{\"new\":3}\n", StandardOpenOption.APPEND);
+        assertThat(tailer.poll(out::add)).isEqualTo(1);
+        assertThat(out).containsExactly("{\"new\":3}");
+    }
+
+    @Test
+    void savedOffsetOfZeroIsHonouredRatherThanTreatedAsUnknown() throws Exception {
+        // Offset 0 is a real position, not an absence of one. If it were
+        // confused with "no offset known", a genuine resume-from-start would be
+        // skipped and those lines lost.
+        Path f = tmp.resolve("zero.json");
+        Files.writeString(f, "{\"first\":1}\n");
+        CollectorOffsetStore offsets = new CollectorOffsetStore();
+
+        // Poll once so the store holds this file's real inode key. Using a made-up
+        // key here would take the rotation branch and pass for the wrong reason.
+        RotatingFileTailer initial = new RotatingFileTailer("zero", f, offsets);
+        initial.poll(new ArrayList<String>()::add);
+        String realKey = offsets.fileOffset("zero").orElseThrow().inodeKey();
+        assertThat(offsets.fileOffset("zero").orElseThrow().offset()).isPositive();
+
+        // Now a genuine "resume from the very beginning".
+        offsets.saveFileOffset("zero", realKey, 0);
+        RotatingFileTailer resumed = new RotatingFileTailer("zero", f, offsets);
+        List<String> out = new ArrayList<>();
+        assertThat(resumed.poll(out::add)).isEqualTo(1);
+        assertThat(out).containsExactly("{\"first\":1}");
     }
 
     @Test

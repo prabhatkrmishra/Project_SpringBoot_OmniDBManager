@@ -85,10 +85,22 @@ public class RotatingFileTailer {
             partial.setLength(0);
             truncatedPartial = false;
         } else if (currentKey == null) {
+            // First poll with no saved offset for this source, so there is
+            // nothing to resume from. Start at end-of-file: replaying the whole
+            // log on every restart floods the bounded drop-oldest queue and
+            // re-persists history the audit trail already holds.
+            //
+            // Rotation and truncation below still resume at 0, because those are
+            // genuinely new files that must be read whole.
+            //
+            // The old `position > size` reset here was unreachable: position is
+            // still 0 whenever currentKey is null, so it could never exceed size.
             currentKey = key;
-            if (position > size) {
-                position = 0; // saved offset beyond a replaced file
-            }
+            position = size;
+            partial.setLength(0);
+            truncatedPartial = false;
+            log.info("audit tail {} has no saved offset; starting at end of file ({} bytes)",
+                    sourceId, size);
         } else if (size < position || (lastSize >= 0 && size < lastSize && size <= position)) {
             // Truncated in place (copytruncate-style) or truncated and
             // rewritten to a size at/below the old offset.
