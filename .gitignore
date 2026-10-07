@@ -59,3 +59,13 @@ replay_pid*.log
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+
+# TLS material — generated locally, never committed
+# ----------------------
+# compose.postgres.yaml bind-mounts server.crt / server.key / ca.crt and the
+# whole directory into the TLS bridge. A real private key dropped here would
+# otherwise be committable. Keep the directory itself via .gitkeep so a fresh
+# clone has the mount point; see certs/README.md for how to populate it.
+certs/*
+!certs/.gitkeep
+!certs/README.md

@@ -387,7 +387,7 @@ CI: `.github/workflows/maven.yml` — `mvn -B clean package -DargLine=-Xmx1024m`
 
 - Unit tests for validators, password generator, services, rate limiters, encryption, backup/restore.
 - `@WebMvcTest` slices for controllers (auth, CSRF, validation, error handling).
-- Testcontainers-backed tests (real MongoDB/PostgreSQL with auth) for driver repos and full provision/reset/delete lifecycle, including concurrency and rate-limit bursts. Full suite is **862 tests, 0 failures** with Docker available (`mvn test`); container-backed tests require a running Docker daemon.
+- Testcontainers-backed tests (real MongoDB/PostgreSQL with auth) for driver repos and full provision/reset/delete lifecycle, including concurrency and rate-limit bursts. Full suite is **954 tests, 0 failures** via `mvn test` with a reachable Docker daemon; without one, the 52 Testcontainers-backed tests skip rather than fail.
 
 ## Project layout
 
