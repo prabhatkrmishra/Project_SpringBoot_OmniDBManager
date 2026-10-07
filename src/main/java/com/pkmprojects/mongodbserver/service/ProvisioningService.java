@@ -512,29 +512,35 @@ public class ProvisioningService {
         if (postgresRepository.isEmpty()) return requestedUser;
         PostgresDatabaseRepository repo = postgresRepository.get();
         ProbeResult requested = repo.probeRole(requestedUser);
-        if (requested == ProbeResult.FREE) return requestedUser;
-        if (requested != ProbeResult.OCCUPIED) {
-            log.warn("Role probe inconclusive for '{}' — refusing to provision rather than risk reusing another tenant's role",
-                    requestedUser);
-            throw new ProvisioningException("Could not verify whether role '" + requestedUser
-                    + "' is already in use — the database did not answer the probe");
-        }
-        PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
-                ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
-        for (int i = 0; i < 5; i++) {
-            String candidate = gen.generate(dbName);
-            ProbeResult candidateResult = repo.probeRole(candidate);
-            if (candidateResult != ProbeResult.FREE && candidateResult != ProbeResult.OCCUPIED) {
-                log.warn("Role probe inconclusive for candidate role on '{}' — failing closed", dbName);
-                throw new ProvisioningException("Could not verify a unique role for database '" + dbName + "'");
+        if (requested == ProbeResult.FREE) {
+            return requestedUser;
+        } else if (requested == ProbeResult.OCCUPIED) {
+            PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
+                    ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
+            for (int i = 0; i < 5; i++) {
+                String candidate = gen.generate(dbName);
+                ProbeResult candidateResult = repo.probeRole(candidate);
+                if (candidateResult == ProbeResult.FREE) {
+                    log.info("Postgres role '{}' already exists (cluster-wide) — provisioning '{}' with unique role '{}'",
+                            requestedUser, dbName, candidate);
+                    return candidate;
+                } else if (candidateResult == ProbeResult.OCCUPIED) {
+                    continue;   // taken too — mint another
+                } else {
+                    // Inconclusive. Not evidence the candidate is free.
+                    log.warn("Role probe inconclusive for candidate role on '{}' — failing closed", dbName);
+                    throw new ProvisioningException("Could not verify a unique role for database '" + dbName + "'");
+                }
             }
-            if (candidateResult == ProbeResult.FREE) {
-                log.info("Postgres role '{}' already exists (cluster-wide) — provisioning '{}' with unique role '{}'",
-                        requestedUser, dbName, candidate);
-                return candidate;
-            }
+            throw new ProvisioningException("Could not mint a unique Postgres role for database '" + dbName + "' (role '" + requestedUser + "' is taken)");
         }
-        throw new ProvisioningException("Could not mint a unique Postgres role for database '" + dbName + "' (role '" + requestedUser + "' is taken)");
+        // UNKNOWN, or any value this code does not recognise: the server never
+        // told us the name is free, so we must not assume it is. Reusing the
+        // name would let createUser ALTER whichever tenant already holds it.
+        log.warn("Role probe inconclusive for '{}' — refusing to provision rather than risk reusing another tenant's role",
+                requestedUser);
+        throw new ProvisioningException("Could not verify whether role '" + requestedUser
+                + "' is already in use — the database did not answer the probe");
     }
 
     /**
@@ -550,29 +556,35 @@ public class ProvisioningService {
         if (mysqlRepository.isEmpty()) return requestedUser;
         MysqlDatabaseRepository repo = mysqlRepository.get();
         ProbeResult requested = repo.probeUser(requestedUser);
-        if (requested == ProbeResult.FREE) return requestedUser;
-        if (requested != ProbeResult.OCCUPIED) {
-            log.warn("User probe inconclusive for '{}' — refusing to provision rather than risk reusing another tenant's account",
-                    requestedUser);
-            throw new ProvisioningException("Could not verify whether user '" + requestedUser
-                    + "' is already in use — the database did not answer the probe");
-        }
-        PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
-                ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
-        for (int i = 0; i < 5; i++) {
-            String candidate = gen.generate(dbName, 32);
-            ProbeResult candidateResult = repo.probeUser(candidate);
-            if (candidateResult != ProbeResult.FREE && candidateResult != ProbeResult.OCCUPIED) {
-                log.warn("User probe inconclusive for candidate user on '{}' — failing closed", dbName);
-                throw new ProvisioningException("Could not verify a unique user for database '" + dbName + "'");
+        if (requested == ProbeResult.FREE) {
+            return requestedUser;
+        } else if (requested == ProbeResult.OCCUPIED) {
+            PostgresRoleNameGenerator gen = postgresRoleNameGenerator != null
+                    ? postgresRoleNameGenerator : new PostgresRoleNameGenerator();
+            for (int i = 0; i < 5; i++) {
+                String candidate = gen.generate(dbName, 32);
+                ProbeResult candidateResult = repo.probeUser(candidate);
+                if (candidateResult == ProbeResult.FREE) {
+                    log.info("MySQL user '{}' already exists (server-wide) — provisioning '{}' with unique user '{}'",
+                            requestedUser, dbName, candidate);
+                    return candidate;
+                } else if (candidateResult == ProbeResult.OCCUPIED) {
+                    continue;   // taken too — mint another
+                } else {
+                    // Inconclusive. Not evidence the candidate is free.
+                    log.warn("User probe inconclusive for candidate user on '{}' — failing closed", dbName);
+                    throw new ProvisioningException("Could not verify a unique user for database '" + dbName + "'");
+                }
             }
-            if (candidateResult == ProbeResult.FREE) {
-                log.info("MySQL user '{}' already exists (server-wide) — provisioning '{}' with unique user '{}'",
-                        requestedUser, dbName, candidate);
-                return candidate;
-            }
+            throw new ProvisioningException("Could not mint a unique MySQL user for database '" + dbName + "' (user '" + requestedUser + "' is taken)");
         }
-        throw new ProvisioningException("Could not mint a unique MySQL user for database '" + dbName + "' (user '" + requestedUser + "' is taken)");
+        // UNKNOWN, or any value this code does not recognise: the server never
+        // told us the name is free, so we must not assume it is. Reusing the name
+        // would let createUser ALTER whichever tenant already holds it.
+        log.warn("User probe inconclusive for '{}' — refusing to provision rather than risk reusing another tenant's account",
+                requestedUser);
+        throw new ProvisioningException("Could not verify whether user '" + requestedUser
+                + "' is already in use — the database did not answer the probe");
     }
 
     public DatabaseInfo resetPassword(String dbName, ResetPasswordForm form) {
