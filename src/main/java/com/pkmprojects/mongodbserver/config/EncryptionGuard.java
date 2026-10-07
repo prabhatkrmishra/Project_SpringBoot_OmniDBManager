@@ -14,8 +14,15 @@ import org.springframework.stereotype.Component;
  * {@code APP_ENCRYPTION_KEY}, {@code storedPassword} persists in plaintext
  * (dev/test convenience) — previously with no warning at all, so a real
  * deployment could silently run unencrypted. Mirrors
- * {@link AdminCredentialsGuard}: always warn when disabled, and refuse to
- * start under the {@code atlas} profile. Never logs key material.
+ * {@link AdminCredentialsGuard}, which already fails fast on an explicit
+ * operator opt-in rather than on a profile.
+ *
+ * <p>The {@code atlas} check alone was not enough: {@code atlas} names a storage
+ * backend, not a deployment posture, and the documented systemd unit runs with
+ * no Spring profile at all. So {@code APP_ENCRYPTION_ENFORCE} (default
+ * {@code true}) is the real gate — only deployments that have a key are
+ * unaffected, which is exactly the set that has nothing to fix. Never logs key
+ * material.
  */
 @Component
 public class EncryptionGuard implements ApplicationRunner {
@@ -23,10 +30,14 @@ public class EncryptionGuard implements ApplicationRunner {
     private static final Logger log = LoggerFactory.getLogger(EncryptionGuard.class);
 
     private final EncryptionService encryptionService;
+    private final EncryptionProperties encryptionProperties;
     private final Environment environment;
 
-    public EncryptionGuard(EncryptionService encryptionService, Environment environment) {
+    public EncryptionGuard(EncryptionService encryptionService,
+                           EncryptionProperties encryptionProperties,
+                           Environment environment) {
         this.encryptionService = encryptionService;
+        this.encryptionProperties = encryptionProperties;
         this.environment = environment;
     }
 
@@ -35,7 +46,7 @@ public class EncryptionGuard implements ApplicationRunner {
         if (encryptionService != null && encryptionService.isEnabled()) {
             return;
         }
-        if (environment.acceptsProfiles(Profiles.of("atlas"))) {
+        if (environment.acceptsProfiles(Profiles.of("atlas")) || encryptionProperties.enforce()) {
             throw new IllegalStateException(
                     "Refusing to start with tenant-password encryption disabled "
                             + "(no APP_ENCRYPTION_KEY). Set APP_ENCRYPTION_KEY in .env "

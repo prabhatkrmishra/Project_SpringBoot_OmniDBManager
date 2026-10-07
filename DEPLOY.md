@@ -354,6 +354,9 @@ Wants=docker.service
 [Service]
 User=<YOUR_LINUX_USER>
 WorkingDirectory=/home/<YOUR_LINUX_USER>/omnidb
+# APP_ENCRYPTION_ENFORCE=true (the default) makes the manager refuse to start
+# if APP_ENCRYPTION_KEY is missing from .env. Set it to false in .env ONLY if you
+# accept tenant passwords being stored in plaintext.
 ExecStart=/bin/bash -c 'set -a; source /home/<YOUR_LINUX_USER>/omnidb/.env; exec /usr/bin/java -Xms256m -Xmx512m -jar /home/<YOUR_LINUX_USER>/omnidb/omnidb-manager-*.jar'
 Restart=always
 RestartSec=5

@@ -28,6 +28,7 @@ docker compose -f compose.mysql.yaml up -d
 | `APP_ADMIN_USERNAME` | `admin` | **Yes** | `application.yml:app.admin.username` → `SecurityConfig.userDetailsService()` | Single admin login. Stored as `BCrypt` in-memory user. |
 | `APP_ADMIN_PASSWORD` | `change-me-now` | **Yes** | same | **Must change.** Anyone with this can provision/delete all databases. |
 | `APP_ENCRYPTION_KEY` | `` (empty) | **Yes in prod** | `application.yml:app.encryption.key` → `EncryptionService` (AES-256-GCM) | Generate with `openssl rand -base64 32`. When blank, stored **plaintext** (dev only). |
+| `APP_ENCRYPTION_ENFORCE` | `true` | No | `application.yml:app.encryption.enforce` → `EncryptionGuard` | Refuse to start when `APP_ENCRYPTION_KEY` is absent, on **any** profile. Previously the guard only failed under the `atlas` profile, which names a storage backend rather than a deployment posture — and the documented systemd unit runs with no Spring profile at all, so a VPS missing the key silently stored tenant passwords in plaintext. Deployments that **do** set a key are unaffected. Set `false` only for local dev. |
 
 ## 2. MongoDB Engine
 

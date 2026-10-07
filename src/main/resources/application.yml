@@ -180,6 +180,11 @@ app:
     bridge-log: ${QUERY_AUDIT_BRIDGE_LOG:/var/log/omnidb/bridge.log}
   encryption:
     key: ${APP_ENCRYPTION_KEY:}
+    # Refuse to start when APP_ENCRYPTION_KEY is missing, on any profile.
+    # Default true: deployments that set a key are unaffected, and the ones
+    # that don't are exactly the ones silently storing tenant passwords in
+    # plaintext. Set false only for local dev without a key.
+    enforce: ${APP_ENCRYPTION_ENFORCE:true}
   # Brute-force protection on the login form (attempts per IP+username per window)
   login-rate-limit:
     max-attempts: 5

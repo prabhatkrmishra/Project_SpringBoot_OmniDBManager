@@ -14,8 +14,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Plaintext tenant-password storage must never be silent in a real
- * deployment — warn always, fail fast under the {@code atlas} profile.
+ * Plaintext tenant-password storage must never be silent. Warn always, and
+ * refuse to start whenever {@code APP_ENCRYPTION_ENFORCE} is on (the default)
+ * or the {@code atlas} profile is active.
  */
 @ExtendWith(MockitoExtension.class)
 class EncryptionGuardTest {
@@ -26,30 +27,60 @@ class EncryptionGuardTest {
     @Mock
     private EncryptionService encryptionService;
 
+    private EncryptionGuard guard(boolean enforce) {
+        return new EncryptionGuard(encryptionService, new EncryptionProperties(null, enforce), environment);
+    }
+
+    // ── key present: nothing changes, whatever the flags say ───────────
+
     @Test
     void enabledEncryptionStartsQuietly() {
         when(encryptionService.isEnabled()).thenReturn(true);
-        EncryptionGuard guard = new EncryptionGuard(encryptionService, environment);
+        assertThatCode(() -> guard(true).run(null)).doesNotThrowAnyException();
+    }
 
-        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+    @Test
+    void enabledEncryptionStartsQuietlyEvenWhenEnforcementIsOff() {
+        when(encryptionService.isEnabled()).thenReturn(true);
+        assertThatCode(() -> guard(false).run(null)).doesNotThrowAnyException();
+    }
+
+    // ── key absent: the default now refuses to start ──────────────────
+
+    @Test
+    void disabledEncryptionFailsFastWhenEnforced() {
+        // The documented deployment runs with no Spring profile at all, so this
+        // -- not the atlas profile below -- is what actually protects a VPS that
+        // never set APP_ENCRYPTION_KEY.
+        when(encryptionService.isEnabled()).thenReturn(false);
+        when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(false);
+        assertThatThrownBy(() -> guard(true).run(null)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void failureMessageNeverContainsKeyMaterial() {
+        when(encryptionService.isEnabled()).thenReturn(false);
+        when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(false);
+        assertThatThrownBy(() -> guard(true).run(null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("APP_ENCRYPTION_KEY")
+                .hasMessageNotContaining("null");
     }
 
     @Test
     void disabledEncryptionFailsFastUnderAtlasProfile() {
         when(encryptionService.isEnabled()).thenReturn(false);
         when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(true);
-        EncryptionGuard guard = new EncryptionGuard(encryptionService, environment);
-
-        assertThatThrownBy(() -> guard.run(null)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> guard(false).run(null)).isInstanceOf(IllegalStateException.class);
     }
 
+    // ── key absent and enforcement explicitly waived: the old behaviour ─
+
     @Test
-    void disabledEncryptionWarnsButStartsWithoutAtlasProfile() {
+    void disabledEncryptionWarnsButStartsWhenEnforcementWaived() {
         when(encryptionService.isEnabled()).thenReturn(false);
         when(environment.acceptsProfiles(Profiles.of("atlas"))).thenReturn(false);
-        EncryptionGuard guard = new EncryptionGuard(encryptionService, environment);
-
-        assertThatCode(() -> guard.run(null)).doesNotThrowAnyException();
+        assertThatCode(() -> guard(false).run(null)).doesNotThrowAnyException();
         verify(environment).acceptsProfiles(Profiles.of("atlas"));
     }
 }
