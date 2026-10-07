@@ -247,16 +247,8 @@ public class ProvisioningService {
         String dbName = form.dbName().trim();
         String userName = form.userName().trim();
         String requestedPassword = form.password() == null ? "" : form.password().trim();
-        if (engineType == DatabaseEngineType.POSTGRES) {
-            nameValidator.validatePostgresDatabaseName(dbName);
-            nameValidator.validatePostgresUserName(userName);
-        } else if (engineType == DatabaseEngineType.MYSQL) {
-            nameValidator.validateMysqlDatabaseName(dbName);
-            nameValidator.validateMysqlUserName(userName);
-        } else {
-            nameValidator.validateMongoDatabaseName(dbName);
-            nameValidator.validateUserName(userName);
-        }
+        nameValidator.validateDatabaseName(dbName, engineType);
+        nameValidator.validateUserName(userName, engineType);
         nameValidator.validatePassword(requestedPassword);
         // Reject PG-unsafe passwords with HTTP 400 here, before the
         // lock or any lifecycle step (the repository would throw a raw 500).
@@ -601,9 +593,7 @@ public class ProvisioningService {
     }
 
     public DatabaseInfo resetPassword(DatabaseEngineType engineType, String dbName, ResetPasswordForm form) {
-        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
-        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
-        else nameValidator.validateDatabaseName(dbName);
+        nameValidator.validateDatabaseName(dbName, engineType);
         String requestedPassword = form.password() == null ? "" : form.password().trim();
         nameValidator.validatePassword(requestedPassword);
         // Same early-400 rule as provision (see above).
@@ -702,9 +692,7 @@ public class ProvisioningService {
     }
 
     public void delete(DatabaseEngineType engineType, String dbName) {
-        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
-        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
-        else nameValidator.validateDatabaseName(dbName);
+        nameValidator.validateDatabaseName(dbName, engineType);
         databaseLocks.withLock(lockKey(engineType, dbName), () -> {
             Optional<ManagedDatabase> metadata = managedDatabaseStore.findByEngineTypeAndDbName(engineType, dbName);
             DatabaseEngine engine = engineFor(engineType);
@@ -829,9 +817,7 @@ public class ProvisioningService {
     }
 
     public List<DatabaseUser> listUsers(DatabaseEngineType engineType, String dbName) {
-        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
-        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
-        else nameValidator.validateDatabaseName(dbName);
+        nameValidator.validateDatabaseName(dbName, engineType);
         requireDatabase(dbName, engineType);
         if (engineType == DatabaseEngineType.POSTGRES) {
             return engineFor(engineType).getUsers(dbName).stream()
@@ -861,12 +847,8 @@ public class ProvisioningService {
     }
 
     public void revokeUser(DatabaseEngineType engineType, String dbName, String userName) {
-        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresUserName(userName);
-        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlUserName(userName);
-        else nameValidator.validateUserName(userName);
-        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
-        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
-        else nameValidator.validateDatabaseName(dbName);
+        nameValidator.validateUserName(userName, engineType);
+        nameValidator.validateDatabaseName(dbName, engineType);
         databaseLocks.withLock(lockKey(engineType, dbName), () -> {
             requireDatabase(dbName, engineType);
             if (engineType == DatabaseEngineType.POSTGRES) {
@@ -943,9 +925,7 @@ public class ProvisioningService {
     }
 
     public DatabaseInfo getDatabase(DatabaseEngineType engineType, String dbName) {
-        if (engineType == DatabaseEngineType.POSTGRES) nameValidator.validatePostgresDatabaseName(dbName);
-        else if (engineType == DatabaseEngineType.MYSQL) nameValidator.validateMysqlDatabaseName(dbName);
-        else nameValidator.validateDatabaseName(dbName);
+        nameValidator.validateDatabaseName(dbName, engineType);
         if (!engineFor(engineType).databaseExists(dbName)) throw new DatabaseNotFoundException("Database '" + dbName + "' does not exist in " + engineType);
         Optional<ManagedDatabase> metadata = managedDatabaseStore.findByEngineTypeAndDbName(engineType, dbName);
         ManagedDatabase md = metadata.orElse(null);
