@@ -761,12 +761,8 @@ public class ProvisioningService {
                     try {
                         engine.dropDatabase(dbName);
                     } catch (Exception e) {
-                        try {
-                            audit(AuditEvent.DELETE_FAILED, dbName, engineType,
-                                    metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
-                        } catch (Exception auditEx) {
-                            log.warn("Could not record DELETE_FAILED audit for '{}'", dbName, auditEx);
-                        }
+                        audit(AuditEvent.DELETE_FAILED, dbName, engineType,
+                                metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());
                         throw new ProvisioningException("Could not drop " + engineType + " database '" + dbName
                                 + "' — database, role and metadata preserved for retry", e);
                     }
@@ -997,13 +993,8 @@ public class ProvisioningService {
                 String detail = e instanceof org.springframework.dao.DataAccessException dae
                         ? safeMessage(dae.getMostSpecificCause())
                         : safeMessage(e);
-                // Record the failure without masking the original exception: if the
-                // audit store is unavailable, log it and still surface the real cause.
-                try {
-                    audit(AuditEvent.VECTOR_ENABLE_FAILED, n, engineType, null, clock.instant());
-                } catch (Exception auditEx) {
-                    log.warn("Could not record VECTOR_ENABLE_FAILED audit for '{}'", n, auditEx);
-                }
+                // Cannot mask the original exception: audit() is non-throwing.
+                audit(AuditEvent.VECTOR_ENABLE_FAILED, n, engineType, null, clock.instant());
                 throw new ProvisioningException("Could not enable pgvector on '" + n + "': " + detail, e);
             }
             audit(AuditEvent.VECTOR_ENABLED, n, engineType, null, clock.instant());
@@ -1045,11 +1036,7 @@ public class ProvisioningService {
                 String detail = e instanceof org.springframework.dao.DataAccessException dae
                         ? safeMessage(dae.getMostSpecificCause())
                         : safeMessage(e);
-                try {
-                    audit(AuditEvent.POOLED_AUTH_ENABLE_FAILED, n, engineType, null, clock.instant());
-                } catch (Exception auditEx) {
-                    log.warn("Could not record POOLED_AUTH_ENABLE_FAILED audit for '{}'", n, auditEx);
-                }
+                audit(AuditEvent.POOLED_AUTH_ENABLE_FAILED, n, engineType, null, clock.instant());
                 throw new ProvisioningException("Could not install pooled auth on '" + n + "': " + detail, e);
             }
             // Prove the repaired path with a real tenant login when possible —
@@ -1058,11 +1045,7 @@ public class ProvisioningService {
                 String plain = decryptStoredPassword(md.getStoredPassword());
                 var result = plain == null ? null : connectionValidationService.validatePooledDetailed(n, md.getUserName(), plain);
                 if (result == null || !result.healthy()) {
-                    try {
-                        audit(AuditEvent.POOLED_AUTH_ENABLE_FAILED, n, engineType, null, clock.instant());
-                    } catch (Exception auditEx) {
-                        log.warn("Could not record POOLED_AUTH_ENABLE_FAILED audit for '{}'", n, auditEx);
-                    }
+                    audit(AuditEvent.POOLED_AUTH_ENABLE_FAILED, n, engineType, null, clock.instant());
                     throw new ProvisioningException(
                             "Pooled auth installed on '" + n + "' but pooled validation failed — pooled logins cannot authenticate yet");
                 }
@@ -1121,10 +1104,29 @@ public class ProvisioningService {
         }
     }
 
+    /**
+     * Records an admin action. Never throws.
+     *
+     * <p>Callers invoke this <em>after</em> the mutation has committed, so letting
+     * an audit failure propagate would return 500 for work that actually
+     * succeeded -- and the client's retry would then report "already exists".
+     * That was not hypothetical: {@code auditStore.save} reaches Mongo directly and
+     * {@code publishEvent} runs listeners inline.
+     *
+     * <p>Catching here rather than at each call site keeps the guarantee in one
+     * place, so a future event type cannot reintroduce it. The individual
+     * log-and-continue wrappers this replaces were all doing exactly this.
+     */
     private void audit(String eventType, String dbName, DatabaseEngineType engineType, String userName, java.time.Instant performedAt) {
-        AuditEvent event = new AuditEvent(eventType, dbName, engineType, userName, currentUsername(), performedAt);
-        auditStore.save(event);
-        applicationEventPublisher.publishEvent(new AuditEventRecorded(event));
+        try {
+            AuditEvent event = new AuditEvent(eventType, dbName, engineType, userName, currentUsername(), performedAt);
+            auditStore.save(event);
+            applicationEventPublisher.publishEvent(new AuditEventRecorded(event));
+        } catch (Exception e) {
+            // The operation already committed; failing the request now would only
+            // mislead the caller. Say what was lost and carry on.
+            log.warn("Could not record {} audit for '{}' (the operation itself completed)", eventType, dbName, e);
+        }
     }
 
     private void audit(String eventType, String dbName, String userName, java.time.Instant performedAt) {

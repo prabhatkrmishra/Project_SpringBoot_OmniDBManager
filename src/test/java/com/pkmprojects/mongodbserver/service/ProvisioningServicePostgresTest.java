@@ -686,4 +686,53 @@ class ProvisioningServicePostgresTest {
 
         verify(postgresRepo, never()).createUser(any(), any(), any());
     }
+    @Test
+    void provisionSucceedsEvenWhenTheAuditStoreIsDown() {
+        // The mutation has already committed by the time audit() runs, so letting
+        // an audit failure propagate returns 500 for work that succeeded -- and the
+        // client's retry then reports "already exists". audit() must swallow.
+        doThrow(new RuntimeException("mongo unreachable"))
+                .when(auditRepo).save(org.mockito.ArgumentMatchers.any());
+
+        DatabaseInfo info = service.provision(
+                new CreateDatabaseForm("myapp", DatabaseEngineType.POSTGRES, "myapp_user", "mysecret123"));
+
+        assertThat(info.connectionString()).contains("myapp_user:mysecret123@");
+        verify(postgresRepo).createUser("myapp", "myapp_user", "mysecret123");
+        verify(postgresRepo).createDatabase("myapp", "myapp_user");
+    }
+
+    @Test
+    void deleteSucceedsEvenWhenTheAuditStoreIsDown() {
+        ManagedDatabase md = new ManagedDatabase("myapp", DatabaseEngineType.POSTGRES,
+                "myapp_user", List.of("ALL:myapp"), NOW, NOW, null);
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp"))
+                .thenReturn(Optional.of(md));
+        doThrow(new RuntimeException("mongo unreachable"))
+                .when(auditRepo).save(org.mockito.ArgumentMatchers.any());
+
+        service.delete(DatabaseEngineType.POSTGRES, "myapp");
+
+        verify(postgresRepo).dropDatabase("myapp");
+        verify(managedRepo).deleteByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp");
+    }
+
+    @Test
+    void failedDropsStillRecordTheirFailureAuditWithoutMaskingTheCause() {
+        // audit() is non-throwing, so the DELETE_FAILED wrapper went away. The
+        // original exception must still reach the caller.
+        ManagedDatabase md = new ManagedDatabase("myapp", DatabaseEngineType.POSTGRES,
+                "myapp_user", List.of("ALL:myapp"), NOW, NOW, null);
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp"))
+                .thenReturn(Optional.of(md));
+        doThrow(new RuntimeException("drop failed")).when(postgresRepo).dropDatabase("myapp");
+
+        assertThatThrownBy(() -> service.delete(DatabaseEngineType.POSTGRES, "myapp"))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("preserved for retry");
+        verify(auditRepo).save(org.mockito.ArgumentMatchers.argThat(
+                (com.pkmprojects.mongodbserver.model.AuditEvent e) ->
+                        "DELETE_FAILED".equals(e.getEventType())));
+    }
 }
+
