@@ -56,27 +56,7 @@ public interface DatabaseEngine {
         return new DatabaseConnections(direct, null);
     }
 
-    // ── PgBouncer pooled-auth (auth_query lookup) ───────────────────────
-    // No-op default so non-pooler engines (Mongo/MySQL) need no changes;
-    // PostgresDatabaseEngine overrides with role + function install.
-
-    default void installPooledAuth(String dbName) {
-        throw new UnsupportedOperationException("Pooled auth is not supported by " + type());
-    }
-
-    default boolean isPooledAuthInstalled(String dbName) { return false; }
-
-    // ── Vector extensions (pgvector) ─────────────────────────────────────
-    // Defaults are no-ops so non-vector engines (Mongo/MySQL) and future
-    // engines don't need to implement them; PostgresDatabaseEngine overrides.
-
-    default boolean isVectorAvailable() { return false; }
-
-    default boolean isVectorEnabled(String dbName) { return false; }
-
-    default void enableVector(String dbName) {
-        throw new UnsupportedOperationException("Vector extensions are not supported by " + type());
-    }
-
-    default String vectorVersion(String dbName) { return null; }
+    // Pooled-auth installation and pgvector are not part of this contract --
+    // they live on PostgresOnlyCapability, so calling them on a Mongo or MySQL
+    // engine is a compile error rather than a runtime surprise.
 }

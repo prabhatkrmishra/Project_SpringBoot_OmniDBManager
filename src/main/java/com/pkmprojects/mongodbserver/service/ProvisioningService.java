@@ -346,7 +346,13 @@ public class ProvisioningService {
                         // lookup function. Runs after grants so the target DB
                         // exists. Failure here fails provisioning — a pooled
                         // record without the lookup is worse than no record.
-                        engine.installPooledAuth(dbName);
+                        // engineFor(POSTGRES) is postgresEngine.orElseThrow, so by
+                        // this point the optional is known present. Use it directly
+                        // rather than casting `engine` -- a cast here would turn a
+                        // wiring mistake into a ClassCastException, where the
+                        // accessor yields the same ProvisioningException the rest
+                        // of this method already throws.
+                        postgresEngine.get().installPooledAuth(dbName);
                         // End-to-end proof with tenant creds (§29): pooler +
                         // auth_query + SCRAM, not just SHOW POOLS. Skipped when
                         // no validator is wired (unit tests, PG-disabled).
@@ -962,7 +968,8 @@ public class ProvisioningService {
         nameValidator.validatePostgresDatabaseName(n);
         databaseLocks.withLock(lockKey(engineType, n), () -> {
             requireDatabase(n, engineType);
-            DatabaseEngine pg = engineFor(engineType);
+            PostgresOnlyCapability pg = postgresEngine.orElseThrow(
+                    () -> new ProvisioningException("PostgreSQL engine is not configured"));
             if (pg.isVectorEnabled(n)) {
                 log.info("pgvector already enabled on '{}' — skipping", n);
                 return;
@@ -1009,7 +1016,8 @@ public class ProvisioningService {
             if (!md.isPooled()) {
                 throw new ProvisioningException("Database '" + n + "' is not pooled — pooled auth does not apply");
             }
-            DatabaseEngine pg = engineFor(engineType);
+            PostgresOnlyCapability pg = postgresEngine.orElseThrow(
+                    () -> new ProvisioningException("PostgreSQL engine is not configured"));
             if (pg.isPooledAuthInstalled(n)) {
                 log.info("Pooled auth already installed on '{}' — skipping", n);
                 return;

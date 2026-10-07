@@ -15,7 +15,7 @@ import java.util.Map;
 
 @Service
 @ConditionalOnProperty(name = "app.postgres.enabled", havingValue = "true")
-public class PostgresDatabaseEngine implements DatabaseEngine {
+public class PostgresDatabaseEngine implements DatabaseEngine, PostgresOnlyCapability {
 
     private static final Logger log = LoggerFactory.getLogger(PostgresDatabaseEngine.class);
 
@@ -153,6 +153,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
      * Requires pooler config (throws when pooling is not configured) and a
      * non-blank auth password (never installs with a default/empty secret).
      */
+    @Override
     public void installPooledAuth(String dbName) {
         if (pgbouncerProperties == null) {
             throw new IllegalStateException("Pooling is not configured for database '" + dbName + "' — app.pgbouncer is missing");
@@ -167,6 +168,7 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
                 dbName, com.pkmprojects.mongodbserver.config.PgbouncerProperties.AUTH_USER);
     }
 
+    @Override
     public boolean isPooledAuthInstalled(String dbName) {
         return postgresDatabaseRepository.isAuthLookupInstalled(dbName);
     }
@@ -223,18 +225,22 @@ public class PostgresDatabaseEngine implements DatabaseEngine {
         return new com.pkmprojects.mongodbserver.model.DatabaseConnections(direct, pooledEp);
     }
 
+    @Override
     public boolean isVectorAvailable() {
         return postgresDatabaseRepository.isVectorAvailable();
     }
 
+    @Override
     public boolean isVectorEnabled(String dbName) {
         return postgresDatabaseRepository.isVectorEnabled(dbName);
     }
 
+    @Override
     public void enableVector(String dbName) {
         postgresDatabaseRepository.enableVectorExtension(dbName);
     }
 
+    @Override
     public String vectorVersion(String dbName) {
         return postgresDatabaseRepository.vectorVersion(dbName);
     }
