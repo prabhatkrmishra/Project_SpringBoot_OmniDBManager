@@ -46,7 +46,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ProbeSecurityTest {
 
     @Container
-    static GenericContainer<?> mongo = new GenericContainer<>(DockerImageName.parse("mongo:8"))
+    static GenericContainer<?> mongo = new GenericContainer<>(DockerImageName.parse("mongo:8.2"))
             .withEnv("MONGO_INITDB_ROOT_USERNAME", "root")
             .withEnv("MONGO_INITDB_ROOT_PASSWORD", "root")
             .withExposedPorts(27017)
