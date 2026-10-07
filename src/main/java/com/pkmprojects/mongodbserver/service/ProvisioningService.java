@@ -734,13 +734,22 @@ public class ProvisioningService {
                 // severed, with the identical end-state after DROP+RESUME.
                 // Best-effort pooler steps — invariant: PgBouncer unavailable
                 // must never turn a direct-path delete into a failed delete
-                // (§57). RESUME is unconditional in finally (also on partial
-                // failure) so held clients fail cleanly instead of hanging.
+                // (§57). RESUME runs in finally on every pooled delete (§57),
+                // not only when PAUSE reported success: PAUSE and RESUME are both
+                // idempotent, and RESUME on a database that was never paused is a
+                // no-op. Gating RESUME on the PAUSE result is what used to strand
+                // the standard pooler in PAUSED whenever the HC instance was down
+                // and pauseAll() returned false — the one outcome that was neither
+                // cleaned up nor reported.
                 // PAUSE ALL relevant poolers for the DB (standard + HC).
-                boolean pooledPaused = engineType == DatabaseEngineType.POSTGRES
+                boolean pooledDelete = engineType == DatabaseEngineType.POSTGRES
                         && pgbouncerAdminService != null
-                        && metadata.map(ManagedDatabase::isPooled).orElse(false)
-                        && pgbouncerAdminService.pauseAll(dbName);
+                        && metadata.map(ManagedDatabase::isPooled).orElse(false);
+                boolean pauseSucceeded = pooledDelete && pgbouncerAdminService.pauseAll(dbName);
+                if (pooledDelete && !pauseSucceeded) {
+                    log.warn("PgBouncer PAUSE did not fully succeed for '{}' — continuing with the delete; "
+                            + "RESUME will still be attempted", dbName);
+                }
                 // Failure arm is terminal for this attempt: the role and the
                 // metadata are preserved, the failure is recorded, and the
                 // error surfaces as recoverable (retry-safe: PAUSE, terminate
@@ -768,10 +777,11 @@ public class ProvisioningService {
                     });
                     metadata.ifPresent(m -> managedDatabaseStore.deleteByEngineTypeAndDbName(engineType, dbName));
                 } finally {
-                    // RESUME ALL relevant poolers (standard + HC), even
-                    // on partial failure. Failure of one pooler never prevents
-                    // attempting the other (handled inside resumeAll).
-                    if (pooledPaused) pgbouncerAdminService.resumeAll(dbName);
+                    // RESUME ALL relevant poolers (standard + HC), on every
+                    // pooled delete and regardless of what PAUSE reported.
+                    // Failure of one pooler never prevents attempting the other
+                    // (handled inside resumeAll).
+                    if (pooledDelete) pgbouncerAdminService.resumeAll(dbName);
                 }
             }
             audit(AuditEvent.DELETE, dbName, engineType, metadata.map(ManagedDatabase::getUserName).orElse(null), clock.instant());

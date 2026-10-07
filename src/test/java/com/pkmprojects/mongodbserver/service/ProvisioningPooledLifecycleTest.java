@@ -214,4 +214,40 @@ class ProvisioningPooledLifecycleTest {
         verify(admin, never()).reconnectDb(any());
         verify(admin, never()).reconnectAll(any());
     }
+    @Test
+    void deletePooledResumesEvenWhenPausePartiallyFails() {
+        // pauseAll() returns std && hc. When the standard instance paused but the
+        // HC one did not, it returns false -- and gating RESUME on that result
+        // left the standard pooler PAUSED forever, with the database already
+        // dropped underneath it. RESUME is a no-op on a database that was never
+        // paused, so it must not depend on PAUSE having fully succeeded.
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp"))
+                .thenReturn(Optional.of(pooledMetadata()));
+        when(admin.pauseAll("myapp")).thenReturn(false);
+        pooled.setPgbouncerAdminService(admin);
+
+        pooled.delete(DatabaseEngineType.POSTGRES, "myapp");
+
+        verify(admin).pauseAll("myapp");
+        verify(admin).resumeAll("myapp");
+        verify(postgresRepo).dropDatabase("myapp");
+    }
+
+    @Test
+    void deletePooledResumesWhenPauseFailsAndDropAlsoFails() {
+        // Both failure arms at once: the pooler never confirmed the pause and the
+        // drop threw. RESUME still has to run, or a pooler paused by an earlier
+        // attempt stays paused across the retry.
+        when(managedRepo.findByEngineTypeAndDbName(DatabaseEngineType.POSTGRES, "myapp"))
+                .thenReturn(Optional.of(pooledMetadata()));
+        when(admin.pauseAll("myapp")).thenReturn(false);
+        doThrow(new RuntimeException("drop failed")).when(postgresRepo).dropDatabase("myapp");
+        pooled.setPgbouncerAdminService(admin);
+
+        assertThatThrownBy(() -> pooled.delete(DatabaseEngineType.POSTGRES, "myapp"))
+                .isInstanceOf(ProvisioningException.class)
+                .hasMessageContaining("preserved for retry");
+
+        verify(admin).resumeAll("myapp");
+    }
 }
