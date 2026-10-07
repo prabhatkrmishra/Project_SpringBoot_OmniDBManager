@@ -115,7 +115,6 @@ No flag — `pgbouncer:6432` runs with postgres (`postgres:5432` internally, `12
 docker compose -f compose.postgres.yaml up -d
 ```
 
-Pooled strings use `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT` (e.g. `pg.example.com:27432`), direct use `POSTGRES_ISSUED_HOST` + `POSTGRES_ISSUED_PORT` (e.g. `pg.example.com:27431`) — blank host resolves to `127.0.0.1:6432` / `127.0.0.1:9813` for local dev. Mongo/MySQL untouched. Per-DB users auth via `auth_query` (`pgbouncer.user_lookup`, SCRAM) as least-privilege `pgbouncer_auth`; `userlist.txt` holds only `pgbouncer_admin`/`stats` (md5) plus the plain-text auth_user entry SCRAM requires. The detail page shows **pooled auth ok/missing** with a one-click repair for pre-existing pooled DBs. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** and a `pgbouncer` entry in `/actuator/health`.
 Pooled strings use `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT` (e.g. `pg.example.com:27432`), direct use `POSTGRES_ISSUED_HOST` + `POSTGRES_ISSUED_PORT` (e.g. `pg.example.com:27431`) — blank host resolves to `127.0.0.1:6432` / `127.0.0.1:9813` for local dev. When the TLS bridge is enabled (`DATABASE_PROXY_HOST` set), both modes instead share that host + `DATABASE_PROXY_PORT` (`:15432`) with `options=-c omnidb.mode=` selecting the route and `channel_binding=disable` pinned (see `deploy/database-bridge-gate.md`). Mongo/MySQL untouched. Per-DB users auth via `auth_query` (`pgbouncer.user_lookup`, SCRAM) as least-privilege `pgbouncer_auth`; `userlist.txt` holds only `pgbouncer_admin`/`stats` (md5) plus the plain-text auth_user entry SCRAM requires. The detail page shows **pooled auth ok/missing** with a one-click repair for pre-existing pooled DBs. Monitor adds a PgBouncer facet under **Monitor → PostgreSQL** and a `pgbouncer` entry in `/actuator/health`.
 
 ### Enable MySQL
@@ -324,7 +323,6 @@ Controller  →  Service  →  Repository (Mongo Java driver / JdbcTemplate)
 ```
 
 - `ProvisioningService` — lifecycle: provision / reset / delete / list (per-engine, `DatabaseLockRegistry` `engine:dbName`, `Clock` for audit, `EncryptionService` `ENC:v1:` for all engines; Postgres `pooled` flag per DB for PgBouncer, `repairPooledAuth` backfill for the `auth_query` lookup).
-- `DatabaseEngine` — `MongoDatabaseEngine` + `PostgresDatabaseEngine` (via `JdbcTemplate`, no `@Transactional`; `buildPooledConnectionString` for pooled DBs via `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT`, `installPooledAuth`/`isPooledAuthInstalled` for the pooler lookup) + `MysqlDatabaseEngine`.
 - `DatabaseEngine` — `MongoDatabaseEngine` + `PostgresDatabaseEngine` (via `JdbcTemplate`, no `@Transactional`; `buildPooledConnectionString` for pooled DBs via `POSTGRES_ISSUED_HOST` + `PGBOUNCER_ISSUED_PORT`, `installPooledAuth`/`isPooledAuthInstalled` for the pooler lookup; bridged `channel_binding=disable` + `options=-c omnidb.mode=` strings via `PostgresConnectionStringBuilder` when the TLS bridge is enabled) + `MysqlDatabaseEngine`.
 - `PooledResumeOnStartup` — startup best-effort `RESUME` of pooled databases paused by a crashed delete (never throws, creates/deletes nothing).
 - `ReconciliationService` + `AdminDiagnosticsController` — read-only metadata-vs-catalog diff at `GET /api/admin/reconcile` (ADMIN-only, never mutates).
@@ -389,7 +387,7 @@ CI: `.github/workflows/maven.yml` — `mvn -B clean package -DargLine=-Xmx1024m`
 
 - Unit tests for validators, password generator, services, rate limiters, encryption, backup/restore.
 - `@WebMvcTest` slices for controllers (auth, CSRF, validation, error handling).
-- Testcontainers-backed tests (real MongoDB/PostgreSQL with auth) for driver repos and full provision/reset/delete lifecycle, including concurrency and rate-limit bursts. Full suite is **714 tests, 0 failures** with Docker available (`mvn test`); container-backed tests require a running Docker daemon.
+- Testcontainers-backed tests (real MongoDB/PostgreSQL with auth) for driver repos and full provision/reset/delete lifecycle, including concurrency and rate-limit bursts. Full suite is **862 tests, 0 failures** with Docker available (`mvn test`); container-backed tests require a running Docker daemon.
 
 ## Project layout
 

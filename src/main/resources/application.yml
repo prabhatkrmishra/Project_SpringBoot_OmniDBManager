@@ -114,6 +114,11 @@ app:
     tls: ${OVERRIDE_MYSQL_TLS:false}
   adminer:
     base-url: http://127.0.0.1:9815
+    # Server-side single sign-on as the Postgres SUPERUSER for any authenticated
+    # ADMIN. Set ADMINER_SSO_ENABLED=false to keep the proxy reachable but require
+    # an explicit Adminer login (the operator then types Adminer credentials).
+    # Default true = existing behaviour; nothing changes unless you opt out.
+    sso-enabled: ${ADMINER_SSO_ENABLED:true}
   phpmyadmin:
     base-url: http://127.0.0.1:9817
   pgbouncer:

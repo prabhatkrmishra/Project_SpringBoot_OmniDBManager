@@ -49,6 +49,14 @@ import java.util.regex.Pattern;
  * The Spring admin session cookie is never forwarded, and the password never
  * appears in a URL, a log line, or the browser — only in the server-side POST
  * body. Any SSO failure falls back to proxying the plain login page.</p>
+ *
+ * <p><strong>Blast radius:</strong> this hands every authenticated ADMIN the
+ * Postgres <em>superuser</em> inside Adminer, which can read and write every
+ * tenant database and create roles cluster-wide. There is no per-tenant
+ * scoping. {@code app.adminer.sso-enabled} (env {@code ADMINER_SSO_ENABLED},
+ * default {@code true} = the behaviour this filter has always had) turns the
+ * server-side login off; the proxy stays reachable and the operator then types
+ * Adminer credentials into Adminer's own form.</p>
  */
 @Component
 public class AdminerProxyFilter extends OncePerRequestFilter {
@@ -90,19 +98,35 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
     private final HttpClient http;
     private final String adminerUsername;
     private final String adminerPassword;
+    private final boolean ssoEnabled;
 
+    /** Test/default constructor — superuser SSO enabled, the historical behaviour. */
+    AdminerProxyFilter(String baseUrl, String username, String password, HttpClient httpClient) {
+        this(baseUrl, username, password, httpClient, true);
+    }
+
+    // Explicitly @Autowired: with the convenience overload above there are two
+    // constructors and no no-arg one, so Spring needs to be told which to use.
+    @org.springframework.beans.factory.annotation.Autowired
     public AdminerProxyFilter(@Value("${app.adminer.base-url:http://127.0.0.1:9815}") String baseUrl,
                               @Value("${POSTGRES_ROOT_USER:root}") String adminerUsername,
                               @Value("${POSTGRES_ROOT_PASSWORD:root}") String adminerPassword,
-                              @org.springframework.beans.factory.annotation.Autowired(required = false) HttpClient httpClient) {
+                              @org.springframework.beans.factory.annotation.Autowired(required = false) HttpClient httpClient,
+                              @Value("${app.adminer.sso-enabled:true}") boolean ssoEnabled) {
         this.targetBase = URI.create(baseUrl);
         this.adminerUsername = adminerUsername;
         this.adminerPassword = adminerPassword;
+        this.ssoEnabled = ssoEnabled;
         this.http = httpClient != null ? httpClient : HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .version(HttpClient.Version.HTTP_1_1)
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
+    }
+
+    /** Whether the server-side superuser login may run (see the class Javadoc). */
+    boolean isSsoEnabled() {
+        return ssoEnabled;
     }
 
     @Override
@@ -134,7 +158,7 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
         boolean hadRequestCookies = outboundCookie != null;
         boolean isLoginPageLoad = "GET".equalsIgnoreCase(request.getMethod())
                 && (path.equals("/") || path.isEmpty());
-        if (outboundCookie == null && isLoginPageLoad) {
+        if (ssoEnabled && outboundCookie == null && isLoginPageLoad) {
             List<String> landingPath = new ArrayList<>(1);
             List<String> ssoCookies = tryServerSideLogin(landingPath);
             if (ssoCookies != null && !ssoCookies.isEmpty()) {
@@ -212,7 +236,7 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
             // though the browser sent cookies. Refresh once transparently (GET
             // only — never auto-replay a POST) instead of stranding the user
             // on a login form for credentials they were never given.
-            if (!retried && hadRequestCookies && isLoginPageLoad
+            if (ssoEnabled && !retried && hadRequestCookies && isLoginPageLoad
                     && upstream.statusCode() == 200
                     && isLoginPage(upstream.headers().firstValue("content-type").orElse(null), upstream.body())) {
                 List<String> fresh = tryServerSideLogin();
@@ -274,6 +298,12 @@ public class AdminerProxyFilter extends OncePerRequestFilter {
      * URL instead of proxying {@code /}.
      */
     private List<String> tryServerSideLogin(List<String> landingPathOut) {
+        // Authoritative SSO opt-out choke point: the root credentials must never
+        // reach Adminer while the flag is false. Call sites also check the flag
+        // so the fallback WARN never misreports an opt-out as an SSO failure.
+        if (!ssoEnabled) {
+            return null;
+        }
         try {
             HttpRequest loginPage = HttpRequest.newBuilder(URI.create(targetBase + "/"))
                     .timeout(Duration.ofSeconds(10))

@@ -85,6 +85,7 @@ Disk/rotation contract: source logs rotate via their native drivers (PG logging_
 |---|---|---|---|
 | `SERVER_ADDRESS` | `127.0.0.1` | `application.yml:server.address` | Loopback only. `0.0.0.0` = expose directly (not recommended). |
 | `RATE_LIMIT_TRUST_XFF` | `false` | `application.yml:app.*.trust-x-forwarded-for` | Set `true` only behind trusted proxy. |
+| `ADMINER_SSO_ENABLED` | `true` | `application.yml:app.adminer.sso-enabled` | Bundled Adminer UI (`/adminer`) server-side single sign-on. While `true`, any authenticated ADMIN is signed in upstream as the **Postgres superuser** — full read/write on every tenant database and cluster-wide role creation, with no per-tenant scoping. Set `false` to keep `/adminer` proxied behind app auth but require an explicit Adminer login (the operator then enters Adminer credentials into Adminer's own form). The sibling `/mongo-express` proxy injects a fixed basic-auth credential (`app.mongo-express.username`/`password`, default `admin`/`admin`) into every request and has **no** opt-out flag; `/phpmyadmin` injects no credentials at all and defers to phpMyAdmin's own login. |
 
 ## 6. Encryption at Rest
 

@@ -202,4 +202,109 @@ class AdminerProxyFilterTest {
             upstream.stop(0);
         }
     }
+
+    @Test
+    void defaultConstructorKeepsSuperuserSsoEnabled() {
+        // The 4-arg constructor is what every pre-existing caller and test uses.
+        // It must stay on: flipping the default would silently revoke the
+        // convenience login for every deployment that never set the flag.
+        AdminerProxyFilter defaulted =
+                new AdminerProxyFilter("http://127.0.0.1:9815", "root", "pw",
+                        java.net.http.HttpClient.newHttpClient());
+
+        assertThat(defaulted.isSsoEnabled()).isTrue();
+    }
+
+    @Test
+    void ssoDisabledNeverSendsRootCredentialsUpstream() throws Exception {
+        // ADMINER_SSO_ENABLED=false must leave the proxy working while making
+        // the superuser auto-login impossible: no POST upstream at all, so the
+        // root password never leaves the process, and Adminer's own login form
+        // is served verbatim.
+        List<String> seen = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        com.sun.net.httpserver.HttpServer upstream =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/", exchange -> {
+            try {
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                seen.add(exchange.getRequestMethod() + " " + new String(body, java.nio.charset.StandardCharsets.UTF_8));
+                byte[] page = ("<html><form><input name=\"auth[username]\">"
+                        + "<input type='hidden' name='token' value='7:stub'></form></html>")
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
+                exchange.sendResponseHeaders(200, page.length);
+                exchange.getResponseBody().write(page);
+            } finally {
+                exchange.close();
+            }
+        });
+        upstream.start();
+        try {
+            AdminerProxyFilter off = new AdminerProxyFilter(
+                    "http://127.0.0.1:" + upstream.getAddress().getPort(),
+                    "root", "sup3rs3cr3t", java.net.http.HttpClient.newHttpClient(), false);
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/adminer/");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            off.doFilter(request, response, new MockFilterChain());
+
+            assertThat(off.isSsoEnabled()).isFalse();
+            // Exactly one proxied GET; no login POST was attempted.
+            assertThat(seen).hasSize(1).allMatch(r -> r.startsWith("GET"));
+            assertThat(seen.toString()).doesNotContain("sup3rs3cr3t");
+            // Adminer's login form reaches the browser untouched, and no
+            // session cookie was minted server-side.
+            assertThat(response.getStatus()).isEqualTo(200);
+            assertThat(response.getContentAsString()).contains("auth[username]");
+            assertThat(response.getHeaders("Set-Cookie").toString()).doesNotContain("adminer_sid");
+        } finally {
+            upstream.stop(0);
+        }
+    }
+
+    @Test
+    void ssoEnabledStillPerformsTheSuperuserLogin() throws Exception {
+        // Counterpart to the opt-out test: proves the flag is wired to real
+        // behaviour and not a no-op — with SSO on, the same stub upstream
+        // receives the credential POST.
+        List<String> seen = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        com.sun.net.httpserver.HttpServer upstream =
+                com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        upstream.createContext("/", exchange -> {
+            try {
+                byte[] body = exchange.getRequestBody().readAllBytes();
+                seen.add(exchange.getRequestMethod() + " " + new String(body, java.nio.charset.StandardCharsets.UTF_8));
+                if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                    byte[] page = ("<html><form><input name=\"auth[username]\">"
+                            + "<input type='hidden' name='token' value='7:stub'></form></html>")
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
+                    exchange.sendResponseHeaders(200, page.length);
+                    exchange.getResponseBody().write(page);
+                } else {
+                    exchange.getResponseHeaders().add("Set-Cookie", "adminer_sid=sess123; path=/; HttpOnly");
+                    exchange.getResponseHeaders().add("Location", "?pgsql=postgres&username=root");
+                    exchange.sendResponseHeaders(302, -1);
+                }
+            } finally {
+                exchange.close();
+            }
+        });
+        upstream.start();
+        try {
+            AdminerProxyFilter on = new AdminerProxyFilter(
+                    "http://127.0.0.1:" + upstream.getAddress().getPort(),
+                    "root", "sup3rs3cr3t", java.net.http.HttpClient.newHttpClient(), true);
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/adminer/");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            on.doFilter(request, response, new MockFilterChain());
+
+            assertThat(on.isSsoEnabled()).isTrue();
+            assertThat(seen).hasSize(2);
+            assertThat(seen.get(1)).startsWith("POST").contains("sup3rs3cr3t");
+        } finally {
+            upstream.stop(0);
+        }
+    }
 }
