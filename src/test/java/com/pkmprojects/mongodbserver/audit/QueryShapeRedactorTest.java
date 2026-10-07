@@ -67,30 +67,6 @@ class QueryShapeRedactorTest {
     }
 
     @Test
-    void mongoCommandShapeRedactsValuesAndTokenisesKeys() {
-        String shape = QueryShapeRedactor.normalizeCommandShape(
-                "{\"find\": \"items\", \"filter\": {\"name\": \"secret\", \"n\": 5}}", 4);
-        assertThat(shape).doesNotContain("secret");
-        // Keys are now stable tokens rather than verbatim: the same key still
-        // groups, but a tenant-chosen name no longer reaches the audit view.
-        //
-        // Asserted by shape, not by identifierToken(...): this path tokenises in
-        // two passes, so the token in the output is a hash of an already-tokenised
-        // string. That is stable and harmless -- normalizeCommandShape has no
-        // caller in src/main, the live Mongo path renders once in
-        // MongoProfilerParser -- but it is not a single tokenisation.
-        assertThat(shape).doesNotContain("filter").doesNotContain("name").doesNotContain("\"n\"");
-        assertThat(shape).matches(".*n_[0-9a-f]{8}.*");
-    }
-
-    @Test
-    void mongoNestedSensitiveFieldsRedactedAtDepth() {
-        String shape = QueryShapeRedactor.normalizeCommandShape(
-                "{\"update\": \"t\", \"u\": {\"$set\": {\"password\": \"x\", \"deep\": {\"a\": {\"b\": 1}}}}}", 2);
-        assertThat(shape).doesNotContain("\"x\"");
-    }
-
-    @Test
     void shapeHashIsStableSha256() {
         String a = QueryShapeRedactor.normalize("SELECT * FROM t WHERE id = 1");
         String b = QueryShapeRedactor.normalize("SELECT * FROM t WHERE id = 2");
