@@ -156,10 +156,15 @@ public class PostgresDatabaseRepository {
         if (dbName == null || dbName.isEmpty()) {
             throw new IllegalArgumentException("dbName must not be null or empty");
         }
-        if (deletingDatabases.contains(dbName)) {
-            throw new IllegalStateException("Database '" + dbName + "' is being deleted");
-        }
+        // The deleting check lives inside the mapping function, not before it.
+        // computeIfAbsent holds the per-key bin lock while it runs, so this is
+        // atomic against the thread that is mid-dropDatabase -- whereas a check
+        // beforehand lets a caller pass it, have the pool evicted, and then cache
+        // a fresh pool for a database that is about to be dropped.
         HikariDataSource ds = perDbDataSources.computeIfAbsent(dbName, key -> {
+            if (deletingDatabases.contains(key)) {
+                throw new IllegalStateException("Database '" + key + "' is being deleted");
+            }
             HikariDataSource hds = new HikariDataSource();
             try {
                 hds.setJdbcUrl(urlFor(key));

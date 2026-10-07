@@ -472,15 +472,19 @@ public class ProvisioningService {
             // failure after DB/role/grants/validation left live PG resources
             // with no metadata (orphan; retry then reports "already exists"
             // with nothing to manage). Fail closed with best-effort cleanup.
-            final String pgUserForCleanup = effectiveUser;
+            final String provisionedUserForCleanup = effectiveUser;
             try {
                 managedDatabaseStore.save(metadata);
             } catch (Exception e) {
-                if (engineType == DatabaseEngineType.POSTGRES) {
-                    try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up PG database '{}' after metadata failure", dbName, ce); }
-                    try { engine.dropUser(dbName, pgUserForCleanup); } catch (Exception ce) { log.warn("Could not clean up PG role '{}' after metadata failure", pgUserForCleanup, ce); }
-                }
-                log.error("Failed to persist metadata for database '{}' — provisioned resources cleaned up", dbName, e);
+                // Every engine, not PostgreSQL only. Reaching here means creation
+                // fully succeeded, so cleanup is unconditional -- a MySQL or Mongo
+                // tenant previously kept a live database and user with no metadata
+                // row at all, invisible to every later operation, while the log
+                // line below claimed the resources had been cleaned up.
+                try { engine.dropDatabase(dbName); } catch (Exception ce) { log.warn("Could not clean up {} database '{}' after metadata failure", engineType, dbName, ce); }
+                try { engine.dropUser(dbName, provisionedUserForCleanup); } catch (Exception ce) { log.warn("Could not clean up {} user '{}' after metadata failure", engineType, provisionedUserForCleanup, ce); }
+                log.error("Failed to persist metadata for database '{}' ({} user '{}') — provisioned resources cleaned up",
+                        dbName, engineType, provisionedUserForCleanup, e);
                 throw new ProvisioningException("Could not provision database '" + dbName + "'", e);
             }
             audit(AuditEvent.PROVISION, dbName, engineType, effectiveUser, now);

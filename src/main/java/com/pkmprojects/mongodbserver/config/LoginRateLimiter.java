@@ -77,15 +77,39 @@ public class LoginRateLimiter {
     }
 
     /**
-     * Drops every entry whose window has certainly elapsed by now, freeing the map
-     * once it exceeds {@value #MAX_KEYS} keys. The linear scan only runs above the
-     * cap, never on the hot path.
+     * Frees space once the map exceeds {@value #MAX_KEYS} keys: first drop
+     * everything whose window has certainly elapsed, then, if that was not
+     * enough, evict oldest-first until it is.
+     *
+     * <p>The second half is what makes {@value #MAX_KEYS} an actual cap. Without
+     * it, {@code MAX_KEYS} was only a trigger: the stale pass removes nothing
+     * while an attacker keeps every key fresh, so an attacker cycling more than
+     * {@value #MAX_KEYS} distinct usernames within {@link #PRUNE_HORIZON} drove a
+     * full linear scan on <em>every</em> subsequent login request, pre-auth. The
+     * key is client IP plus submitted username, so username variation alone is
+     * enough to mint unlimited keys.
+     *
+     * <p>Only runs above the cap, never on the hot path.
      */
     private void pruneStale(Instant now) {
         for (Map.Entry<String, WindowEntry> entry : attempts.entrySet()) {
             WindowEntry value = entry.getValue();
             if (value != null && !value.windowStart().plus(PRUNE_HORIZON).isAfter(now)) {
                 attempts.remove(entry.getKey(), value);
+            }
+        }
+        while (attempts.size() > MAX_KEYS) {
+            String oldestKey = null;
+            Instant oldest = null;
+            for (Map.Entry<String, WindowEntry> entry : attempts.entrySet()) {
+                Instant start = entry.getValue() == null ? null : entry.getValue().windowStart();
+                if (start != null && (oldest == null || start.isBefore(oldest))) {
+                    oldest = start;
+                    oldestKey = entry.getKey();
+                }
+            }
+            if (oldestKey == null || attempts.remove(oldestKey) == null) {
+                break;   // nothing removable (all entries null); avoid spinning
             }
         }
     }
