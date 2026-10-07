@@ -178,12 +178,41 @@ public class WebhookService {
             InetAddress[] addresses = InetAddress.getAllByName(host);
             for (InetAddress addr : addresses) {
                 if (addr.isLoopbackAddress() || addr.isSiteLocalAddress() || addr.isLinkLocalAddress()
-                        || addr.isAnyLocalAddress()) {
+                        || addr.isAnyLocalAddress() || isReservedOrInternalBytes(addr)) {
                     return true;
                 }
             }
         } catch (UnknownHostException e) {
             // Cannot resolve yet; allow validation to proceed, delivery will fail later
+        }
+        return false;
+    }
+
+    /**
+     * Ranges the JDK's category predicates do not cover.
+     *
+     * <p>The headline one is IPv6 unique-local, {@code fc00::/7}: Java's
+     * {@code isSiteLocalAddress()} only recognises the deprecated
+     * {@code fec0::/10}, so {@code fd00::1} passed every check above and a
+     * webhook could dial straight into the host's internal ULA space.
+     *
+     * <p>Checked on raw bytes rather than by more {@code InetAddress} calls,
+     * because that is where the gap is.
+     */
+    private static boolean isReservedOrInternalBytes(InetAddress addr) {
+        byte[] b = addr.getAddress();
+        if (b.length == 4) {
+            int p0 = b[0] & 0xFF;
+            int p1 = b[1] & 0xFF;
+            return p0 == 0                                  // 0.0.0.0/8      "this network"
+                    || p0 == 100 && p1 >= 64 && p1 <= 127    // 100.64.0.0/10  CGNAT
+                    || p0 == 192 && p1 == 0                 // 192.0.0.0/24   IETF protocol
+                    || p0 == 198 && (p1 & 0xFE) == 18       // 198.18.0.0/15  benchmarking
+                    || p0 >= 224;                            // 224.0.0.0/4 multicast, 240/4 reserved
+        }
+        if (b.length == 16) {
+            int b0 = b[0] & 0xFF;
+            return (b0 & 0xFE) == 0xFC;                    // fc00::/7 unique-local
         }
         return false;
     }

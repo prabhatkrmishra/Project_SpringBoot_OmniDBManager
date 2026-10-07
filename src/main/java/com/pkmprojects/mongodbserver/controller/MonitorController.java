@@ -155,10 +155,16 @@ public class MonitorController {
     }
 
     private void sendTick(SseEmitter emitter, String engine) {
+        // Explicit Future rather than CompletableFuture.orTimeout, so a snapshot
+        // that overruns is actually interrupted. orTimeout only completes the future
+        // exceptionally: the JDBC call keeps running on its virtual thread, still
+        // holding a pooled connection, while the next tick starts another one. And
+        // since this runs on the shared two-thread scheduler, blocking here for the
+        // full timeout used to starve the tick loop and the heartbeat for every
+        // connected client at once.
+        java.util.concurrent.Future<String> task = null;
         try {
-            // Offload blocking JDBC snapshot to virtual threads with hard timeout
-            // so scheduler threads never block on a hung PG/MySQL.
-            String data = CompletableFuture.supplyAsync(() -> {
+            task = tickExecutor.submit(() -> {
                 if ("postgres".equals(engine)) {
                     var snapshot = postgresMonitorService.get().getSnapshot();
                     return postgresMonitorService.get().serialize(snapshot);
@@ -175,20 +181,28 @@ public class MonitorController {
                     var snapshot = monitorService.getSnapshot();
                     return monitorService.serialize(snapshot);
                 }
-            }, tickExecutor).orTimeout(3, TimeUnit.SECONDS).join();
+            });
+            String data = task.get(3, TimeUnit.SECONDS);
             emitter.send(SseEmitter.event().name("tick").data(data));
-        } catch (java.util.concurrent.CompletionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof TimeoutException) {
-                log.warn("Monitor snapshot tick timed out for engine {}", engine);
-                try {
-                    emitter.send(SseEmitter.event().name("tick").data("{\"error\":\"snapshot timeout\"}"));
-                } catch (IOException ignored) {
-                    log.debug("Could not send timeout tick; client gone", ignored);
-                    throw new SseStreamClosed(new IOException("timeout tick send failed", ignored));
-                }
-                return;
+        } catch (InterruptedException interrupted) {
+            // The scheduler shutting down, or an emitter timeout cancelling us.
+            // Restore the flag before unwinding so the pool still sees it.
+            Thread.currentThread().interrupt();
+            throw new SseStreamClosed(new IOException("monitor tick interrupted", interrupted));
+        } catch (TimeoutException timeout) {
+            // cancel(true) interrupts the virtual thread, so the JDBC call stops
+            // and its pooled connection is released rather than leaking.
+            if (task != null) task.cancel(true);
+            log.warn("Monitor snapshot tick timed out for engine {}", engine);
+            try {
+                emitter.send(SseEmitter.event().name("tick").data("{\"error\":\"snapshot timeout\"}"));
+            } catch (IOException ignored) {
+                log.debug("Could not send timeout tick; client gone", ignored);
+                throw new SseStreamClosed(new IOException("timeout tick send failed", ignored));
             }
+            return;
+        } catch (java.util.concurrent.ExecutionException e) {
+            Throwable cause = e.getCause();
             if (cause instanceof RuntimeException re) throw re;
             if (cause instanceof IOException ioe) {
                 log.debug("Monitor SSE client disconnected", ioe);

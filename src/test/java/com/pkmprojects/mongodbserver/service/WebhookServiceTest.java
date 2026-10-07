@@ -12,6 +12,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -198,4 +200,27 @@ class WebhookServiceTest {
         verify(auditStore).save(auditCaptor.capture());
         assertThat(auditCaptor.getValue().getEventType()).isEqualTo(AuditEvent.WEBHOOK_DELETED);
     }
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "127.0.0.1", "::1", "10.0.0.1", "172.16.0.1", "192.168.1.1",
+            "169.254.169.254", "fe80::1", "0.0.0.0",
+            // The headline gap: Java's isSiteLocalAddress() only covers the
+            // deprecated fec0::/10, so fd00::1 previously passed every check.
+            "fd00::1", "fc00::1",
+            "100.64.0.1", "192.0.0.1", "198.18.0.1", "224.0.0.1", "240.0.0.1",
+            "255.255.255.255"})
+    void internalAndReservedAddressesAreBlocked(String ip) {
+        org.assertj.core.api.Assertions.assertThat(WebhookService.isBlockedDeliveryHost(ip))
+                .as("%s must never be dialed", ip)
+                .isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"8.8.8.8", "1.1.1.1", "2001:4860:4860::8888"})
+    void publicAddressesAreStillAllowed(String ip) {
+        org.assertj.core.api.Assertions.assertThat(WebhookService.isBlockedDeliveryHost(ip))
+                .as("%s is public and must not be blocked", ip)
+                .isFalse();
+    }
 }
+

@@ -109,6 +109,25 @@ class MongoExpressProxyFilterTest {
             return new Upstream(server);
         }
 
+        /** Upstream that answers with a redirect, recording the Location it sent. */
+        static Upstream redirecting(List<String> sentLocations) throws Exception {
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            server.createContext("/", exchange -> {
+                try {
+                    exchange.getRequestBody().readAllBytes();
+                    String host = exchange.getRequestHeaders().getFirst("Host");
+                    String location = "http://" + host + "/collections";
+                    sentLocations.add(location);
+                    exchange.getResponseHeaders().add("Location", location);
+                    exchange.sendResponseHeaders(302, -1);
+                } finally {
+                    exchange.close();
+                }
+            });
+            server.start();
+            return new Upstream(server);
+        }
+
         String baseUrl() {
             return "http://127.0.0.1:" + server.getAddress().getPort();
         }
@@ -118,4 +137,28 @@ class MongoExpressProxyFilterTest {
             server.stop(0);
         }
     }
+    // ── redirect rewriting ────────────────────────────────────────────
+    //
+    // rewriteLocation had no coverage at all and returned a bare path, where the
+    // Adminer and phpMyAdmin equivalents prefix with PROXY_PREFIX. A redirect then
+    // bounced the browser out of /mongo-express into the app's own routes -- while
+    // the method's own Javadoc claimed it routed back through this filter.
+
+    @Test
+    void absoluteRedirectIsRewrittenUnderTheProxyPrefix() throws Exception {
+        List<String> sent = new ArrayList<>();
+        try (Upstream upstream = Upstream.redirecting(sent)) {
+            MongoExpressProxyFilter filter = new MongoExpressProxyFilter(
+                    upstream.baseUrl(), "admin", "admin", HttpClient.newHttpClient(), true);
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/mongo-express/");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+
+            filter.doFilter(request, response, new MockFilterChain());
+
+            assertThat(response.getHeader("Location"))
+                    .isNotNull()
+                    .startsWith("/mongo-express/");
+        }
+    }
 }
+

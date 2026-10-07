@@ -55,7 +55,14 @@ public class PhpMyAdminProxyFilter extends OncePerRequestFilter {
         String target = targetBase + path;
         if (request.getQueryString() != null) target += "?" + request.getQueryString();
 
-        byte[] body = request.getInputStream().readAllBytes();
+        byte[] body;
+        try {
+            body = readBoundedBody(request);
+        } catch (PayloadTooLargeException tooLarge) {
+            log.warn("Refusing oversized proxied request body for {}", request.getRequestURI());
+            writeError(response, HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE, tooLarge.getMessage());
+            return;
+        }
         HttpRequest.Builder builder;
         try {
             builder = HttpRequest.newBuilder(URI.create(target))
@@ -122,6 +129,38 @@ public class PhpMyAdminProxyFilter extends OncePerRequestFilter {
             response.setStatus(status);
             response.setContentType("text/plain;charset=UTF-8");
             response.getOutputStream().write(message.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    /** Ceiling on a proxied request body. Room for a UI file import, far below the heap. */
+    static final int MAX_PROXY_BODY_BYTES = 64 * 1024 * 1024;
+
+    /**
+     * Reads the request body, refusing anything past {@link #MAX_PROXY_BODY_BYTES}.
+     *
+     * <p>{@code spring.servlet.multipart.max-request-size} does not cover this: it
+     * governs multipart only, and proxied UI requests arrive as
+     * {@code application/octet-stream}. All three proxy prefixes are also
+     * CSRF-exempt, so without a bound a handful of concurrent large posts is enough
+     * to exhaust a 256 MB heap. These routes are ADMIN-only, which makes this an
+     * authenticated self-DoS rather than a remote one -- still worth refusing
+     * cleanly instead of dying.
+     *
+     * @throws PayloadTooLargeException when the body exceeds the limit
+     */
+    static byte[] readBoundedBody(jakarta.servlet.http.HttpServletRequest request)
+            throws java.io.IOException {
+        byte[] body = request.getInputStream().readNBytes(MAX_PROXY_BODY_BYTES + 1);
+        if (body.length > MAX_PROXY_BODY_BYTES) {
+            throw new PayloadTooLargeException();
+        }
+        return body;
+    }
+
+    /** Request body exceeded the proxy limit. */
+    static final class PayloadTooLargeException extends RuntimeException {
+        PayloadTooLargeException() {
+            super("proxied request body exceeds " + MAX_PROXY_BODY_BYTES + " bytes");
         }
     }
 }
