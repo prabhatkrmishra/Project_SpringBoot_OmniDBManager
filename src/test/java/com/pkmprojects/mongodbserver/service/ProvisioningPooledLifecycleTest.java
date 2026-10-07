@@ -58,6 +58,11 @@ class ProvisioningPooledLifecycleTest {
         lenient().when(env.getProperty("spring.mongodb.uri", "")).thenReturn("mongodb://root:root@localhost:27017/?authSource=admin");
         lenient().when(env.getProperty("app.mongo.issued-host", "")).thenReturn("");
         lenient().when(env.getProperty("app.mongo.tls", Boolean.class, false)).thenReturn(false);
+        // The probe is tri-state, so an unstubbed mock returns null and the
+        // fail-closed branch fires before this test ever reaches the behaviour it
+        // is about. State the intent explicitly instead of inheriting a default.
+        lenient().when(postgresRepo.probeRole(any())).thenReturn(
+                com.pkmprojects.mongodbserver.repository.ProbeResult.FREE);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("admin", "n/a", List.of(new SimpleGrantedAuthority("ROLE_ADMIN"))));
         var props = new com.pkmprojects.mongodbserver.config.PgbouncerProperties(
