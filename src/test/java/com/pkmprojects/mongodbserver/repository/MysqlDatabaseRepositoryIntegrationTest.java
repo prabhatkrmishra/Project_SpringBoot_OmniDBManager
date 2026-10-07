@@ -98,8 +98,10 @@ class MysqlDatabaseRepositoryIntegrationTest {
         repo.createUser("m1", "row1_user", "secret123");
         repo.grantPrivileges("m1", "row1_user");
         String grants = grantsOf("row1_user");
-        assertThat(grants).contains("M1");
-        assertThat(grants).doesNotContain("SUPER");
+        // MySQL echoes the database name as written at CREATE time -- lower case
+        // here -- so compare case-insensitively rather than pinning its case.
+        assertThat(grants.toUpperCase(java.util.Locale.ROOT)).contains("M1");
+        assertThat(grants.toUpperCase(java.util.Locale.ROOT)).doesNotContain("SUPER");
         repo.dropDatabase("m1");
     }
 
